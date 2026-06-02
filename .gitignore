@@ -1,0 +1,6 @@
+Asayn/
+asayn
+*.exe
+*.test
+dist/
+bin/
