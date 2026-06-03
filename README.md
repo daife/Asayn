@@ -121,7 +121,7 @@ allow_interactive_shell = false
 
 ## Sub-Agents
 
-Root agents can start, inspect, continue, and stop sub-agents through the fixed `sub_agent_*` tools. `sub_agent_status` lists only actual `sub_agents/*.toml` configs with their descriptions. `sub_agent_start` accepts an `agent` name from that list; workplace configs override global configs. A sub-agent keeps its own session history and cannot see `sub_agent_*`, `diff_file`, or shell tools. That keeps delegated work read-only by default, so a sub-agent can research and report without modifying the root agent's files.
+Root agents can list, start, check, wait-check, and resume sub-agents through the fixed `sub_agent_*` tools. `sub_agent_list` lists configured `sub_agents/*.toml` names and descriptions. `sub_agent_start_async` accepts an `agent` name from that list; workplace configs override global configs. A sub-agent keeps its own session history and cannot see `sub_agent_*`, `diff_file`, or shell tools. That keeps delegated work read-only by default, so a sub-agent can research and report without modifying the root agent's files.
 
 ## Skills
 

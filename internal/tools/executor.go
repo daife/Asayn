@@ -180,11 +180,11 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 
 func subAgentSchemas() []types.ToolSchema {
 	return []types.ToolSchema{
-		schema("sub_agent_list", "List available sub-agent configurations and active sub-agents.", nil),
+		schema("sub_agent_list", "List configured sub-agent names and descriptions.", nil),
 		schema("sub_agent_start_async", "Start a parallel sub-agent. Sub-agents have file tools but no shell or sub-agent tools.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"agent":       prop("string", "Sub-agent config name from sub_agent_list available configs."),
+				"agent":       prop("string", "Optional sub-agent config name from sub_agent_list."),
 				"name":        prop("string", "Display name."),
 				"instruction": prop("string", "Task for the sub-agent."),
 			},
@@ -197,7 +197,7 @@ func subAgentSchemas() []types.ToolSchema {
 			},
 			"required": []string{"sub_agent_id"},
 		}),
-		schema("sub_agent_wait_check", "Wait for a specified number of seconds, then check the sub-agent status. Use only when there is no other worthwhile parallel work to do.", map[string]any{
+		schema("sub_agent_wait_check", "Wait for a specified number of seconds, then check one sub-agent. Do not poll with this tool; use it only when the user explicitly asks to wait or there is truly no useful work to do before checking once.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"sub_agent_id": prop("string", "Sub-agent ID."),
@@ -258,9 +258,9 @@ func (e *Executor) Run(ctx context.Context, sess *session.Session, name string, 
 	case "sub_agent_start_async":
 		return e.subAgents.Start(sess, e.store, stringArg(args, "agent"), stringArg(args, "name"), stringArg(args, "instruction")), nil
 	case "sub_agent_check":
-		return e.subAgents.Check(e.paths, stringArg(args, "sub_agent_id")), nil
+		return e.subAgents.Check(stringArg(args, "sub_agent_id")), nil
 	case "sub_agent_wait_check":
-		return e.subAgents.WaitCheck(ctx, e.paths, stringArg(args, "sub_agent_id"), intArg(args, "wait_seconds", 0))
+		return e.subAgents.WaitCheck(ctx, stringArg(args, "sub_agent_id"), intArg(args, "wait_seconds", 0))
 	case "sub_agent_resume_async":
 		return e.subAgents.ResumeAsync(stringArg(args, "sub_agent_id"), stringArg(args, "instruction")), nil
 	default:
@@ -293,20 +293,12 @@ func (e *Executor) readSkill(args map[string]any) (string, error) {
 	return truncate(out, e.maxOutputChars), nil
 }
 
-func (e *Executor) SubAgentSummaries() []string {
-	return e.subAgents.Summaries()
-}
-
 func (e *Executor) SubAgentSnapshots() []SubAgentSnapshot {
 	return e.subAgents.Snapshots()
 }
 
 func (e *Executor) ShellSnapshots() []ShellSnapshot {
 	return e.shells.Snapshots()
-}
-
-func (e *Executor) SubAgentStatus(id string) string {
-	return e.subAgents.Check(e.paths, id)
 }
 
 func (e *Executor) RestoreSubAgents(parent *session.Session, refs []session.SubAgentRef, subStore *session.Store) {

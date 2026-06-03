@@ -444,7 +444,7 @@ func (m model) activeWorkContext() string {
 	rows := []string{}
 	subRows := []string{}
 	for _, sub := range m.ctx.Tools.SubAgentSnapshots() {
-		if sub.Status == "completed" || sub.Status == "stopped" {
+		if sub.Status == "completed" {
 			continue
 		}
 		if sub.Status == "ready_for_check" {
@@ -1764,7 +1764,7 @@ func (m model) subAgentView() string {
 		if snap.ID != m.subViewID {
 			continue
 		}
-		if snap.Status == "completed" || snap.Status == "failed" || snap.Status == "stopped" {
+		if snap.Status == "completed" || snap.Status == "failed" {
 			if snap.SessionID != "" {
 				if sess, err := m.ctx.SubSessions.LoadByID(snap.SessionID); err == nil && len(sess.Messages) > 0 {
 					body := mutedStyle.Render("Sub-agent conversation (read-only). User cannot directly chat with this sub-agent; root agent controls follow-ups.")
@@ -2001,8 +2001,6 @@ func statusDot(status string, spinner int) string {
 		return toolRunStyle.Render(spinnerFrame(spinner))
 	case "completed":
 		return successStyle.Render("●")
-	case "stopped":
-		return mutedStyle.Render("●")
 	default:
 		return errorStyle.Render("●")
 	}

@@ -109,7 +109,7 @@ func (a *Agent) AskWithEvents(ctx context.Context, sess *session.Session, prompt
 			})
 		}
 	}
-	answer := fmt.Sprintf("I stopped this turn after %d tool-call rounds to avoid an infinite tool loop. Some tool or sub-agent work may still be in progress; send a follow-up message to continue from the current session state.", maxToolCallRounds)
+	answer := fmt.Sprintf("I ended this turn after %d tool-call rounds to avoid an infinite tool loop. Some tool or sub-agent work may still be in progress; send a follow-up message to continue from the current session state.", maxToolCallRounds)
 	sess.Messages = append(sess.Messages, types.ChatMessage{Role: "assistant", Content: answer})
 	return answer, nil
 }
@@ -222,7 +222,7 @@ Tool rules:
 - File tools (read_file, view_dir, search_grep, diff_file) use workplace-relative paths only. Prefer small, reviewable diffs.
 - .Asayn/ is Asayn's required runtime/config directory, not project source. Do not read, search, edit, or summarize .Asayn/ unless the user explicitly asks to change Asayn configuration.
 - Shell tools are high-privilege and vary by root-agent shell_config. shell_run_sync is synchronous, returns command output only, and kills the command on timeout; it never supports interactive input. If shell_run_async/shell_async_status/shell_async_kill are available, shell_run_async starts commands in parallel and returns shell_id. If shell_async_write is also available, shell_run_async starts an interactive command and shell_async_write sends input. Before non-trivial shell use, verify the execution environment (cwd, PATH, available binaries, Python interpreter). Prefer file tools when sufficient.
-- Sub-agents (sub_agent_list, sub_agent_start_async, sub_agent_check, sub_agent_wait_check, sub_agent_resume_async) run in parallel with read_file, view_dir, search_grep, read_skill, and diff_file. Delegate only simple, time-consuming, file-scoped tasks (e.g. repeatedly editing and debugging a specific file). Do NOT delegate tasks that need shell or sub-agent coordination. Use sub_agent_wait_check only when there is no other worthwhile parallel work before checking a specific sub-agent again.`
+- Sub-agents (sub_agent_list, sub_agent_start_async, sub_agent_check, sub_agent_wait_check, sub_agent_resume_async) run in parallel with read_file, view_dir, search_grep, read_skill, and diff_file. Delegate only simple, time-consuming, file-scoped tasks. Do NOT delegate tasks that need shell or sub-agent coordination. Prefer continuing useful work and use sub_agent_check when a sub-agent is ready_for_check. Use sub_agent_wait_check only for a single deliberate wait when the user asked to wait or there is truly no useful work to do; do not poll with it.`
 }
 
 func (a *Agent) runToolCall(sess *session.Session, call types.ToolCall, emit func(AgentEvent)) string {
@@ -277,9 +277,9 @@ func (a *Agent) visibleSkillSet(sess *session.Session) map[string]bool {
 
 func toolCallTimeout(name string, args map[string]any) time.Duration {
 	seconds := 60
-	if name == "shell_run_sync" || name == "sub_agent_wait" {
+	if name == "shell_run_sync" || name == "sub_agent_wait_check" {
 		argName := "timeout_sec"
-		if name == "sub_agent_wait" {
+		if name == "sub_agent_wait_check" {
 			argName = "wait_seconds"
 		}
 		if raw, ok := args[argName]; ok {

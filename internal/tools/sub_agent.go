@@ -35,7 +35,6 @@ type SubAgentTask struct {
 	parent     *session.Session
 	store      *session.Store
 	cancel     context.CancelFunc
-	stop       chan struct{}
 }
 
 type SubAgentSnapshot struct {
@@ -82,7 +81,6 @@ func (m *SubAgentManager) Start(parent *session.Session, store *session.Store, a
 		Transcript: []string{"user: " + instruction},
 		parent:     parent,
 		store:      store,
-		stop:       make(chan struct{}),
 	}
 	m.mu.Lock()
 	m.items[task.ID] = task
@@ -90,7 +88,7 @@ func (m *SubAgentManager) Start(parent *session.Session, store *session.Store, a
 	task.persist()
 
 	go m.run(task, instruction)
-	return fmt.Sprintf("sub_agent_id=%s\nstatus: running (parallel — continue with other work and check back later with sub_agent_check)", task.ID)
+	return fmt.Sprintf("sub_agent_id=%s\nstatus: running\nContinue useful work and use sub_agent_check when this sub-agent becomes ready_for_check.", task.ID)
 }
 
 func (m *SubAgentManager) ResumeAsync(id, instruction string) string {
@@ -104,40 +102,28 @@ func (m *SubAgentManager) ResumeAsync(id, instruction string) string {
 		m.mu.Unlock()
 		return "sub-agent is still running; wait for completion first"
 	}
-	if task.Status == "stopped" {
-		task.stop = make(chan struct{})
-	}
 	task.Status = "running"
 	task.UpdatedAt = time.Now()
 	task.Transcript = append(task.Transcript, "user: "+instruction)
 	task.persistLocked()
 	m.mu.Unlock()
 	go m.run(task, instruction)
-	return fmt.Sprintf("sub_agent_id=%s\nstatus: running (parallel — continue with other work and check back later with sub_agent_check)", task.ID)
+	return fmt.Sprintf("sub_agent_id=%s\nstatus: running\nContinue useful work and use sub_agent_check when this sub-agent becomes ready_for_check.", task.ID)
 }
 
 func (m *SubAgentManager) List(paths config.Paths) string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	rows := []string{"available sub-agent configs:"}
+	rows := []string{"configured sub-agents:"}
 	if infos, err := config.ListAgentInfos(paths, config.SubAgentKind); err == nil && len(infos) > 0 {
 		for _, info := range infos {
-			rows = append(rows, fmt.Sprintf("- %s [%s]: %s", info.Name, info.Source, info.Description))
+			rows = append(rows, fmt.Sprintf("- %s: %s", info.Name, info.Description))
 		}
 	} else {
-		rows = append(rows, "none")
-	}
-	rows = append(rows, "", "active sub-agents:")
-	for _, task := range m.items {
-		rows = append(rows, fmt.Sprintf("%s %s agent=%s name=%s", task.ID, task.Status, task.Agent, task.Name))
-	}
-	if len(m.items) == 0 {
 		rows = append(rows, "none")
 	}
 	return truncate(strings.Join(rows, "\n"), m.limit)
 }
 
-func (m *SubAgentManager) Check(paths config.Paths, id string) string {
+func (m *SubAgentManager) Check(id string) string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	task := m.items[id]
@@ -153,7 +139,7 @@ func (m *SubAgentManager) Check(paths config.Paths, id string) string {
 	return truncate(res, m.limit)
 }
 
-func (m *SubAgentManager) WaitCheck(ctx context.Context, paths config.Paths, id string, waitSeconds int) (string, error) {
+func (m *SubAgentManager) WaitCheck(ctx context.Context, id string, waitSeconds int) (string, error) {
 	if id == "" {
 		return "", fmt.Errorf("sub_agent_id is required")
 	}
@@ -166,30 +152,8 @@ func (m *SubAgentManager) WaitCheck(ctx context.Context, paths config.Paths, id 
 	case <-ctx.Done():
 		return "", ctx.Err()
 	case <-timer.C:
-		return m.Check(paths, id), nil
+		return m.Check(id), nil
 	}
-}
-
-func (m *SubAgentManager) Stop(id string) string {
-	m.mu.Lock()
-	task := m.items[id]
-	if task == nil {
-		m.mu.Unlock()
-		return "sub-agent not found"
-	}
-	task.Status = "stopped"
-	task.UpdatedAt = time.Now()
-	task.persistLocked()
-	if task.cancel != nil {
-		task.cancel()
-	}
-	select {
-	case <-task.stop:
-	default:
-		close(task.stop)
-	}
-	m.mu.Unlock()
-	return "stopped"
 }
 
 func (m *SubAgentManager) StopAll() {
@@ -197,33 +161,15 @@ func (m *SubAgentManager) StopAll() {
 	tasks := make([]*SubAgentTask, 0, len(m.items))
 	for _, task := range m.items {
 		tasks = append(tasks, task)
-		task.Status = "stopped"
-		task.UpdatedAt = time.Now()
-		task.persistLocked()
 	}
+	m.items = map[string]*SubAgentTask{}
 	m.mu.Unlock()
 
 	for _, task := range tasks {
 		if task.cancel != nil {
 			task.cancel()
 		}
-		select {
-		case <-task.stop:
-		default:
-			close(task.stop)
-		}
 	}
-}
-
-func (m *SubAgentManager) Summaries() []string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	out := []string{}
-	for _, task := range m.items {
-		out = append(out, fmt.Sprintf("%s: %s", task.Name, task.Status))
-	}
-	sort.Strings(out)
-	return out
 }
 
 func (m *SubAgentManager) Snapshots() []SubAgentSnapshot {
@@ -273,10 +219,7 @@ func (m *SubAgentManager) run(task *SubAgentTask, instruction string) {
 			})
 		}
 		m.mu.Lock()
-		if ctx.Err() != nil || task.Status == "stopped" {
-			task.Status = "stopped"
-			task.UpdatedAt = time.Now()
-			task.persistLocked()
+		if ctx.Err() != nil {
 			m.mu.Unlock()
 			return
 		}
@@ -289,8 +232,6 @@ func (m *SubAgentManager) run(task *SubAgentTask, instruction string) {
 		task.Transcript = append(task.Transcript, "assistant: "+task.Result)
 		task.persistLocked()
 		m.mu.Unlock()
-	case <-task.stop:
-		return
 	}
 }
 
@@ -302,9 +243,9 @@ func (m *SubAgentManager) Restore(parent *session.Session, store *session.Store,
 		if ref.TaskID == "" {
 			continue
 		}
-		status := ref.Status
-		if status == "running" {
-			status = "restored"
+		status := normalizeRestoredSubAgentStatus(ref.Status)
+		if status == "" {
+			continue
 		}
 		task := &SubAgentTask{
 			ID:        ref.TaskID,
@@ -316,7 +257,6 @@ func (m *SubAgentManager) Restore(parent *session.Session, store *session.Store,
 			SessionID: ref.SessionID,
 			parent:    parent,
 			store:     store,
-			stop:      make(chan struct{}),
 		}
 		if task.Name == "" {
 			task.Name = "sub-agent"
@@ -336,10 +276,16 @@ func (m *SubAgentManager) Restore(parent *session.Session, store *session.Store,
 				task.Result = lastAssistantContent(sess)
 			}
 		}
-		if len(task.Transcript) == 0 {
-			task.Transcript = []string{"restored sub-agent session"}
-		}
 		m.items[task.ID] = task
+	}
+}
+
+func normalizeRestoredSubAgentStatus(status string) string {
+	switch status {
+	case "ready_for_check", "completed", "failed":
+		return status
+	default:
+		return "completed"
 	}
 }
 
@@ -400,17 +346,6 @@ func lastAssistantContent(sess *session.Session) string {
 	return ""
 }
 
-func (m *SubAgentManager) describe(task *SubAgentTask) string {
-	return fmt.Sprintf("id: %s\nname: %s\nstatus: %s\nupdated: %s\nresult: %s\n\n%s",
-		task.ID,
-		task.Name,
-		task.Status,
-		task.UpdatedAt.Format(time.RFC3339),
-		task.Result,
-		strings.Join(task.Transcript, "\n"),
-	)
-}
-
 func (m *SubAgentManager) describeForRoot(task *SubAgentTask) string {
 	lines := []string{
 		fmt.Sprintf("id: %s", task.ID),
@@ -430,7 +365,7 @@ func (m *SubAgentManager) describeForRoot(task *SubAgentTask) string {
 		lines = append(lines, "result: "+task.Result)
 	}
 	if task.Status == "running" {
-		lines = append(lines, "", "This sub-agent is still running. Do not call shell tools for it. Continue with other worthwhile parallel work first; if none remains, use sub_agent_wait before checking again.")
+		lines = append(lines, "", "This sub-agent is still running. Continue useful work; use sub_agent_wait_check only for one deliberate wait when there is truly no useful work to do.")
 	}
 	return strings.Join(lines, "\n")
 }
