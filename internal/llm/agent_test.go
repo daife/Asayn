@@ -23,7 +23,7 @@ func TestMessagesForAPIHidesNoLongerVisibleReadSkillContent(t *testing.T) {
 		{Role: "tool", ToolCallID: "call-1", Content: "secret skill body"},
 	}
 
-	out := messagesForAPI(messages, map[string]bool{"hidden-skill": false})
+	out := messagesForAPI(messages, map[string]bool{"hidden-skill": false}, true)
 	if out[2].Content == "secret skill body" {
 		t.Fatal("hidden skill content was still sent to API")
 	}
@@ -45,9 +45,47 @@ func TestMessagesForAPIKeepsVisibleReadSkillContent(t *testing.T) {
 		{Role: "tool", ToolCallID: "call-1", Content: "visible skill body"},
 	}
 
-	out := messagesForAPI(messages, map[string]bool{"visible-skill": true})
+	out := messagesForAPI(messages, map[string]bool{"visible-skill": true}, true)
 	if out[1].Content != "visible skill body" {
 		t.Fatalf("visible skill content changed: %q", out[1].Content)
+	}
+}
+
+func TestMessagesForAPIDropsReasoningWhenThinkingDisabled(t *testing.T) {
+	messages := []types.ChatMessage{
+		{Role: "assistant", ReasoningContent: "old thinking", ToolCalls: []types.ToolCall{{
+			ID:   "call-1",
+			Type: "function",
+			Function: types.ToolFunction{
+				Name:      "read_file",
+				Arguments: `{"path":"x"}`,
+			},
+		}}},
+		{Role: "tool", ToolCallID: "call-1", Content: "result"},
+	}
+
+	out := messagesForAPI(messages, nil, false)
+	if out[0].ReasoningContent != "" {
+		t.Fatalf("disabled thinking should not send reasoning_content, got %q", out[0].ReasoningContent)
+	}
+}
+
+func TestMessagesForAPIKeepsToolReasoningWhenThinkingEnabled(t *testing.T) {
+	messages := []types.ChatMessage{
+		{Role: "assistant", ReasoningContent: "tool thinking", ToolCalls: []types.ToolCall{{
+			ID:   "call-1",
+			Type: "function",
+			Function: types.ToolFunction{
+				Name:      "read_file",
+				Arguments: `{"path":"x"}`,
+			},
+		}}},
+		{Role: "tool", ToolCallID: "call-1", Content: "result"},
+	}
+
+	out := messagesForAPI(messages, nil, true)
+	if out[0].ReasoningContent != "tool thinking" {
+		t.Fatalf("enabled thinking should keep tool reasoning, got %q", out[0].ReasoningContent)
 	}
 }
 
@@ -65,5 +103,20 @@ func TestSystemPromptIncludesConcreteWorkplaceRules(t *testing.T) {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("system prompt missing %q:\n%s", want, prompt)
 		}
+	}
+}
+
+func TestChatRequestUsesPerAgentThinkingConfig(t *testing.T) {
+	disabled := buildChatRequest("model", []types.ChatMessage{{Role: "user", Content: "hi"}}, nil, false, "max", false)
+	if disabled.Thinking["type"] != "disabled" {
+		t.Fatalf("expected disabled thinking, got %#v", disabled.Thinking)
+	}
+	if disabled.ReasoningEffort != "" {
+		t.Fatalf("disabled thinking should omit reasoning_effort, got %q", disabled.ReasoningEffort)
+	}
+
+	enabled := buildChatRequest("model", []types.ChatMessage{{Role: "user", Content: "hi"}}, nil, true, "max", true)
+	if enabled.Thinking["type"] != "enabled" || enabled.ReasoningEffort != "max" || !enabled.Stream {
+		t.Fatalf("expected enabled/max streaming thinking, got thinking=%#v effort=%q stream=%t", enabled.Thinking, enabled.ReasoningEffort, enabled.Stream)
 	}
 }

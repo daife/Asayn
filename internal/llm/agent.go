@@ -82,7 +82,7 @@ func (a *Agent) AskWithEvents(ctx context.Context, sess *session.Session, prompt
 			emit(AgentEvent{Kind: "thinking_start"})
 		}
 		contentStreamed := false
-		msg, err := a.client.ChatStream(ctx, a.root.Model, messagesForAPI(sess.Messages, a.visibleSkillSet(sess)), toolSchemas, func(delta StreamDelta) {
+		msg, err := a.client.ChatStream(ctx, a.root.Model, messagesForAPI(sess.Messages, a.visibleSkillSet(sess), a.root.ThinkingEnabled), toolSchemas, a.root.ThinkingEnabled, a.root.ReasoningEffort, func(delta StreamDelta) {
 			if emit == nil {
 				return
 			}
@@ -124,7 +124,7 @@ func (a *Agent) AskWithEvents(ctx context.Context, sess *session.Session, prompt
 	return answer, nil
 }
 
-func messagesForAPI(messages []types.ChatMessage, visibleSkills map[string]bool) []types.ChatMessage {
+func messagesForAPI(messages []types.ChatMessage, visibleSkills map[string]bool, thinkingEnabled bool) []types.ChatMessage {
 	out := make([]types.ChatMessage, len(messages))
 	readSkillCalls := map[string]string{}
 	for i, msg := range messages {
@@ -146,6 +146,10 @@ func messagesForAPI(messages []types.ChatMessage, visibleSkills map[string]bool)
 			}
 		}
 		if msg.Role != "assistant" || msg.ReasoningContent == "" {
+			continue
+		}
+		if !thinkingEnabled {
+			out[i].ReasoningContent = ""
 			continue
 		}
 		keepReasoning := len(msg.ToolCalls) > 0

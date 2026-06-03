@@ -89,18 +89,8 @@ func NewClient(cfg config.APIConfig) *Client {
 	}
 }
 
-func (c *Client) Chat(ctx context.Context, model string, messages []types.ChatMessage, tools []types.ToolSchema) (types.ChatMessage, error) {
-	reqBody := chatRequest{
-		Model:           model,
-		Messages:        messages,
-		Tools:           tools,
-		ReasoningEffort: c.cfg.ReasoningEffort,
-	}
-	if c.cfg.ThinkingEnabled {
-		reqBody.Thinking = map[string]string{"type": "enabled"}
-	} else {
-		reqBody.Thinking = map[string]string{"type": "disabled"}
-	}
+func (c *Client) Chat(ctx context.Context, model string, messages []types.ChatMessage, tools []types.ToolSchema, thinkingEnabled bool, reasoningEffort string) (types.ChatMessage, error) {
+	reqBody := buildChatRequest(model, messages, tools, thinkingEnabled, reasoningEffort, false)
 
 	data, err := json.Marshal(reqBody)
 	if err != nil {
@@ -144,19 +134,8 @@ func (c *Client) Chat(ctx context.Context, model string, messages []types.ChatMe
 	return parsed.Choices[0].Message, nil
 }
 
-func (c *Client) ChatStream(ctx context.Context, model string, messages []types.ChatMessage, tools []types.ToolSchema, onDelta func(StreamDelta)) (types.ChatMessage, error) {
-	reqBody := chatRequest{
-		Model:           model,
-		Messages:        messages,
-		Tools:           tools,
-		ReasoningEffort: c.cfg.ReasoningEffort,
-		Stream:          true,
-	}
-	if c.cfg.ThinkingEnabled {
-		reqBody.Thinking = map[string]string{"type": "enabled"}
-	} else {
-		reqBody.Thinking = map[string]string{"type": "disabled"}
-	}
+func (c *Client) ChatStream(ctx context.Context, model string, messages []types.ChatMessage, tools []types.ToolSchema, thinkingEnabled bool, reasoningEffort string, onDelta func(StreamDelta)) (types.ChatMessage, error) {
+	reqBody := buildChatRequest(model, messages, tools, thinkingEnabled, reasoningEffort, true)
 
 	data, err := json.Marshal(reqBody)
 	if err != nil {
@@ -269,10 +248,35 @@ func (c *Client) ChatStream(ctx context.Context, model string, messages []types.
 	return msg, nil
 }
 
+func buildChatRequest(model string, messages []types.ChatMessage, tools []types.ToolSchema, thinkingEnabled bool, reasoningEffort string, stream bool) chatRequest {
+	reqBody := chatRequest{
+		Model:    model,
+		Messages: messages,
+		Tools:    tools,
+		Stream:   stream,
+	}
+	if thinkingEnabled {
+		reqBody.ReasoningEffort = normalizedReasoningEffort(reasoningEffort)
+		reqBody.Thinking = map[string]string{"type": "enabled"}
+	} else {
+		reqBody.Thinking = map[string]string{"type": "disabled"}
+	}
+	return reqBody
+}
+
 func completionsURL(base string) string {
 	base = strings.TrimRight(base, "/")
 	if strings.HasSuffix(base, "/chat/completions") {
 		return base
 	}
 	return base + "/chat/completions"
+}
+
+func normalizedReasoningEffort(effort string) string {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "max", "xhigh":
+		return "max"
+	default:
+		return "high"
+	}
 }

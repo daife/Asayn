@@ -74,3 +74,28 @@ model = "custom-model"
 		t.Errorf("expected custom model custom-model, got %s", custom.Model)
 	}
 }
+
+func TestSaveAgentThinkingConfig(t *testing.T) {
+	home := t.TempDir()
+	work := t.TempDir()
+	t.Setenv("HOME", home)
+
+	paths, err := Bootstrap(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := SaveAgentThinkingConfig(paths, SubAgentKind, "default", false, "max")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ThinkingEnabled || cfg.ReasoningEffort != "max" {
+		t.Fatalf("unexpected saved thinking config: enabled=%t effort=%s", cfg.ThinkingEnabled, cfg.ReasoningEffort)
+	}
+	loaded, err := LoadAgent(paths, SubAgentKind, "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.ThinkingEnabled || loaded.ReasoningEffort != "max" {
+		t.Fatalf("unexpected loaded thinking config: enabled=%t effort=%s", loaded.ThinkingEnabled, loaded.ReasoningEffort)
+	}
+}

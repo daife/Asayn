@@ -84,9 +84,6 @@ ASAYN_ALLOW_NON_LINUX=1 go run ./cmd/asayn
 ```toml
 url = "https://api.deepseek.com"
 api_key = "env:DEEPSEEK_API_KEY"
-model = "deepseek-v4-pro"
-reasoning_effort = "max"
-thinking_enabled = true
 timeout_seconds = 120
 
 [headers]
@@ -102,6 +99,9 @@ description = "General-purpose agent."
 system_prompt = "You are a helpful assistant."
 visible_skills = []
 max_output_chars = 5000
+thinking_enabled = true
+reasoning_effort = "max"
+allow_parallel_shell = false
 allow_interactive_shell = false
 ```
 
@@ -115,6 +115,10 @@ allow_interactive_shell = false
 - `/root_agent [name]`
 - `/skills`
 - `/skills [name] on|off`
+- `/shell_config`
+- `/think_config`
+- `/think_config root|sub [agent] enabled on|off`
+- `/think_config root|sub [agent] effort high|max`
 - `/compact [instructions]` reserved
 - `/btw <question>` reserved
 - `/exit`

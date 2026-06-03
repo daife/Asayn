@@ -1,7 +1,5 @@
 url = "https://api.deepseek.com"
 api_key = "env:DEEPSEEK_API_KEY"
-reasoning_effort = "max"
-thinking_enabled = true
 timeout_seconds = 120
 
 [headers]

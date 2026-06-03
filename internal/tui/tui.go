@@ -52,6 +52,10 @@ type model struct {
 	shellConfigItems    []config.AgentInfo
 	shellConfigSelected int
 	shellConfigOption   int
+	thinkConfigPicker   bool
+	thinkTargets        []skillTarget
+	thinkTargetSelected int
+	thinkConfigOption   int
 	subViewID           string
 	spinner             int
 	pendingToolLine     string
@@ -107,6 +111,7 @@ var commands = []commandSpec{
 	{Name: "/root_agent", Description: "select root agent"},
 	{Name: "/skills", Description: "toggle visible skills"},
 	{Name: "/shell_config", Description: "configure root-agent shell tools"},
+	{Name: "/think_config", Description: "configure per-agent thinking mode"},
 	{Name: "/compact", Description: "reserved context compression"},
 	{Name: "/btw", Description: "reserved side-channel question"},
 	{Name: "/exit", Description: "exit CLI"},
@@ -196,6 +201,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.shellConfigPicker {
 			next, cmd, handled := m.handleShellConfigPickerKey(msg)
+			if handled {
+				return next, cmd
+			}
+		}
+		if m.thinkConfigPicker {
+			next, cmd, handled := m.handleThinkConfigPickerKey(msg)
 			if handled {
 				return next, cmd
 			}
@@ -968,6 +979,53 @@ func (m model) handleShellConfigPickerKey(msg tea.KeyMsg) (model, tea.Cmd, bool)
 	return m, nil, true
 }
 
+func (m model) handleThinkConfigPickerKey(msg tea.KeyMsg) (model, tea.Cmd, bool) {
+	switch msg.String() {
+	case "ctrl+c":
+		_ = m.cleanupEmptySession()
+		return m, tea.Quit, true
+	case "esc":
+		m.thinkConfigPicker = false
+		m.thinkTargets = nil
+		m.thinkTargetSelected = 0
+		m.thinkConfigOption = 0
+		m.status = "ready"
+		return m, nil, true
+	case "left", "right":
+		if len(m.thinkTargets) > 0 {
+			if msg.String() == "left" {
+				m.thinkTargetSelected--
+				if m.thinkTargetSelected < 0 {
+					m.thinkTargetSelected = len(m.thinkTargets) - 1
+				}
+			} else {
+				m.thinkTargetSelected++
+				if m.thinkTargetSelected >= len(m.thinkTargets) {
+					m.thinkTargetSelected = 0
+				}
+			}
+			m.status = "configure thinking for " + m.currentThinkTargetLabel()
+		}
+		return m, nil, true
+	case "up", "down":
+		if msg.String() == "up" {
+			m.thinkConfigOption--
+			if m.thinkConfigOption < 0 {
+				m.thinkConfigOption = 1
+			}
+		} else {
+			m.thinkConfigOption++
+			if m.thinkConfigOption > 1 {
+				m.thinkConfigOption = 0
+			}
+		}
+		return m, nil, true
+	case " ", "space":
+		return m.toggleThinkConfig(), nil, true
+	}
+	return m, nil, true
+}
+
 func (m model) handleCommand(raw string) (model, tea.Cmd) {
 	parts := strings.Fields(raw)
 	cmd := strings.TrimPrefix(parts[0], "/")
@@ -1079,6 +1137,22 @@ func (m model) handleCommand(raw string) (model, tea.Cmd) {
 		}
 		enabled := parts[3] == "on" || parts[3] == "true"
 		if err := m.setRootAgentShellOption(parts[1], parts[2], enabled); err != nil {
+			m.setCommandOutput("error: " + err.Error())
+		}
+	case "think_config":
+		if len(parts) == 1 {
+			return m.startThinkConfigPicker()
+		}
+		if len(parts) != 5 {
+			m.setCommandOutput("usage: /think_config root|sub [agent] enabled on|off  OR  /think_config root|sub [agent] effort high|max")
+			return m, nil
+		}
+		kind, err := agentKindFromArg(parts[1])
+		if err != nil {
+			m.setCommandOutput("error: " + err.Error())
+			return m, nil
+		}
+		if err := m.setAgentThinkOption(kind, parts[2], parts[3], parts[4]); err != nil {
 			m.setCommandOutput("error: " + err.Error())
 		}
 	case "compact", "btw":
@@ -1215,6 +1289,117 @@ func (m *model) saveRootShellConfig(agentName string, allowParallel, allowIntera
 	return nil
 }
 
+func (m model) startThinkConfigPicker() (model, tea.Cmd) {
+	targets, err := m.listSkillTargets()
+	if err != nil {
+		m.setCommandOutput("error: " + err.Error())
+		return m, nil
+	}
+	m.thinkTargets = targets
+	m.thinkTargetSelected = 0
+	for i, target := range targets {
+		if target.Kind == config.RootAgentKind && target.Name == m.session.RootAgent {
+			m.thinkTargetSelected = i
+			break
+		}
+	}
+	m.thinkConfigOption = 0
+	m.thinkConfigPicker = true
+	m.status = "configure thinking for " + m.currentThinkTargetLabel()
+	return m, nil
+}
+
+func (m model) currentThinkTarget() (skillTarget, bool) {
+	if len(m.thinkTargets) == 0 {
+		return skillTarget{}, false
+	}
+	idx := m.thinkTargetSelected
+	if idx < 0 || idx >= len(m.thinkTargets) {
+		idx = 0
+	}
+	return m.thinkTargets[idx], true
+}
+
+func (m model) currentThinkTargetLabel() string {
+	target, ok := m.currentThinkTarget()
+	if !ok {
+		return "no agent"
+	}
+	return target.Name + " (" + skillTargetKindLabel(target.Kind) + ")"
+}
+
+func (m model) toggleThinkConfig() model {
+	target, ok := m.currentThinkTarget()
+	if !ok {
+		return m
+	}
+	cfg, err := config.LoadAgent(m.ctx.Paths, target.Kind, target.Name)
+	if err != nil {
+		m.setCommandOutput("error: " + err.Error())
+		return m
+	}
+	switch m.thinkConfigOption {
+	case 0:
+		cfg.ThinkingEnabled = !cfg.ThinkingEnabled
+	case 1:
+		if cfg.ReasoningEffort == "max" {
+			cfg.ReasoningEffort = "high"
+		} else {
+			cfg.ReasoningEffort = "max"
+		}
+	}
+	if err := m.saveAgentThinkConfig(target.Kind, cfg.Name, cfg.ThinkingEnabled, cfg.ReasoningEffort); err != nil {
+		m.setCommandOutput("error: " + err.Error())
+	}
+	return m
+}
+
+func (m *model) setAgentThinkOption(kind, agentName, option, value string) error {
+	cfg, err := config.LoadAgent(m.ctx.Paths, kind, agentName)
+	if err != nil {
+		return err
+	}
+	switch option {
+	case "enabled", "thinking", "thinking_enabled":
+		cfg.ThinkingEnabled = value == "on" || value == "true" || value == "enabled"
+	case "effort", "reasoning_effort":
+		switch value {
+		case "high", "max":
+			cfg.ReasoningEffort = value
+		default:
+			return fmt.Errorf("reasoning effort must be high or max")
+		}
+	default:
+		return fmt.Errorf("unknown think option %q", option)
+	}
+	return m.saveAgentThinkConfig(kind, cfg.Name, cfg.ThinkingEnabled, cfg.ReasoningEffort)
+}
+
+func (m *model) saveAgentThinkConfig(kind, agentName string, thinkingEnabled bool, reasoningEffort string) error {
+	cfg, err := config.SaveAgentThinkingConfig(m.ctx.Paths, kind, agentName, thinkingEnabled, reasoningEffort)
+	if err != nil {
+		return err
+	}
+	if kind == config.RootAgentKind && cfg.Name == m.session.RootAgent {
+		m.ctx.Root = cfg
+		m.ctx.Agent = llm.NewAgent(m.ctx.API, cfg, m.ctx.Paths, m.ctx.Tools)
+		m.ctx.Agent.RefreshSystemPrompt(m.session)
+	}
+	m.setCommandOutput(fmt.Sprintf("think_config %s/%s: enabled=%t effort=%s", skillTargetKindLabel(kind), cfg.Name, cfg.ThinkingEnabled, cfg.ReasoningEffort))
+	return nil
+}
+
+func agentKindFromArg(value string) (string, error) {
+	switch value {
+	case "root", "root_agent", "root_agents":
+		return config.RootAgentKind, nil
+	case "sub", "sub_agent", "sub_agents":
+		return config.SubAgentKind, nil
+	default:
+		return "", fmt.Errorf("agent kind must be root or sub")
+	}
+}
+
 func (m model) startSkillsPicker(skills []config.Skill) (model, tea.Cmd) {
 	targets, err := m.listSkillTargets()
 	if err != nil {
@@ -1310,6 +1495,9 @@ func (m model) assistView() string {
 	}
 	if m.shellConfigPicker {
 		return m.shellConfigPickerView()
+	}
+	if m.thinkConfigPicker {
+		return m.thinkConfigPickerView()
 	}
 	suggestions := m.commandSuggestions()
 	if len(suggestions) == 0 {
@@ -1505,6 +1693,50 @@ func (m model) shellConfigPickerView() string {
 		Width(m.log.Width).
 		Foreground(lipgloss.Color("8")).
 		Render(wrapANSI(panelBlock("shell config", rows), m.log.Width))
+}
+
+func (m model) thinkConfigPickerView() string {
+	rows := []string{"think_config: left/right agent, up/down option, space toggle, esc close"}
+	target, ok := m.currentThinkTarget()
+	if !ok {
+		rows = append(rows, "  no agents found")
+		return "\n" + lipgloss.NewStyle().
+			Width(m.log.Width).
+			Foreground(lipgloss.Color("8")).
+			Render(wrapANSI(strings.Join(rows, "\n"), m.log.Width))
+	}
+	cfg, err := config.LoadAgent(m.ctx.Paths, target.Kind, target.Name)
+	if err != nil {
+		rows = append(rows, "  error: "+err.Error())
+	} else {
+		rows = append(rows, "agent: "+target.Name+" ("+skillTargetKindLabel(target.Kind)+")")
+		options := []struct {
+			Name  string
+			Value string
+			Note  string
+		}{
+			{Name: "thinking mode", Value: onOff(cfg.ThinkingEnabled), Note: "sends thinking.type enabled/disabled"},
+			{Name: "reasoning effort", Value: cfg.ReasoningEffort, Note: "high or max when thinking is enabled"},
+		}
+		for i, option := range options {
+			marker := " "
+			if i == m.thinkConfigOption {
+				marker = ">"
+			}
+			rows = append(rows, fmt.Sprintf("%s %-20s %-8s %s", marker, option.Name, option.Value, option.Note))
+		}
+	}
+	return "\n" + lipgloss.NewStyle().
+		Width(m.log.Width).
+		Foreground(lipgloss.Color("8")).
+		Render(wrapANSI(panelBlock("thinking config", rows), m.log.Width))
+}
+
+func onOff(enabled bool) string {
+	if enabled {
+		return "on"
+	}
+	return "off"
 }
 
 func (m model) currentShellConfigAgent() (config.AgentInfo, bool) {
@@ -1738,6 +1970,7 @@ func (m model) rootSidebarLines(width int) ([]string, int, int) {
 	}
 	lines = append(lines, indentedSummary(m.ctx.Root.SystemPrompt, 3)...)
 	lines = append(lines,
+		fmt.Sprintf("thinking: %s effort=%s", onOff(m.ctx.Root.ThinkingEnabled), m.ctx.Root.ReasoningEffort),
 		"status: "+status,
 	)
 	if len(m.queuedMessages) > 0 {
@@ -2277,6 +2510,7 @@ Commands:
 /root_agent [name]    pick or set root agent
 /skills               pick per-agent visible skills with left/right + space
 /shell_config         pick root-agent shell tool mode with left/right + space
+/think_config         pick per-agent thinking mode/effort with left/right + space
 /compact [text]       reserved for future context compression
 /btw <question>       reserved for future side-channel question
 /exit                 exit CLI

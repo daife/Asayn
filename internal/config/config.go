@@ -44,6 +44,8 @@ type AgentConfig struct {
 	MaxOutputChars        int      `toml:"max_output_chars" json:"max_output_chars"`
 	AllowParallelShell    bool     `toml:"allow_parallel_shell" json:"allow_parallel_shell"`
 	AllowInteractiveShell bool     `toml:"allow_interactive_shell" json:"allow_interactive_shell"`
+	ThinkingEnabled       bool     `toml:"thinking_enabled" json:"thinking_enabled"`
+	ReasoningEffort       string   `toml:"reasoning_effort" json:"reasoning_effort"`
 }
 
 type Skill struct {
@@ -170,6 +172,7 @@ func LoadAgent(paths Paths, kind, name string) (AgentConfig, error) {
 		cfg.MaxOutputChars = 5000
 	}
 	cfg.NormalizeShellConfig()
+	cfg.NormalizeThinkingConfig()
 	return cfg, nil
 }
 
@@ -177,6 +180,10 @@ func (c *AgentConfig) NormalizeShellConfig() {
 	if c.AllowInteractiveShell {
 		c.AllowParallelShell = true
 	}
+}
+
+func (c *AgentConfig) NormalizeThinkingConfig() {
+	c.ReasoningEffort = normalizeReasoningEffort(c.ReasoningEffort)
 }
 
 func SaveAgentVisibleSkills(paths Paths, kind, name string, visibleSkills []string) (AgentConfig, error) {
@@ -225,6 +232,39 @@ func SaveRootAgentShellConfig(paths Paths, name string, allowParallel, allowInte
 		return cfg, err
 	}
 	return cfg, os.WriteFile(path, data, 0o644)
+}
+
+func SaveAgentThinkingConfig(paths Paths, kind, name string, thinkingEnabled bool, reasoningEffort string) (AgentConfig, error) {
+	if name == "" {
+		name = "default"
+	}
+	cfg, err := LoadAgent(paths, kind, name)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.ThinkingEnabled = thinkingEnabled
+	cfg.ReasoningEffort = normalizeReasoningEffort(reasoningEffort)
+	if cfg.Name == "" {
+		cfg.Name = name
+	}
+	path := paths.WorkspacePath(kind, name+".toml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return cfg, err
+	}
+	data, err := toml.Marshal(cfg)
+	if err != nil {
+		return cfg, err
+	}
+	return cfg, os.WriteFile(path, data, 0o644)
+}
+
+func normalizeReasoningEffort(effort string) string {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "max", "xhigh":
+		return "max"
+	default:
+		return "high"
+	}
 }
 
 func uniqueSorted(items []string) []string {
@@ -525,12 +565,14 @@ func defaultAgentConfig(kind, name string) AgentConfig {
 		model = "deepseek-v4-flash"
 	}
 	return AgentConfig{
-		Name:           name,
-		Model:          model,
-		Description:    defaultAgentDescription(kind, name),
-		SystemPrompt:   "You are a helpful assistant.",
-		VisibleSkills:  []string{},
-		MaxOutputChars: 5000,
+		Name:            name,
+		Model:           model,
+		Description:     defaultAgentDescription(kind, name),
+		SystemPrompt:    "You are a helpful assistant.",
+		VisibleSkills:   []string{},
+		MaxOutputChars:  5000,
+		ThinkingEnabled: true,
+		ReasoningEffort: "max",
 	}
 }
 

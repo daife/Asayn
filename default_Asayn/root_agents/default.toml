@@ -6,3 +6,5 @@ visible_skills = []
 max_output_chars = 5000
 allow_parallel_shell = false
 allow_interactive_shell = false
+thinking_enabled = true
+reasoning_effort = "max"
