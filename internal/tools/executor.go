@@ -93,11 +93,11 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 				"path": prop("string", "Directory path under the workplace."),
 			},
 		}),
-		schema("search_grep", "Search file names or file contents in the workplace with regular expressions. filename mode matches the relative path; content mode matches file lines.", map[string]any{
+		schema("search_grep", "Search file names or file contents in the workplace using regular expressions. In 'filename' mode, the query is a regex matched against the relative path. In 'content' mode, it matches individual file lines.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"query":          prop("string", "Search string or regular expression."),
-				"mode":           prop("string", "filename or content."),
+				"query":          prop("string", "Search regular expression (or plain string)."),
+				"mode":           prop("string", "Search mode: 'filename' (matches paths) or 'content' (matches file lines)."),
 				"case_sensitive": prop("boolean", "Whether search is case sensitive."),
 			},
 			"required": []string{"query"},
