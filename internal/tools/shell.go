@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"runtime"
+	"sort"
+	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,13 +23,25 @@ type ShellManager struct {
 }
 
 type shellRun struct {
-	id      string
-	command string
-	cmd     *exec.Cmd
-	stdin   io.WriteCloser
-	output  *safeBuffer
-	started time.Time
-	done    chan error
+	id        string
+	command   string
+	cmd       *exec.Cmd
+	stdin     io.WriteCloser
+	output    *safeBuffer
+	started   time.Time
+	done      chan struct{}
+	mu        sync.Mutex
+	err       error
+	completed bool
+}
+
+type ShellSnapshot struct {
+	ID        string
+	Command   string
+	Status    string
+	PID       int
+	Age       time.Duration
+	StartedAt time.Time
 }
 
 type safeBuffer struct {
@@ -43,7 +57,13 @@ func NewShellManager(workdir string, limit int) *ShellManager {
 	}
 }
 
-func (m *ShellManager) Run(ctx context.Context, command string, timeoutSec int, interactive bool) (string, error) {
+func (m *ShellManager) SetLimit(limit int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.limit = limit
+}
+
+func (m *ShellManager) RunBlocking(ctx context.Context, command string, timeoutSec int) (string, error) {
 	if command == "" {
 		return "", fmt.Errorf("command is required")
 	}
@@ -54,49 +74,58 @@ func (m *ShellManager) Run(ctx context.Context, command string, timeoutSec int, 
 	if err != nil {
 		return "", err
 	}
-	if interactive {
-		m.mu.Lock()
-		m.runs[run.id] = run
-		m.mu.Unlock()
-		return fmt.Sprintf("shell_id=%s\nstarted interactive command; use shell_read/shell_write/shell_kill", run.id), nil
-	}
-
 	waitCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
 	defer cancel()
 	select {
-	case err := <-run.done:
+	case <-run.done:
 		out := run.output.String()
-		if err != nil {
+		if err := run.Err(); err != nil {
 			return truncate(out, m.limit), fmt.Errorf("command failed: %w", err)
 		}
 		return truncate(out, m.limit), nil
 	case <-waitCtx.Done():
-		out := run.output.String()
-		m.mu.Lock()
-		m.runs[run.id] = run
-		m.mu.Unlock()
-		return truncate(fmt.Sprintf("shell_id=%s\ncommand still running after %ds\n%s", run.id, timeoutSec, out), m.limit), nil
+		m.killRun(run)
+		return truncate(run.output.String(), m.limit), nil
 	}
 }
 
-func (m *ShellManager) Read(id string) string {
-	run := m.get(id)
-	if run == nil {
-		return "shell not found"
+func (m *ShellManager) StartAsync(command string, interactive bool) (string, error) {
+	if command == "" {
+		return "", fmt.Errorf("command is required")
 	}
-	select {
-	case err := <-run.done:
-		status := "completed"
-		if err != nil {
-			status = "failed: " + err.Error()
+	run, err := m.start(command)
+	if err != nil {
+		return "", err
+	}
+	m.mu.Lock()
+	m.runs[run.id] = run
+	m.mu.Unlock()
+	mode := "parallel command"
+	if interactive {
+		mode = "interactive command"
+	}
+	return fmt.Sprintf("shell_id=%s\nstarted %s", run.id, mode), nil
+}
+
+func (m *ShellManager) Status(id string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if id != "" {
+		run := m.runs[id]
+		if run == nil {
+			return "shell not found"
 		}
-		m.mu.Lock()
-		delete(m.runs, id)
-		m.mu.Unlock()
-		return truncate(status+"\n"+run.output.String(), m.limit)
-	default:
-		return truncate("running\n"+run.output.String(), m.limit)
+		return truncate(m.describeWithOutput(run), m.limit)
 	}
+	rows := []string{}
+	for _, run := range m.runs {
+		rows = append(rows, m.describe(run))
+	}
+	sort.Strings(rows)
+	if len(rows) == 0 {
+		return "no running shells"
+	}
+	return truncate(strings.Join(rows, "\n\n"), m.limit)
 }
 
 func (m *ShellManager) Write(id, input string) (string, error) {
@@ -115,24 +144,68 @@ func (m *ShellManager) Kill(id string) (string, error) {
 	if run == nil {
 		return "", fmt.Errorf("shell not found")
 	}
-	if run.cmd.Process != nil {
-		_ = run.cmd.Process.Kill()
-	}
+	m.killRun(run)
 	m.mu.Lock()
 	delete(m.runs, id)
 	m.mu.Unlock()
 	return "killed", nil
 }
 
-func (m *ShellManager) start(command string) (*shellRun, error) {
-	shell := "sh"
-	args := []string{"-lc", command}
-	if runtime.GOOS == "windows" {
-		shell = "powershell"
-		args = []string{"-NoProfile", "-Command", command}
+func (m *ShellManager) Snapshots() []ShellSnapshot {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := []ShellSnapshot{}
+	for _, run := range m.runs {
+		status := "running"
+		if run.Completed() {
+			status = "completed"
+			if err := run.Err(); err != nil {
+				status = "failed"
+			}
+		}
+		pid := 0
+		if run.cmd.Process != nil {
+			pid = run.cmd.Process.Pid
+		}
+		out = append(out, ShellSnapshot{
+			ID:        run.id,
+			Command:   run.command,
+			Status:    status,
+			PID:       pid,
+			Age:       time.Since(run.started).Truncate(time.Second),
+			StartedAt: run.started,
+		})
 	}
-	cmd := exec.Command(shell, args...)
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+func (m *ShellManager) KillAll() {
+	m.mu.Lock()
+	runs := make([]*shellRun, 0, len(m.runs))
+	for _, run := range m.runs {
+		runs = append(runs, run)
+	}
+	m.runs = map[string]*shellRun{}
+	m.mu.Unlock()
+
+	for _, run := range runs {
+		m.killRun(run)
+	}
+}
+
+func (m *ShellManager) killRun(run *shellRun) {
+	if run == nil || run.cmd.Process == nil {
+		return
+	}
+	_ = syscall.Kill(-run.cmd.Process.Pid, syscall.SIGKILL)
+	_ = run.cmd.Process.Kill()
+}
+
+func (m *ShellManager) start(command string) (*shellRun, error) {
+	cmd := exec.Command("sh", "-lc", command)
 	cmd.Dir = m.workdir
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	out := &safeBuffer{}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -147,13 +220,13 @@ func (m *ShellManager) start(command string) (*shellRun, error) {
 		stdin:   stdin,
 		output:  out,
 		started: time.Now(),
-		done:    make(chan error, 1),
+		done:    make(chan struct{}),
 	}
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
 	go func() {
-		run.done <- cmd.Wait()
+		run.Finish(cmd.Wait())
 	}()
 	return run, nil
 }
@@ -162,6 +235,45 @@ func (m *ShellManager) get(id string) *shellRun {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.runs[id]
+}
+
+func (m *ShellManager) describe(run *shellRun) string {
+	status := "running"
+	if run.Completed() {
+		status = "completed"
+		if err := run.Err(); err != nil {
+			status = "failed: " + err.Error()
+		}
+	}
+	short := run.id
+	if len(short) > 8 {
+		short = short[:8]
+	}
+	return fmt.Sprintf("%s %s pid=%d age=%s cmd=%s", short, status, run.cmd.Process.Pid, time.Since(run.started).Truncate(time.Second), run.command)
+}
+
+func (m *ShellManager) describeWithOutput(run *shellRun) string {
+	return m.describe(run) + "\n" + run.output.String()
+}
+
+func (r *shellRun) Finish(err error) {
+	r.mu.Lock()
+	r.err = err
+	r.completed = true
+	r.mu.Unlock()
+	close(r.done)
+}
+
+func (r *shellRun) Completed() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.completed
+}
+
+func (r *shellRun) Err() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.err
 }
 
 func (b *safeBuffer) Write(p []byte) (int, error) {

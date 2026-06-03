@@ -20,23 +20,30 @@ import (
 )
 
 type Executor struct {
-	paths          config.Paths
-	store          *session.Store
-	maxOutputChars int
-	readOnly       bool
-	shells         *ShellManager
-	subAgents      *SubAgentManager
-	mu             sync.Mutex
+	paths                 config.Paths
+	store                 *session.Store
+	maxOutputChars        int
+	allowParallelShell    bool
+	allowInteractiveShell bool
+	readOnly              bool
+	shells                *ShellManager
+	subAgents             *SubAgentManager
+	mu                    sync.Mutex
 }
 
-func NewExecutor(paths config.Paths, store *session.Store, maxOutputChars int) *Executor {
+func NewExecutor(paths config.Paths, store *session.Store, maxOutputChars int, allowParallelShell, allowInteractiveShell bool) *Executor {
 	if maxOutputChars <= 0 {
 		maxOutputChars = 5000
 	}
+	if allowInteractiveShell {
+		allowParallelShell = true
+	}
 	exec := &Executor{
-		paths:          paths,
-		store:          store,
-		maxOutputChars: maxOutputChars,
+		paths:                 paths,
+		store:                 store,
+		maxOutputChars:        maxOutputChars,
+		allowParallelShell:    allowParallelShell,
+		allowInteractiveShell: allowInteractiveShell,
 	}
 	exec.shells = NewShellManager(paths.Workplace, maxOutputChars)
 	exec.subAgents = NewSubAgentManager(maxOutputChars)
@@ -44,13 +51,29 @@ func NewExecutor(paths config.Paths, store *session.Store, maxOutputChars int) *
 }
 
 func NewReadOnlyExecutor(paths config.Paths, store *session.Store, maxOutputChars int) *Executor {
-	exec := NewExecutor(paths, store, maxOutputChars)
+	exec := NewExecutor(paths, store, maxOutputChars, false, false)
 	exec.readOnly = true
 	return exec
 }
 
 func (e *Executor) SetSubAgentRunner(runner SubAgentRunner) {
 	e.subAgents.SetRunner(runner)
+}
+
+func (e *Executor) SetAgentLimits(maxOutputChars int, allowParallelShell, allowInteractiveShell bool) {
+	if maxOutputChars <= 0 {
+		maxOutputChars = 5000
+	}
+	if allowInteractiveShell {
+		allowParallelShell = true
+	}
+	e.mu.Lock()
+	e.maxOutputChars = maxOutputChars
+	e.allowParallelShell = allowParallelShell
+	e.allowInteractiveShell = allowInteractiveShell
+	e.mu.Unlock()
+	e.shells.SetLimit(maxOutputChars)
+	e.subAgents.SetLimit(maxOutputChars)
 }
 
 func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
@@ -79,50 +102,61 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 			},
 			"required": []string{"query"},
 		}),
-	}
-	if forSubAgent {
-		return schemas
-	}
-	schemas = append(schemas,
-		schema("diff_file", "Create, modify, delete, patch, or revert files and record the full change chain in the active session.", map[string]any{
+		schema("read_skill", "Read the SKILL.md for a currently visible skill. Skill metadata and source are included in the result.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"mode":             prop("string", "write, patch, delete, revert, or preview."),
+				"name": prop("string", "Visible skill name."),
+			},
+			"required": []string{"name"},
+		}),
+		schema("diff_file", "Apply unified diffs, create/delete files, inspect change history, show changes, and revert one or more recorded changes.", map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"mode":             prop("string", "preview, apply, write, delete, history, show, revert, or revert_many. Prefer apply with unified_diff for edits."),
 				"path":             prop("string", "Path under the workplace."),
-				"content":          prop("string", "Full new file content for write/preview."),
-				"find":             prop("string", "Exact text to replace for patch."),
-				"replace":          prop("string", "Replacement text for patch."),
+				"content":          prop("string", "Full new file content for write/preview. Use sparingly for new or small files."),
+				"unified_diff":     prop("string", "Unified diff to apply. Can include one or more file patches."),
+				"patches":          prop("array", "Optional list of unified diff strings."),
+				"find":             prop("string", "Deprecated exact text to replace for patch."),
+				"replace":          prop("string", "Deprecated replacement text for patch."),
 				"change_id":        prop("string", "Change ID to revert."),
+				"change_ids":       prop("array", "Change IDs to show or revert in order."),
+				"limit":            prop("integer", "Maximum history entries to show."),
 				"allow_create":     prop("boolean", "Allow creating a new file on patch/write."),
 				"expected_current": prop("string", "Optional guard: current content must equal this value."),
 			},
 			"required": []string{"mode"},
 		}),
-		schema("shell_run", "Run a non-interactive shell command. Interactive commands require interactive=true and then use shell_read/shell_write/shell_kill.", map[string]any{
+	}
+	if forSubAgent {
+		return schemas
+	}
+	schemas = append(schemas, schema("shell_run_sync", "Run a shell command synchronously. The command returns only command output; it is killed if it reaches timeout_sec.", map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"command":     prop("string", "Shell command to run."),
+			"timeout_sec": prop("integer", "Maximum seconds to wait before killing the command, default 60."),
+		},
+		"required": []string{"command", "timeout_sec"},
+	}))
+	if !e.allowParallelShell {
+		return append(schemas, subAgentSchemas()...)
+	}
+	schemas = append(schemas,
+		schema("shell_run_async", "Start a shell command asynchronously and return a shell_id. The command keeps running until it exits or is killed.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"command":     prop("string", "Shell command to run."),
-				"timeout_sec": prop("integer", "Wait time before returning partial output, default 60."),
-				"interactive": prop("boolean", "Start in parallel and return a shell_id."),
+				"command": prop("string", "Shell command to run."),
 			},
 			"required": []string{"command"},
 		}),
-		schema("shell_read", "Read output from a running interactive shell command.", map[string]any{
+		schema("shell_async_status", "Check asynchronous shell commands. With shell_id, returns status and captured output for that command.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"shell_id": prop("string", "Shell ID."),
+				"shell_id": prop("string", "Optional shell ID."),
 			},
-			"required": []string{"shell_id"},
 		}),
-		schema("shell_write", "Inject input into a running interactive shell command.", map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"shell_id": prop("string", "Shell ID."),
-				"input":    prop("string", "Input to send, include newline when needed."),
-			},
-			"required": []string{"shell_id", "input"},
-		}),
-		schema("shell_kill", "Kill a running interactive shell command.", map[string]any{
+		schema("shell_async_kill", "Kill an asynchronous shell command by shell_id.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"shell_id": prop("string", "Shell ID."),
@@ -130,44 +164,65 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 			"required": []string{"shell_id"},
 		}),
 	)
-	if !forSubAgent {
+	if e.allowInteractiveShell {
 		schemas = append(schemas,
-			schema("sub_agent_start", "Start a parallel sub-agent task. Sub-agents cannot see sub_agent tools.", map[string]any{
+			schema("shell_async_write", "Write input to an asynchronous interactive shell command.", map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"name":        prop("string", "Display name."),
-					"instruction": prop("string", "Task for the sub-agent."),
+					"shell_id": prop("string", "Shell ID."),
+					"input":    prop("string", "Input to send, include newline when needed."),
 				},
-				"required": []string{"instruction"},
-			}),
-			schema("sub_agent_status", "List sub-agent status or get one sub-agent transcript/result.", map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"sub_agent_id": prop("string", "Optional sub-agent ID."),
-				},
-			}),
-			schema("sub_agent_send", "Send a follow-up instruction to a running or completed sub-agent context.", map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"sub_agent_id": prop("string", "Sub-agent ID."),
-					"instruction":  prop("string", "Follow-up instruction."),
-				},
-				"required": []string{"sub_agent_id", "instruction"},
-			}),
-			schema("sub_agent_stop", "Stop a sub-agent and its owned terminals.", map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"sub_agent_id": prop("string", "Sub-agent ID."),
-				},
-				"required": []string{"sub_agent_id"},
-			}),
-		)
+				"required": []string{"shell_id", "input"},
+			}))
 	}
-	return schemas
+	return append(schemas, subAgentSchemas()...)
+}
+
+func subAgentSchemas() []types.ToolSchema {
+	return []types.ToolSchema{
+		schema("sub_agent_start", "Start a parallel sub-agent. Sub-agents have file tools but no shell or sub-agent tools.", map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"agent":       prop("string", "Sub-agent config name from sub_agent_status available sub-agents."),
+				"name":        prop("string", "Display name."),
+				"instruction": prop("string", "Task for the sub-agent."),
+			},
+			"required": []string{"instruction"},
+		}),
+		schema("sub_agent_status", "List sub-agent status or get one sub-agent transcript/result.", map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"sub_agent_id": prop("string", "Optional sub-agent ID."),
+			},
+		}),
+		schema("sub_agent_wait", "Wait for a specified number of seconds, then return one sub-agent transcript/result status. Use only when there is no other worthwhile parallel work to do.", map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"sub_agent_id": prop("string", "Sub-agent ID."),
+				"wait_seconds": prop("integer", "Seconds to wait before reading status. The root agent chooses this delay."),
+			},
+			"required": []string{"sub_agent_id", "wait_seconds"},
+		}),
+		schema("sub_agent_send", "Send a follow-up instruction to a completed or stopped sub-agent context.", map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"sub_agent_id": prop("string", "Sub-agent ID."),
+				"instruction":  prop("string", "Follow-up instruction."),
+			},
+			"required": []string{"sub_agent_id", "instruction"},
+		}),
+		schema("sub_agent_stop", "Stop a running sub-agent.", map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"sub_agent_id": prop("string", "Sub-agent ID."),
+			},
+			"required": []string{"sub_agent_id"},
+		}),
+	}
 }
 
 func (e *Executor) Run(ctx context.Context, sess *session.Session, name string, args map[string]any) (string, error) {
-	if e.readOnly && name != "read_file" && name != "view_dir" && name != "search_grep" {
+	if e.readOnly && name != "read_file" && name != "view_dir" && name != "search_grep" && name != "read_skill" && name != "diff_file" {
 		return "", fmt.Errorf("tool %q is not available to read-only sub-agents", name)
 	}
 	switch name {
@@ -177,20 +232,38 @@ func (e *Executor) Run(ctx context.Context, sess *session.Session, name string, 
 		return e.viewDir(args)
 	case "search_grep":
 		return e.searchGrep(args)
+	case "read_skill":
+		return e.readSkill(args)
 	case "diff_file":
 		return e.diffFile(sess, args)
-	case "shell_run":
-		return e.shells.Run(ctx, stringArg(args, "command"), intArg(args, "timeout_sec", 60), boolArg(args, "interactive", false))
-	case "shell_read":
-		return e.shells.Read(stringArg(args, "shell_id")), nil
-	case "shell_write":
-		return e.shells.Write(stringArg(args, "shell_id"), stringArg(args, "input"))
-	case "shell_kill":
+	case "shell_run_sync":
+		return e.shells.RunBlocking(ctx, stringArg(args, "command"), intArg(args, "timeout_sec", 60))
+	case "shell_run_async":
+		if !e.allowParallelShell {
+			return "", fmt.Errorf("shell_run_async is not available unless parallel shell is enabled")
+		}
+		return e.shells.StartAsync(stringArg(args, "command"), e.allowInteractiveShell)
+	case "shell_async_status":
+		if !e.allowParallelShell {
+			return "", fmt.Errorf("shell_async_status is not available unless parallel shell is enabled")
+		}
+		return e.shells.Status(stringArg(args, "shell_id")), nil
+	case "shell_async_kill":
+		if !e.allowParallelShell {
+			return "", fmt.Errorf("shell_async_kill is not available unless parallel shell is enabled")
+		}
 		return e.shells.Kill(stringArg(args, "shell_id"))
+	case "shell_async_write":
+		if !e.allowInteractiveShell {
+			return "", fmt.Errorf("shell_async_write is not available unless interactive shell is enabled")
+		}
+		return e.shells.Write(stringArg(args, "shell_id"), stringArg(args, "input"))
 	case "sub_agent_start":
-		return e.subAgents.Start(stringArg(args, "name"), stringArg(args, "instruction")), nil
+		return e.subAgents.Start(sess, e.store, stringArg(args, "agent"), stringArg(args, "name"), stringArg(args, "instruction")), nil
 	case "sub_agent_status":
-		return e.subAgents.Status(stringArg(args, "sub_agent_id")), nil
+		return e.subAgents.Status(e.paths, stringArg(args, "sub_agent_id")), nil
+	case "sub_agent_wait":
+		return e.subAgents.Wait(ctx, e.paths, stringArg(args, "sub_agent_id"), intArg(args, "wait_seconds", 0))
 	case "sub_agent_send":
 		return e.subAgents.Send(stringArg(args, "sub_agent_id"), stringArg(args, "instruction")), nil
 	case "sub_agent_stop":
@@ -198,6 +271,31 @@ func (e *Executor) Run(ctx context.Context, sess *session.Session, name string, 
 	default:
 		return "", fmt.Errorf("unknown tool %q", name)
 	}
+}
+
+func (e *Executor) readSkill(args map[string]any) (string, error) {
+	name := stringArg(args, "name")
+	if name == "" {
+		return "", fmt.Errorf("name is required")
+	}
+	visible := map[string]bool{}
+	for _, item := range stringSliceArg(args, "_visible_skills") {
+		visible[item] = true
+	}
+	if !visible[name] {
+		return "", fmt.Errorf("skill %q is not visible in the active session", name)
+	}
+	skill, err := config.LoadSkill(e.paths, name)
+	if err != nil {
+		return "", err
+	}
+	meta := []string{}
+	for k, v := range skill.Metadata {
+		meta = append(meta, fmt.Sprintf("%s=%q", k, v))
+	}
+	sort.Strings(meta)
+	out := fmt.Sprintf("name: %s\nsource: %s\npath: %s\nmetadata: %s\n\n%s", skill.Name, skill.Source, skill.Path, strings.Join(meta, " "), strings.TrimSpace(skill.Body))
+	return truncate(out, e.maxOutputChars), nil
 }
 
 func (e *Executor) SubAgentSummaries() []string {
@@ -208,8 +306,21 @@ func (e *Executor) SubAgentSnapshots() []SubAgentSnapshot {
 	return e.subAgents.Snapshots()
 }
 
+func (e *Executor) ShellSnapshots() []ShellSnapshot {
+	return e.shells.Snapshots()
+}
+
 func (e *Executor) SubAgentStatus(id string) string {
-	return e.subAgents.Status(id)
+	return e.subAgents.Status(e.paths, id)
+}
+
+func (e *Executor) RestoreSubAgents(parent *session.Session, refs []session.SubAgentRef, subStore *session.Store) {
+	e.subAgents.Restore(parent, e.store, refs, subStore)
+}
+
+func (e *Executor) Shutdown() {
+	e.subAgents.StopAll()
+	e.shells.KillAll()
 }
 
 func (e *Executor) readFile(args map[string]any) (string, error) {
@@ -286,7 +397,7 @@ func (e *Executor) searchGrep(args map[string]any) (string, error) {
 			return err
 		}
 		rel, _ := filepath.Rel(e.paths.Workplace, path)
-		if strings.HasPrefix(rel, "Asayn"+string(filepath.Separator)) || rel == "Asayn" {
+		if strings.HasPrefix(rel, ".Asayn"+string(filepath.Separator)) || rel == ".Asayn" {
 			return nil
 		}
 		if mode == "filename" {
@@ -332,8 +443,20 @@ func (e *Executor) diffFile(sess *session.Session, args map[string]any) (string,
 
 	mode := stringArg(args, "mode")
 	changeID := stringArg(args, "change_id")
+	switch mode {
+	case "history":
+		return e.changeHistory(sess, stringArg(args, "path"), intArg(args, "limit", 20))
+	case "show":
+		return e.showChanges(sess, changeID, stringSliceArg(args, "change_ids"))
+	case "revert_many":
+		return e.revertChanges(sess, appendChangeIDs(changeID, stringSliceArg(args, "change_ids")))
+	}
 	if mode == "revert" {
 		return e.revertChange(sess, changeID)
+	}
+
+	if mode == "apply" || (mode == "preview" && (stringArg(args, "unified_diff") != "" || len(stringSliceArg(args, "patches")) > 0)) {
+		return e.applyDiffs(sess, args, mode == "preview")
 	}
 
 	path, err := e.resolveWorkplacePath(stringArg(args, "path"))
@@ -412,6 +535,88 @@ func (e *Executor) diffFile(sess *session.Session, args map[string]any) (string,
 	return truncate(fmt.Sprintf("change_id=%s\n%s", change.ID, diff), e.maxOutputChars), nil
 }
 
+func (e *Executor) applyDiffs(sess *session.Session, args map[string]any, preview bool) (string, error) {
+	diffs := stringSliceArg(args, "patches")
+	if one := stringArg(args, "unified_diff"); one != "" {
+		diffs = append([]string{one}, diffs...)
+	}
+	if len(diffs) == 0 {
+		return "", fmt.Errorf("unified_diff or patches is required")
+	}
+	plans := []diffApplyPlan{}
+	for _, raw := range diffs {
+		parsed, err := parseUnifiedDiff(raw)
+		if err != nil {
+			return "", err
+		}
+		plans = append(plans, parsed...)
+	}
+	if len(plans) == 0 {
+		return "", fmt.Errorf("diff contained no file patches")
+	}
+
+	outputs := []string{}
+	for _, plan := range plans {
+		path, err := e.resolveWorkplacePath(plan.Path)
+		if err != nil {
+			return "", err
+		}
+		beforeBytes, readErr := os.ReadFile(path)
+		before := ""
+		existed := readErr == nil
+		if existed {
+			before = string(beforeBytes)
+		} else if !plan.Creates && !boolArg(args, "allow_create", false) {
+			return "", fmt.Errorf("%s does not exist; set allow_create=true for creating files", plan.Path)
+		}
+		if guard := stringArg(args, "expected_current"); guard != "" && guard != before {
+			return "", fmt.Errorf("expected_current guard did not match for %s", plan.Path)
+		}
+		after, err := applyParsedPatch(before, plan)
+		if err != nil {
+			return "", fmt.Errorf("%s: %w", plan.Path, err)
+		}
+		action := "modify"
+		if !existed {
+			action = "create"
+		}
+		if plan.Deletes {
+			action = "delete"
+		}
+		diff := unifiedDiff(plan.Path, before, after)
+		if preview {
+			outputs = append(outputs, diff)
+			continue
+		}
+		if action == "delete" {
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				return "", err
+			}
+		} else {
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				return "", err
+			}
+			if err := os.WriteFile(path, []byte(after), 0o644); err != nil {
+				return "", err
+			}
+		}
+		change := session.FileChange{
+			ID:            uuid.NewString(),
+			At:            time.Now(),
+			Path:          plan.Path,
+			Action:        action,
+			BeforeContent: before,
+			AfterContent:  after,
+			UnifiedDiff:   diff,
+		}
+		if err := e.store.AddChange(sess, change); err != nil {
+			return "", err
+		}
+		outputs = append(outputs, fmt.Sprintf("change_id=%s\n%s", change.ID, diff))
+	}
+	return truncate(strings.Join(outputs, "\n"), e.maxOutputChars), nil
+}
+
 func (e *Executor) revertChange(sess *session.Session, changeID string) (string, error) {
 	if changeID == "" {
 		return "", fmt.Errorf("change_id is required")
@@ -431,8 +636,13 @@ func (e *Executor) revertChange(sess *session.Session, changeID string) (string,
 			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 				return "", err
 			}
-		} else if err := os.WriteFile(path, []byte(ch.BeforeContent), 0o644); err != nil {
-			return "", err
+		} else {
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				return "", err
+			}
+			if err := os.WriteFile(path, []byte(ch.BeforeContent), 0o644); err != nil {
+				return "", err
+			}
 		}
 		revert := session.FileChange{
 			ID:            uuid.NewString(),
@@ -449,6 +659,73 @@ func (e *Executor) revertChange(sess *session.Session, changeID string) (string,
 		return truncate(fmt.Sprintf("reverted=%s\nchange_id=%s\n%s", changeID, revert.ID, diff), e.maxOutputChars), nil
 	}
 	return "", fmt.Errorf("change_id not found")
+}
+
+func (e *Executor) revertChanges(sess *session.Session, changeIDs []string) (string, error) {
+	if len(changeIDs) == 0 {
+		return "", fmt.Errorf("change_ids is required")
+	}
+	out := []string{}
+	for _, id := range changeIDs {
+		result, err := e.revertChange(sess, id)
+		if err != nil {
+			return strings.Join(out, "\n"), err
+		}
+		out = append(out, result)
+	}
+	return truncate(strings.Join(out, "\n"), e.maxOutputChars), nil
+}
+
+func (e *Executor) changeHistory(sess *session.Session, path string, limit int) (string, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	rows := []string{}
+	for i := len(sess.Changes) - 1; i >= 0; i-- {
+		ch := sess.Changes[i]
+		if path != "" && filepath.ToSlash(path) != ch.Path {
+			continue
+		}
+		rows = append(rows, fmt.Sprintf("%s %s %s %s", ch.ID, ch.At.Format(time.RFC3339), ch.Action, ch.Path))
+		if len(rows) >= limit {
+			break
+		}
+	}
+	if len(rows) == 0 {
+		return "no changes", nil
+	}
+	return truncate(strings.Join(rows, "\n"), e.maxOutputChars), nil
+}
+
+func (e *Executor) showChanges(sess *session.Session, changeID string, changeIDs []string) (string, error) {
+	ids := appendChangeIDs(changeID, changeIDs)
+	if len(ids) == 0 {
+		return "", fmt.Errorf("change_id or change_ids is required")
+	}
+	wanted := map[string]bool{}
+	for _, id := range ids {
+		wanted[id] = true
+	}
+	out := []string{}
+	for _, ch := range sess.Changes {
+		if !wanted[ch.ID] {
+			continue
+		}
+		out = append(out, fmt.Sprintf("change_id=%s\nat=%s\naction=%s\npath=%s\n%s", ch.ID, ch.At.Format(time.RFC3339), ch.Action, ch.Path, ch.UnifiedDiff))
+	}
+	if len(out) == 0 {
+		return "change_id not found", nil
+	}
+	return truncate(strings.Join(out, "\n"), e.maxOutputChars), nil
+}
+
+func appendChangeIDs(first string, rest []string) []string {
+	out := []string{}
+	if first != "" {
+		out = append(out, first)
+	}
+	out = append(out, rest...)
+	return out
 }
 
 func (e *Executor) resolveWorkplacePath(rel string) (string, error) {
@@ -526,6 +803,33 @@ func intArg(args map[string]any, key string, def int) int {
 	return def
 }
 
+func stringSliceArg(args map[string]any, key string) []string {
+	v, ok := args[key]
+	if !ok || v == nil {
+		return nil
+	}
+	switch t := v.(type) {
+	case []string:
+		return t
+	case []any:
+		out := []string{}
+		for _, item := range t {
+			if item == nil {
+				continue
+			}
+			out = append(out, fmt.Sprint(item))
+		}
+		return out
+	case string:
+		if t == "" {
+			return nil
+		}
+		return []string{t}
+	default:
+		return nil
+	}
+}
+
 func boolArg(args map[string]any, key string, def bool) bool {
 	v, ok := args[key]
 	if !ok || v == nil {
@@ -589,4 +893,147 @@ func unifiedDiff(path, before, after string) string {
 		}
 	}
 	return b.String()
+}
+
+type diffApplyPlan struct {
+	Path    string
+	Hunks   []diffHunk
+	Creates bool
+	Deletes bool
+}
+
+type diffHunk struct {
+	OldStart int
+	OldCount int
+	Lines    []string
+}
+
+func parseUnifiedDiff(raw string) ([]diffApplyPlan, error) {
+	lines := strings.Split(raw, "\n")
+	plans := []diffApplyPlan{}
+	var current *diffApplyPlan
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		if strings.HasPrefix(line, "--- ") {
+			if i+1 >= len(lines) || !strings.HasPrefix(lines[i+1], "+++ ") {
+				return nil, fmt.Errorf("diff header missing +++ line")
+			}
+			oldPath := cleanDiffPath(strings.TrimSpace(strings.TrimPrefix(line, "--- ")))
+			newPath := cleanDiffPath(strings.TrimSpace(strings.TrimPrefix(lines[i+1], "+++ ")))
+			path := newPath
+			if path == "/dev/null" || path == "" {
+				path = oldPath
+			}
+			if path == "" || path == "/dev/null" {
+				return nil, fmt.Errorf("diff file path missing")
+			}
+			plans = append(plans, diffApplyPlan{
+				Path:    path,
+				Creates: oldPath == "/dev/null",
+				Deletes: newPath == "/dev/null",
+			})
+			current = &plans[len(plans)-1]
+			i++
+			continue
+		}
+		if strings.HasPrefix(line, "@@ ") {
+			if current == nil {
+				return nil, fmt.Errorf("hunk before file header")
+			}
+			hunk, err := parseHunkHeader(line)
+			if err != nil {
+				return nil, err
+			}
+			i++
+			for ; i < len(lines); i++ {
+				if strings.HasPrefix(lines[i], "--- ") || strings.HasPrefix(lines[i], "@@ ") {
+					i--
+					break
+				}
+				if lines[i] == `\ No newline at end of file` {
+					continue
+				}
+				if lines[i] == "" {
+					continue
+				}
+				prefix := lines[i][0]
+				if prefix != ' ' && prefix != '+' && prefix != '-' {
+					return nil, fmt.Errorf("invalid hunk line %q", lines[i])
+				}
+				hunk.Lines = append(hunk.Lines, lines[i])
+			}
+			current.Hunks = append(current.Hunks, hunk)
+		}
+	}
+	return plans, nil
+}
+
+func parseHunkHeader(header string) (diffHunk, error) {
+	re := regexp.MustCompile(`^@@ -([0-9]+)(?:,([0-9]+))? \+([0-9]+)(?:,([0-9]+))? @@`)
+	m := re.FindStringSubmatch(header)
+	if m == nil {
+		return diffHunk{}, fmt.Errorf("invalid hunk header %q", header)
+	}
+	oldStart, _ := strconv.Atoi(m[1])
+	oldCount := 1
+	if m[2] != "" {
+		oldCount, _ = strconv.Atoi(m[2])
+	}
+	return diffHunk{OldStart: oldStart, OldCount: oldCount}, nil
+}
+
+func cleanDiffPath(path string) string {
+	path = strings.Trim(path, "\"")
+	if path == "/dev/null" {
+		return path
+	}
+	if strings.HasPrefix(path, "a/") || strings.HasPrefix(path, "b/") {
+		path = path[2:]
+	}
+	return filepath.ToSlash(path)
+}
+
+func applyParsedPatch(before string, plan diffApplyPlan) (string, error) {
+	if len(plan.Hunks) == 0 {
+		return before, nil
+	}
+	lines := strings.Split(before, "\n")
+	out := []string{}
+	cursor := 0
+	for _, hunk := range plan.Hunks {
+		start := hunk.OldStart - 1
+		if hunk.OldStart == 0 {
+			start = 0
+		}
+		if start < cursor || start > len(lines) {
+			return "", fmt.Errorf("hunk start is outside file")
+		}
+		out = append(out, lines[cursor:start]...)
+		pos := start
+		for _, hline := range hunk.Lines {
+			if hline == "" {
+				continue
+			}
+			prefix := hline[0]
+			text := hline[1:]
+			switch prefix {
+			case ' ':
+				if pos >= len(lines) || lines[pos] != text {
+					return "", fmt.Errorf("context mismatch near line %d", pos+1)
+				}
+				out = append(out, text)
+				pos++
+			case '-':
+				if pos >= len(lines) || lines[pos] != text {
+					return "", fmt.Errorf("delete mismatch near line %d", pos+1)
+				}
+				pos++
+			case '+':
+				out = append(out, text)
+			}
+		}
+		cursor = pos
+	}
+	out = append(out, lines[cursor:]...)
+	return strings.Join(out, "\n"), nil
 }

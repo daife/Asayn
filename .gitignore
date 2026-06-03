@@ -1,5 +1,5 @@
-Asayn/
-asayn
+.Asayn/
+/asayn
 *.exe
 *.test
 dist/

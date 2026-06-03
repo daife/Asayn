@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/asayn/asayn/internal/llm/types"
@@ -21,6 +22,18 @@ type Session struct {
 	Messages      []types.ChatMessage `json:"messages"`
 	VisibleSkills map[string]bool     `json:"visible_skills"`
 	Changes       []FileChange        `json:"changes"`
+	SubAgents     []SubAgentRef       `json:"sub_agents"`
+	InputHistory  []string            `json:"input_history"`
+}
+
+type SubAgentRef struct {
+	TaskID    string    `json:"task_id"`
+	SessionID string    `json:"session_id"`
+	Agent     string    `json:"agent"`
+	Name      string    `json:"name"`
+	Status    string    `json:"status"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type FileChange struct {
@@ -42,12 +55,13 @@ func NewStore(dir string) *Store {
 }
 
 func (s *Store) New(name, rootAgent string) (*Session, error) {
-	if name == "" {
-		name = "session"
-	}
 	now := time.Now()
+	id := uuid.NewString()
+	if name == "" {
+		name = shortSessionID(id)
+	}
 	sess := &Session{
-		ID:            uuid.NewString(),
+		ID:            id,
 		Name:          name,
 		RootAgent:     rootAgent,
 		CreatedAt:     now,
@@ -55,6 +69,13 @@ func (s *Store) New(name, rootAgent string) (*Session, error) {
 		VisibleSkills: map[string]bool{},
 	}
 	return sess, s.Save(sess)
+}
+
+func shortSessionID(id string) string {
+	if len(id) > 8 {
+		return id[:8]
+	}
+	return id
 }
 
 func (s *Store) Save(sess *Session) error {
@@ -68,6 +89,42 @@ func (s *Store) Save(sess *Session) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(dir, "session.json"), data, 0o644)
+}
+
+func (s *Store) Delete(sess *Session) error {
+	if sess == nil || sess.ID == "" {
+		return nil
+	}
+	return os.RemoveAll(s.sessionDir(sess.ID))
+}
+
+func (s *Store) LoadByID(id string) (*Session, error) {
+	return s.loadByID(id)
+}
+
+func HasContent(sess *Session) bool {
+	if sess == nil {
+		return false
+	}
+	if len(sess.Changes) > 0 {
+		return true
+	}
+	if len(sess.SubAgents) > 0 {
+		return true
+	}
+	for _, msg := range sess.Messages {
+		switch msg.Role {
+		case "user", "tool":
+			if strings.TrimSpace(msg.Content) != "" {
+				return true
+			}
+		case "assistant":
+			if strings.TrimSpace(msg.Content) != "" || len(msg.ToolCalls) > 0 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (s *Store) Load(idOrName string) (*Session, error) {
@@ -91,11 +148,66 @@ func (s *Store) Fork(src *Session, name string) (*Session, error) {
 	cp.UpdatedAt = cp.CreatedAt
 	cp.Messages = append([]types.ChatMessage(nil), src.Messages...)
 	cp.Changes = append([]FileChange(nil), src.Changes...)
+	cp.SubAgents = append([]SubAgentRef(nil), src.SubAgents...)
 	cp.VisibleSkills = map[string]bool{}
 	for k, v := range src.VisibleSkills {
 		cp.VisibleSkills[k] = v
 	}
 	return &cp, s.Save(&cp)
+}
+
+func (s *Store) UpsertSubAgent(sess *Session, ref SubAgentRef) error {
+	if sess == nil || ref.TaskID == "" {
+		return nil
+	}
+	now := time.Now()
+	if ref.CreatedAt.IsZero() {
+		ref.CreatedAt = now
+	}
+	if ref.UpdatedAt.IsZero() {
+		ref.UpdatedAt = now
+	}
+	for i := range sess.SubAgents {
+		if sess.SubAgents[i].TaskID != ref.TaskID {
+			continue
+		}
+		if ref.SessionID != "" {
+			sess.SubAgents[i].SessionID = ref.SessionID
+		}
+		if ref.Name != "" {
+			sess.SubAgents[i].Name = ref.Name
+		}
+		if ref.Status != "" {
+			sess.SubAgents[i].Status = ref.Status
+		}
+		if !ref.CreatedAt.IsZero() {
+			sess.SubAgents[i].CreatedAt = ref.CreatedAt
+		}
+		sess.SubAgents[i].UpdatedAt = ref.UpdatedAt
+		return s.Save(sess)
+	}
+	sess.SubAgents = append(sess.SubAgents, ref)
+	return s.Save(sess)
+}
+
+func (s *Store) UpdateSubAgent(sess *Session, taskID, sessionID, status string) error {
+	if sess == nil || taskID == "" {
+		return nil
+	}
+	for i := range sess.SubAgents {
+		if sess.SubAgents[i].TaskID != taskID {
+			continue
+		}
+		if sessionID != "" {
+			sess.SubAgents[i].SessionID = sessionID
+		}
+		if status != "" {
+			sess.SubAgents[i].Status = status
+		}
+		sess.SubAgents[i].UpdatedAt = time.Now()
+		return s.Save(sess)
+	}
+	return nil
 }
 
 func (s *Store) Rename(sess *Session, name string) error {

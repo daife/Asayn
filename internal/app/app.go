@@ -13,12 +13,13 @@ import (
 )
 
 type Context struct {
-	Paths    config.Paths
-	API      config.APIConfig
-	Root     config.AgentConfig
-	Sessions *session.Store
-	Tools    *tools.Executor
-	Agent    *llm.Agent
+	Paths       config.Paths
+	API         config.APIConfig
+	Root        config.AgentConfig
+	Sessions    *session.Store
+	SubSessions *session.Store
+	Tools       *tools.Executor
+	Agent       *llm.Agent
 }
 
 func Bootstrap(cwd string) (*Context, error) {
@@ -37,19 +38,28 @@ func Bootstrap(cwd string) (*Context, error) {
 		return nil, err
 	}
 
-	store := session.NewStore(paths.WorkspaceSessionsDir())
-	executor := tools.NewExecutor(paths, store, root.MaxOutputChars)
+	store := session.NewStore(paths.RootAgentSessionsDir())
+	subStore := session.NewStore(paths.SubAgentSessionsDir())
+	executor := tools.NewExecutor(paths, store, root.MaxOutputChars, root.AllowParallelShell, root.AllowInteractiveShell)
 	agent := llm.NewAgent(api, root, paths, executor)
 	var subSessions sync.Map
-	executor.SetSubAgentRunner(func(parent context.Context, taskID, name, instruction string) string {
-		subCfg, err := config.LoadAgent(paths, config.SubAgentKind, "default")
+	executor.SetSubAgentRunner(func(parent context.Context, taskID, sessionID, agentName, name, instruction string, emit func(string), bind func(string)) string {
+		if agentName == "" {
+			agentName = "default"
+		}
+		subCfg, err := config.LoadAgent(paths, config.SubAgentKind, agentName)
 		if err != nil {
 			return fmt.Sprintf("load sub-agent config: %v", err)
 		}
-		subStore := store
 		var subSess *session.Session
 		if loaded, ok := subSessions.Load(taskID); ok {
 			subSess = loaded.(*session.Session)
+		} else if sessionID != "" {
+			subSess, err = subStore.LoadByID(sessionID)
+			if err != nil {
+				return fmt.Sprintf("load sub-agent session: %v", err)
+			}
+			subSessions.Store(taskID, subSess)
 		} else {
 			subSess, err = subStore.New("sub-"+name, subCfg.Name)
 			if err != nil {
@@ -57,11 +67,19 @@ func Bootstrap(cwd string) (*Context, error) {
 			}
 			subSessions.Store(taskID, subSess)
 		}
+		if bind != nil {
+			bind(subSess.ID)
+		}
 		subExec := tools.NewReadOnlyExecutor(paths, subStore, subCfg.MaxOutputChars)
 		sub := llm.NewSubAgent(api, subCfg, paths, subExec)
+		sub.RefreshSystemPrompt(subSess)
 		ctx, cancel := context.WithTimeout(parent, 10*time.Minute)
 		defer cancel()
-		answer, err := sub.Ask(ctx, subSess, instruction)
+		answer, err := sub.AskWithEvents(ctx, subSess, instruction, func(event llm.AgentEvent) {
+			if emit != nil {
+				emit(event.Display())
+			}
+		})
 		if saveErr := subStore.Save(subSess); saveErr != nil && err == nil {
 			err = saveErr
 		}
@@ -72,11 +90,12 @@ func Bootstrap(cwd string) (*Context, error) {
 	})
 
 	return &Context{
-		Paths:    paths,
-		API:      api,
-		Root:     root,
-		Sessions: store,
-		Tools:    executor,
-		Agent:    agent,
+		Paths:       paths,
+		API:         api,
+		Root:        root,
+		Sessions:    store,
+		SubSessions: subStore,
+		Tools:       executor,
+		Agent:       agent,
 	}, nil
 }

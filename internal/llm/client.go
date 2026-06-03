@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -26,6 +27,7 @@ type chatRequest struct {
 	Tools           []types.ToolSchema  `json:"tools,omitempty"`
 	ReasoningEffort string              `json:"reasoning_effort,omitempty"`
 	Thinking        map[string]string   `json:"thinking,omitempty"`
+	Stream          bool                `json:"stream,omitempty"`
 }
 
 type chatResponse struct {
@@ -37,6 +39,42 @@ type chatResponse struct {
 		Type    string `json:"type"`
 		Code    any    `json:"code"`
 	} `json:"error,omitempty"`
+}
+
+type StreamDelta struct {
+	ReasoningContent string
+	Content          string
+}
+
+type streamResponse struct {
+	Choices []struct {
+		Delta        streamChoiceDelta `json:"delta"`
+		FinishReason string            `json:"finish_reason"`
+	} `json:"choices"`
+	Error *struct {
+		Message string `json:"message"`
+		Type    string `json:"type"`
+		Code    any    `json:"code"`
+	} `json:"error,omitempty"`
+}
+
+type streamChoiceDelta struct {
+	Role             string                `json:"role,omitempty"`
+	Content          string                `json:"content,omitempty"`
+	ReasoningContent string                `json:"reasoning_content,omitempty"`
+	ToolCalls        []streamToolCallDelta `json:"tool_calls,omitempty"`
+}
+
+type streamToolCallDelta struct {
+	Index    int                     `json:"index"`
+	ID       string                  `json:"id,omitempty"`
+	Type     string                  `json:"type,omitempty"`
+	Function streamToolFunctionDelta `json:"function,omitempty"`
+}
+
+type streamToolFunctionDelta struct {
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments,omitempty"`
 }
 
 func NewClient(cfg config.APIConfig) *Client {
@@ -104,6 +142,131 @@ func (c *Client) Chat(ctx context.Context, messages []types.ChatMessage, tools [
 		return types.ChatMessage{}, fmt.Errorf("API returned no choices")
 	}
 	return parsed.Choices[0].Message, nil
+}
+
+func (c *Client) ChatStream(ctx context.Context, messages []types.ChatMessage, tools []types.ToolSchema, onDelta func(StreamDelta)) (types.ChatMessage, error) {
+	reqBody := chatRequest{
+		Model:           c.cfg.Model,
+		Messages:        messages,
+		Tools:           tools,
+		ReasoningEffort: c.cfg.ReasoningEffort,
+		Stream:          true,
+	}
+	if c.cfg.ThinkingEnabled {
+		reqBody.Thinking = map[string]string{"type": "enabled"}
+	} else {
+		reqBody.Thinking = map[string]string{"type": "disabled"}
+	}
+
+	data, err := json.Marshal(reqBody)
+	if err != nil {
+		return types.ChatMessage{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiURL, bytes.NewReader(data))
+	if err != nil {
+		return types.ChatMessage{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+	if c.cfg.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
+	}
+	for k, v := range c.cfg.Headers {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return types.ChatMessage{}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		var parsed chatResponse
+		if err := json.Unmarshal(body, &parsed); err == nil && parsed.Error != nil {
+			return types.ChatMessage{}, fmt.Errorf("API error %d: %s", resp.StatusCode, parsed.Error.Message)
+		}
+		return types.ChatMessage{}, fmt.Errorf("API error %d: %s", resp.StatusCode, string(body))
+	}
+
+	msg := types.ChatMessage{Role: "assistant"}
+	toolCalls := map[int]types.ToolCall{}
+	maxToolIndex := -1
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, ":") {
+			continue
+		}
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if payload == "[DONE]" {
+			break
+		}
+		var chunk streamResponse
+		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+			return types.ChatMessage{}, fmt.Errorf("decode stream chunk: %w: %s", err, payload)
+		}
+		if chunk.Error != nil {
+			return types.ChatMessage{}, fmt.Errorf("API stream error: %s", chunk.Error.Message)
+		}
+		if len(chunk.Choices) == 0 {
+			continue
+		}
+		delta := chunk.Choices[0].Delta
+		if delta.Role != "" {
+			msg.Role = delta.Role
+		}
+		if delta.ReasoningContent != "" {
+			msg.ReasoningContent += delta.ReasoningContent
+		}
+		if delta.Content != "" {
+			msg.Content += delta.Content
+		}
+		if onDelta != nil && (delta.ReasoningContent != "" || delta.Content != "") {
+			onDelta(StreamDelta{ReasoningContent: delta.ReasoningContent, Content: delta.Content})
+		}
+		for _, part := range delta.ToolCalls {
+			call := toolCalls[part.Index]
+			if part.ID != "" {
+				call.ID = part.ID
+			}
+			if part.Type != "" {
+				call.Type = part.Type
+			}
+			if part.Function.Name != "" {
+				call.Function.Name += part.Function.Name
+			}
+			if part.Function.Arguments != "" {
+				call.Function.Arguments += part.Function.Arguments
+			}
+			toolCalls[part.Index] = call
+			if part.Index > maxToolIndex {
+				maxToolIndex = part.Index
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return types.ChatMessage{}, err
+	}
+	if maxToolIndex >= 0 {
+		msg.ToolCalls = make([]types.ToolCall, 0, maxToolIndex+1)
+		for i := 0; i <= maxToolIndex; i++ {
+			call, ok := toolCalls[i]
+			if !ok {
+				continue
+			}
+			if call.Type == "" {
+				call.Type = "function"
+			}
+			msg.ToolCalls = append(msg.ToolCalls, call)
+		}
+	}
+	return msg, nil
 }
 
 func completionsURL(base string) string {
