@@ -64,7 +64,7 @@ type model struct {
 	pendingThinkSpin    bool
 	streamThinkText     string
 	pendingThinkStart   int
-	pendingAnswerLine   string
+	pendingAnswerStart  int
 	streamAnswerText    string
 }
 
@@ -143,14 +143,15 @@ func Run(ctx *app.Context) error {
 	vp.SetContent(content)
 
 	m := model{
-		ctx:               ctx,
-		session:           sess,
-		input:             input,
-		log:               vp,
-		content:           content,
-		status:            "ready",
-		historyIndex:      -1,
-		pendingThinkStart: -1,
+		ctx:                ctx,
+		session:            sess,
+		input:              input,
+		log:                vp,
+		content:            content,
+		status:             "ready",
+		historyIndex:       -1,
+		pendingThinkStart:  -1,
+		pendingAnswerStart: -1,
 	}
 	_, err = tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
 	return err
@@ -298,7 +299,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendingThinkLine = ""
 		m.pendingThinkStart = -1
 		if msg.err != nil {
-			m.pendingAnswerLine = ""
+			m.pendingAnswerStart = -1
 			m.streamAnswerText = ""
 			if errors.Is(msg.err, context.Canceled) || strings.Contains(msg.err.Error(), "context canceled") {
 				m.status = "ready"
@@ -315,10 +316,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.streamAnswerText == "" {
 				m.appendLog("\n" + agentStyle.Render("Asayn") + ":\n" + msg.answer + "\n")
-			} else if msg.answer != "" && msg.answer != m.streamAnswerText {
-				m.updatePendingAnswer(answerBlock(msg.answer))
+			} else {
+				m.finalizeStreamAnswer(msg.answer)
 			}
-			m.pendingAnswerLine = ""
+			m.pendingAnswerStart = -1
 			m.streamAnswerText = ""
 			m.appendDivider()
 			_ = m.ctx.Sessions.Save(m.session)
@@ -610,16 +611,15 @@ func (m *model) appendAgentEvent(event llm.AgentEvent) {
 		if m.streamAnswerText == "" {
 			m.appendLog(answerBlock(event.Text))
 		} else {
-			m.updatePendingAnswer(answerBlock(m.streamAnswerText + event.Text))
+			m.finalizeStreamAnswer(m.streamAnswerText + event.Text)
 		}
-		m.pendingAnswerLine = ""
+		m.pendingAnswerStart = -1
 		m.streamAnswerText = ""
 	case "assistant_delta":
-		m.streamAnswerText += event.Text
-		m.updatePendingAnswer(answerBlock(m.streamAnswerText))
+		m.appendAnswerDelta(event.Text)
 	case "tool_start":
 		m.finalizePendingThinking()
-		m.pendingAnswerLine = ""
+		m.finalizeStreamAnswer("")
 		m.streamAnswerText = ""
 		line := "\n" + toolRunStyle.Render(spinnerFrame(m.spinner)+" Tool called") + ": " + event.Text + "\n"
 		m.pendingToolLine = line
@@ -648,17 +648,32 @@ func (m *model) replacePendingTool(replacement string) {
 	m.pendingToolName = ""
 }
 
-func (m *model) updatePendingAnswer(replacement string) {
-	if m.pendingAnswerLine != "" {
-		if idx := strings.LastIndex(m.content, m.pendingAnswerLine); idx >= 0 {
-			m.content = m.content[:idx] + replacement + m.content[idx+len(m.pendingAnswerLine):]
-			m.pendingAnswerLine = replacement
-			m.refreshLog(false)
-			return
-		}
+func (m *model) appendAnswerDelta(delta string) {
+	if delta == "" {
+		return
 	}
-	m.pendingAnswerLine = replacement
-	m.appendLog(replacement)
+	if m.pendingAnswerStart < 0 {
+		m.appendLog("\n" + agentStyle.Render("Asayn") + ":\n")
+		m.pendingAnswerStart = len(m.content)
+		m.streamAnswerText = ""
+	}
+	m.streamAnswerText += delta
+	m.appendLog(delta)
+}
+
+func (m *model) finalizeStreamAnswer(final string) {
+	if m.pendingAnswerStart < 0 {
+		return
+	}
+	if final != "" && final != m.streamAnswerText {
+		m.content = m.content[:m.pendingAnswerStart] + final
+		m.streamAnswerText = final
+	}
+	if !strings.HasSuffix(m.content, "\n") {
+		m.content += "\n"
+	}
+	m.pendingAnswerStart = -1
+	m.refreshLog(false)
 }
 
 func (m *model) replacePendingThinking(replacement string) {
