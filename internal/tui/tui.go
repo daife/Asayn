@@ -193,7 +193,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.log.Height < 3 {
 			m.log.Height = 3
 		}
-		m.input.Width = m.log.Width
+		m.input.Width = m.log.Width - 1
 		m.initRenderer(m.log.Width)
 		m.content = renderSessionContent(m.ctx, m.session, m.renderer, m.log.Width)
 		m.log.SetContent(m.wrapContent(m.content))
@@ -438,15 +438,7 @@ func (m model) View() string {
 	}
 
 	side := m.sidebar(sidebarWidth)
-
-	// Ensure each line of the main block is truncated and padded to exactly mainWidth
-	lines := strings.Split(main, "\n")
-	for i, line := range lines {
-		lines[i] = lipgloss.NewStyle().Width(mainWidth).MaxWidth(mainWidth).Render(line)
-	}
-	mainFixed := strings.Join(lines, "\n")
-
-	return lipgloss.JoinHorizontal(lipgloss.Top, mainFixed, " ", side)
+	return lipgloss.JoinHorizontal(lipgloss.Top, main, " ", side)
 }
 
 func (m *model) appendLog(s string) {
@@ -2453,7 +2445,7 @@ func styleTranscriptLine(line string) string {
 }
 
 func minorBlock(title, text string, maxLines int) string {
-	return mutedStyle.Render(title + ":\n" + summarizeIndented(compactDisplayText(text), maxLines))
+	return mutedStyle.Render(title+":") + "\n" + mutedStyle.Render(summarizeIndented(compactDisplayText(text), maxLines))
 }
 
 func answerBlock(text string) string {
@@ -2464,7 +2456,7 @@ func minorResult(text string, maxLines int) string {
 	if strings.TrimSpace(text) == "" {
 		return mutedStyle.Render("  (no output)")
 	}
-	return mutedStyle.Render("\n" + summarizeIndented(text, maxLines))
+	return "\n" + mutedStyle.Render(summarizeIndented(text, maxLines))
 }
 
 func summarizeIndented(text string, maxLines int) string {
@@ -2523,10 +2515,15 @@ func wrapANSI(s string, width int) string {
 	}
 	var out strings.Builder
 	lineWidth := 0
+	lineIndent := ""
+	findingIndent := true
+
 	for i := 0; i < len(s); {
 		if s[i] == '\n' {
 			out.WriteByte('\n')
 			lineWidth = 0
+			lineIndent = ""
+			findingIndent = true
 			i++
 			continue
 		}
@@ -2564,9 +2561,19 @@ func wrapANSI(s string, width int) string {
 			i += size
 			continue
 		}
+
+		if findingIndent {
+			if token == " " || token == "\t" {
+				lineIndent += token
+			} else {
+				findingIndent = false
+			}
+		}
+
 		if lineWidth > 0 && lineWidth+tokenWidth > width {
 			out.WriteByte('\n')
-			lineWidth = 0
+			out.WriteString(lineIndent)
+			lineWidth = lipgloss.Width(lineIndent)
 		}
 		out.WriteString(token)
 		lineWidth += tokenWidth
