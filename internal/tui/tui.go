@@ -514,7 +514,7 @@ func (m model) activeWorkContext() string {
 			rows = append(rows, fmt.Sprintf("[%s] is ready for check", sub.ID))
 			continue
 		}
-		subRows = append(subRows, fmt.Sprintf("- id=%s status=%s agent=%s name=%s session_id=%s", sub.ID, sub.Status, sub.Agent, sub.Name, sub.SessionID))
+		subRows = append(subRows, fmt.Sprintf("- sub_agent %s: %s (%s)", sub.ID, sub.Status, sub.Name))
 	}
 	if len(subRows) > 0 {
 		rows = append(rows, "Active sub-agents:")
@@ -525,19 +525,19 @@ func (m model) activeWorkContext() string {
 		if sh.Status != "running" {
 			continue
 		}
-		shellRows = append(shellRows, fmt.Sprintf("- id=%s status=%s pid=%d age=%s command=%s", sh.ID, sh.Status, sh.PID, sh.Age, sh.Command))
+		shellRows = append(shellRows, fmt.Sprintf("- shell %s: %s (pid %d) %s", sh.ID, sh.Status, sh.PID, sh.Command))
 	}
 	if len(shellRows) > 0 {
 		if len(rows) > 0 {
 			rows = append(rows, "")
 		}
-		rows = append(rows, "Active root-agent terminals:")
+		rows = append(rows, "Active terminals:")
 		rows = append(rows, shellRows...)
 	}
 	if len(rows) == 0 {
 		return ""
 	}
-	return "[Asayn active work context]\n" + strings.Join(rows, "\n")
+	return "[Active Context]\n" + strings.Join(rows, "\n")
 }
 
 func (m model) handleInterrupt() model {

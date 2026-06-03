@@ -88,7 +88,7 @@ func (m *SubAgentManager) Start(parent *session.Session, store *session.Store, a
 	task.persist()
 
 	go m.run(task, instruction)
-	return fmt.Sprintf("sub_agent_id=%s\nstatus: running\nContinue useful work and use sub_agent_check when this sub-agent becomes ready_for_check.", task.ID)
+	return fmt.Sprintf("sub_agent_id=%s\nstatus: running", task.ID)
 }
 
 func (m *SubAgentManager) ResumeAsync(id, instruction string) string {
@@ -108,7 +108,7 @@ func (m *SubAgentManager) ResumeAsync(id, instruction string) string {
 	task.persistLocked()
 	m.mu.Unlock()
 	go m.run(task, instruction)
-	return fmt.Sprintf("sub_agent_id=%s\nstatus: running\nContinue useful work and use sub_agent_check when this sub-agent becomes ready_for_check.", task.ID)
+	return fmt.Sprintf("sub_agent_id=%s\nstatus: running", task.ID)
 }
 
 func (m *SubAgentManager) List(paths config.Paths) string {

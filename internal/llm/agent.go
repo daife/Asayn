@@ -235,11 +235,11 @@ func toolUsePrompt(workplace string) string {
 	return fmt.Sprintf(`
 
 Tool rules:
-- Current workplace: %q. Treat this exact directory as the project root. Do not invent or assume paths such as /root/workplace; if a path matters, verify it with pwd, view_dir, or other available evidence.
-- File tools (read_file, view_dir, search_grep, diff_file) use paths relative to the current workplace unless the tool explicitly accepts otherwise. search_grep supports regular expressions for both filename and content searches. For localized edits, prefer diff_file mode=replace with exact old_text/new_text multi-line blocks; it does not rely on line numbers and returns a change diff for verification. Use unified_diff apply only when the surrounding context is certain. Use full-file write only for new or small files.
-- .Asayn/ is Asayn's required runtime/config directory, not project source. Do not read, search, edit, or summarize .Asayn/ unless the user explicitly asks to change Asayn configuration.
-- Shell commands run with cwd set to the current workplace above. Do not prefix commands with cd to an unverified directory. Shell tools are high-privilege and vary by root-agent shell_config. shell_run_sync is synchronous, returns command output only, and kills the command on timeout; it never supports interactive input. If shell_run_async/shell_async_status/shell_async_kill are available, shell_run_async starts commands in parallel and returns shell_id. If shell_async_write is also available, shell_run_async starts an interactive command and shell_async_write sends input. Before non-trivial shell use, verify cwd/PATH/available binaries/interpreters when the answer depends on them. Prefer file tools when sufficient.
-- Sub-agents (sub_agent_list, sub_agent_start_async, sub_agent_check, sub_agent_wait_check, sub_agent_resume_async) run in parallel with read_file, view_dir, search_grep, read_skill, and diff_file. Delegate only simple, time-consuming, file-scoped tasks. Do NOT delegate tasks that need shell or sub-agent coordination. Prefer continuing useful work and use sub_agent_check when a sub-agent is ready_for_check. Use sub_agent_wait_check only for a single deliberate wait when the user asked to wait or there is truly no useful work to do; do not poll with it.`, workplace)
+- Workplace: %q. Use relative paths.
+- File tools: Prefer diff_file mode=replace with exact old_text/new_text for edits. Use mode=write only for new/small files.
+- Shell tools: Run in workplace root. shell_run_sync is blocking. shell_run_async runs in background.
+- Sub-agents: Run in background. Delegate isolated tasks. Check them when ready_for_check. Do not delegate shell coordination.
+- Avoid modifying .Asayn/ unless explicitly asked to change Asayn configurations.`, workplace)
 }
 
 func (a *Agent) runToolCall(sess *session.Session, call types.ToolCall, emit func(AgentEvent)) string {

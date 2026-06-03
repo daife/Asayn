@@ -97,9 +97,9 @@ func TestSystemPromptIncludesConcreteWorkplaceRules(t *testing.T) {
 	}, config.Paths{Workplace: "/tmp/asayn-workplace"}, nil)
 	prompt := agent.systemPrompt(&session.Session{})
 	for _, want := range []string{
-		`Current workplace: "/tmp/asayn-workplace"`,
-		"Do not invent or assume paths such as /root/workplace",
-		"Shell commands run with cwd set to the current workplace above",
+		`Workplace: "/tmp/asayn-workplace"`,
+		"Use mode=write only for new/small files",
+		"Run in workplace root",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("system prompt missing %q:\n%s", want, prompt)
