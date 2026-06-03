@@ -82,6 +82,73 @@ func TestDiffFileApplyHistoryShowRevertMany(t *testing.T) {
 	}
 }
 
+func TestDiffFileReplaceMultiLineBlockReturnsDiff(t *testing.T) {
+	work := t.TempDir()
+	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
+	sess, err := store.New("test", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
+	initial := "{\n  \"items\": [\n    {\n      \"name\": \"one\"\n    }\n  ]\n}\n"
+	if err := os.WriteFile(filepath.Join(work, "data.json"), []byte(initial), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := exec.Run(context.Background(), sess, "diff_file", map[string]any{
+		"mode": "replace",
+		"path": "data.json",
+		"old_text": "    {\n" +
+			"      \"name\": \"one\"\n" +
+			"    }\n" +
+			"  ]",
+		"new_text": "    {\n" +
+			"      \"name\": \"one\"\n" +
+			"    },\n" +
+			"    {\n" +
+			"      \"name\": \"two\"\n" +
+			"    }\n" +
+			"  ]",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "change_id=") || !strings.Contains(out, "+    },") || !strings.Contains(out, "+      \"name\": \"two\"") {
+		t.Fatalf("replace should return a verification diff, got %s", out)
+	}
+	data, err := os.ReadFile(filepath.Join(work, "data.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "{\n  \"items\": [\n    {\n      \"name\": \"one\"\n    },\n    {\n      \"name\": \"two\"\n    }\n  ]\n}\n"
+	if string(data) != want {
+		t.Fatalf("unexpected replace result:\n%s", data)
+	}
+}
+
+func TestDiffFileReplaceRequiresUniqueMatchByDefault(t *testing.T) {
+	work := t.TempDir()
+	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
+	sess, err := store.New("test", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
+	if err := os.WriteFile(filepath.Join(work, "dup.txt"), []byte("same\nsame\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = exec.Run(context.Background(), sess, "diff_file", map[string]any{
+		"mode":     "replace",
+		"path":     "dup.txt",
+		"old_text": "same",
+		"new_text": "other",
+	})
+	if err == nil || !strings.Contains(err.Error(), "matched 2 times") {
+		t.Fatalf("expected duplicate match error, got %v", err)
+	}
+}
+
 func TestSubAgentWaitCheckSchemaIsRootOnly(t *testing.T) {
 	exec := NewExecutor(config.Paths{}, nil, 20000, false, false)
 	if !hasToolSchema(exec.Schemas(false), "sub_agent_wait_check") {

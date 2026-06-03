@@ -109,16 +109,19 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 			},
 			"required": []string{"name"},
 		}),
-		schema("diff_file", "Apply unified diffs, create/delete files, inspect change history, show changes, and revert one or more recorded changes.", map[string]any{
+		schema("diff_file", "Edit workspace files and record reversible change diffs. Prefer mode=replace with exact old_text/new_text for localized multi-line edits; use unified diff apply only when line context is certain.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"mode":             prop("string", "preview, apply, write, delete, history, show, revert, or revert_many. Prefer apply with unified_diff for edits."),
+				"mode":             prop("string", "replace, preview, apply, write, delete, history, show, revert, or revert_many. Prefer replace for localized edits."),
 				"path":             prop("string", "Path under the workplace."),
 				"content":          prop("string", "Full new file content for write/preview. Use sparingly for new or small files."),
 				"unified_diff":     prop("string", "Unified diff to apply. Can include one or more file patches."),
 				"patches":          prop("array", "Optional list of unified diff strings."),
-				"find":             prop("string", "Deprecated exact text to replace for patch."),
-				"replace":          prop("string", "Deprecated replacement text for patch."),
+				"old_text":         prop("string", "Exact old text block for replace mode. Include enough surrounding lines to make it unique."),
+				"new_text":         prop("string", "Replacement text block for replace mode."),
+				"replace_all":      prop("boolean", "Replace every exact old_text occurrence. Default false requires exactly one match."),
+				"find":             prop("string", "Deprecated alias for old_text."),
+				"replace":          prop("string", "Deprecated alias for new_text."),
 				"change_id":        prop("string", "Change ID to revert."),
 				"change_ids":       prop("array", "Change IDs to show or revert in order."),
 				"limit":            prop("integer", "Maximum history entries to show."),
@@ -468,26 +471,27 @@ func (e *Executor) diffFile(sess *session.Session, args map[string]any) (string,
 	action := "modify"
 	switch mode {
 	case "preview", "write":
+		if mode == "preview" && (stringArg(args, "old_text") != "" || stringArg(args, "find") != "") {
+			next, err := replaceTextBlock(before, args)
+			if err != nil {
+				return "", err
+			}
+			after = next
+			break
+		}
 		after = stringArg(args, "content")
 		if !existed {
 			action = "create"
 		}
-	case "patch":
-		find := stringArg(args, "find")
-		replace := stringArg(args, "replace")
-		if !existed && !boolArg(args, "allow_create", false) {
-			return "", fmt.Errorf("file does not exist; set allow_create=true or use write")
-		}
-		if find == "" {
-			return "", fmt.Errorf("find is required for patch")
-		}
-		if !strings.Contains(before, find) {
-			return "", fmt.Errorf("find text not present")
-		}
-		after = strings.Replace(before, find, replace, 1)
+	case "replace", "patch":
 		if !existed {
-			action = "create"
+			return "", fmt.Errorf("file does not exist; use write to create files")
 		}
+		next, err := replaceTextBlock(before, args)
+		if err != nil {
+			return "", err
+		}
+		after = next
 	case "delete":
 		after = ""
 		action = "delete"
@@ -524,6 +528,31 @@ func (e *Executor) diffFile(sess *session.Session, args map[string]any) (string,
 		return "", err
 	}
 	return truncate(fmt.Sprintf("change_id=%s\n%s", change.ID, diff), e.maxOutputChars), nil
+}
+
+func replaceTextBlock(before string, args map[string]any) (string, error) {
+	oldText := stringArg(args, "old_text")
+	if oldText == "" {
+		oldText = stringArg(args, "find")
+	}
+	if oldText == "" {
+		return "", fmt.Errorf("old_text is required for replace mode")
+	}
+	newText := stringArg(args, "new_text")
+	if _, ok := args["new_text"]; !ok {
+		newText = stringArg(args, "replace")
+	}
+	count := strings.Count(before, oldText)
+	if count == 0 {
+		return "", fmt.Errorf("old_text not found")
+	}
+	if !boolArg(args, "replace_all", false) && count != 1 {
+		return "", fmt.Errorf("old_text matched %d times; include more surrounding lines or set replace_all=true", count)
+	}
+	if boolArg(args, "replace_all", false) {
+		return strings.ReplaceAll(before, oldText, newText), nil
+	}
+	return strings.Replace(before, oldText, newText, 1), nil
 }
 
 func (e *Executor) applyDiffs(sess *session.Session, args map[string]any, preview bool) (string, error) {

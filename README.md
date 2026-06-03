@@ -136,13 +136,15 @@ Skills are directory-based packages. Asayn discovers only directories that conta
 
 ## Diff Tool
 
-`diff_file` prefers unified diff patches for edits:
+`diff_file` records reversible file changes and returns a verification diff:
 
-- `mode="preview"` with `unified_diff` previews a patch without writing.
-- `mode="apply"` with `unified_diff` or `patches` applies one or more file patches and records change IDs.
+- `mode="replace"` edits a localized exact `old_text` block into `new_text`, records a change ID, and returns the resulting diff. This is preferred for multi-line edits because it does not rely on line numbers.
+- `mode="preview"` with `old_text`/`new_text` previews a replace edit without writing.
+- `mode="preview"` with `unified_diff` previews a unified diff patch without writing.
+- `mode="apply"` with `unified_diff` or `patches` applies one or more unified diff file patches and records change IDs.
 - `mode="history"` lists recorded changes, optionally filtered by `path`.
 - `mode="show"` shows one or more recorded changes by `change_id` or `change_ids`.
 - `mode="revert"` reverts one recorded change.
 - `mode="revert_many"` reverts multiple changes in order.
 
-Full-file `write` is still available for new or small files. Exact `find`/`replace` patching is kept for compatibility but is no longer the preferred edit path.
+Full-file `write` is still available for new or small files. Unified diffs remain useful when context is certain; `replace` is safer when editing JSON tails, comma-sensitive blocks, or other multi-line regions where line numbers are easy to get wrong.
