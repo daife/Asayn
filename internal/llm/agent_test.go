@@ -1,9 +1,12 @@
 package llm
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/asayn/asayn/internal/config"
 	"github.com/asayn/asayn/internal/llm/types"
+	"github.com/asayn/asayn/internal/session"
 )
 
 func TestMessagesForAPIHidesNoLongerVisibleReadSkillContent(t *testing.T) {
@@ -45,5 +48,22 @@ func TestMessagesForAPIKeepsVisibleReadSkillContent(t *testing.T) {
 	out := messagesForAPI(messages, map[string]bool{"visible-skill": true})
 	if out[1].Content != "visible skill body" {
 		t.Fatalf("visible skill content changed: %q", out[1].Content)
+	}
+}
+
+func TestSystemPromptIncludesConcreteWorkplaceRules(t *testing.T) {
+	agent := NewAgent(config.APIConfig{}, config.AgentConfig{
+		Name:         "default",
+		SystemPrompt: "base prompt",
+	}, config.Paths{Workplace: "/tmp/asayn-workplace"}, nil)
+	prompt := agent.systemPrompt(&session.Session{})
+	for _, want := range []string{
+		`Current workplace: "/tmp/asayn-workplace"`,
+		"Do not invent or assume paths such as /root/workplace",
+		"Shell commands run with cwd set to the current workplace above",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("system prompt missing %q:\n%s", want, prompt)
+		}
 	}
 }

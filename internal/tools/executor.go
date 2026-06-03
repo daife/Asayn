@@ -131,7 +131,11 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 	if forSubAgent {
 		return schemas
 	}
-	schemas = append(schemas, schema("shell_run_sync", "Run a shell command synchronously. The command returns only command output; it is killed if it reaches timeout_sec.", map[string]any{
+	shellCWD := e.paths.Workplace
+	if shellCWD == "" {
+		shellCWD = "the current workplace"
+	}
+	schemas = append(schemas, schema("shell_run_sync", fmt.Sprintf("Run a shell command synchronously in cwd %q. The command returns only command output; it is killed if it reaches timeout_sec.", shellCWD), map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"command":     prop("string", "Shell command to run."),
@@ -143,7 +147,7 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 		return append(schemas, subAgentSchemas()...)
 	}
 	schemas = append(schemas,
-		schema("shell_run_async", "Start a shell command asynchronously and return a shell_id. The command keeps running until it exits or is killed.", map[string]any{
+		schema("shell_run_async", fmt.Sprintf("Start a shell command asynchronously in cwd %q and return a shell_id. The command keeps running until it exits or is killed.", shellCWD), map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"command": prop("string", "Shell command to run."),
