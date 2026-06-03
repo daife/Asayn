@@ -355,9 +355,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, uiTick()
 	}
 	var cmd tea.Cmd
-	if m.subViewID != "" {
-		m.log.SetContent(m.wrapContent(m.subAgentView()))
-	}
 	if key, ok := msg.(tea.KeyMsg); ok && m.historyIndex != -1 && isInputEditingKey(key.String()) {
 		m.resetHistoryNavigation()
 	}
@@ -406,11 +403,6 @@ func (m model) View() string {
 		return "Asayn"
 	}
 	body := m.log.View()
-	if m.subViewID != "" {
-		vp := m.log
-		vp.SetContent(m.wrapContent(m.subAgentView()))
-		body = vp.View()
-	}
 	main := lipgloss.NewStyle().Width(m.log.Width).Height(m.log.Height).Render(body) + "\n" + m.input.View() + m.assistView()
 	sidebarWidth := 30
 	if m.width < 100 {
@@ -1514,15 +1506,31 @@ func (m model) assistView() string {
 	}
 	selected := m.clampedCommandSelected(len(suggestions))
 	rows := []string{"up/down select, tab complete, enter run; no suggestions: up/down history"}
-	for i, item := range suggestions {
+	start := selected - 5
+	if start < 0 {
+		start = 0
+	}
+	end := start + 6
+	if end > len(suggestions) {
+		end = len(suggestions)
+		start = end - 6
+		if start < 0 {
+			start = 0
+		}
+	}
+	for i := start; i < end; i++ {
+		item := suggestions[i]
 		marker := " "
 		if i == selected {
 			marker = ">"
 		}
 		rows = append(rows, fmt.Sprintf("%s %-12s %s", marker, item.Name, item.Description))
-		if len(rows) >= 7 {
-			break
-		}
+	}
+	if start > 0 {
+		rows = append([]string{rows[0], fmt.Sprintf("  ... %d previous", start)}, rows[1:]...)
+	}
+	if end < len(suggestions) {
+		rows = append(rows, fmt.Sprintf("  ... %d more", len(suggestions)-end))
 	}
 	return "\n" + lipgloss.NewStyle().
 		Width(m.log.Width).
