@@ -1,5 +1,18 @@
-url = "https://api.deepseek.com"
-api_key = "env:DEEPSEEK_API_KEY"
+[providers.SiliconFlow]
+url = "https://api.siliconflow.cn/v1"
+api_key = "your_api_key"
 timeout_seconds = 120
+allowed_models = [
+  "deepseek-ai/DeepSeek-V4-Flash",
+  "deepseek-ai/DeepSeek-V4-Pro",
+  "nex-agi/Nex-N2-Pro"
+]
 
-[headers]
+[providers.DeepSeek]
+url = "https://api.deepseek.com"
+api_key = "your_api_key"
+timeout_seconds = 120
+allowed_models = [
+  "deepseek-v4-pro",
+  "deepseek-v4-flash"
+]

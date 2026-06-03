@@ -113,11 +113,24 @@ ASAYN_ALLOW_NON_LINUX=1 go run ./cmd/asayn
 `api_config.toml` defaults to:
 
 ```toml
-url = "https://api.deepseek.com"
-api_key = "env:DEEPSEEK_API_KEY"
+[providers.SiliconFlow]
+url = "https://api.siliconflow.cn/v1"
+api_key = "your_api_key"
 timeout_seconds = 120
+allowed_models = [
+  "deepseek-ai/DeepSeek-V4-Flash",
+  "deepseek-ai/DeepSeek-V4-Pro",
+  "nex-agi/Nex-N2-Pro"
+]
 
-[headers]
+[providers.DeepSeek]
+url = "https://api.deepseek.com"
+api_key = "your_api_key"
+timeout_seconds = 120
+allowed_models = [
+  "deepseek-v4-pro",
+  "deepseek-v4-flash"
+]
 ```
 
 ## Agent Config
@@ -126,13 +139,15 @@ timeout_seconds = 120
 
 ```toml
 name = "default"
+provider = "DeepSeek"
+model = "deepseek-v4-pro"
 description = "General-purpose agent."
-system_prompt = "You are a helpful assistant."
+system_prompt = "You are a highly competent agent."
 visible_skills = []
 max_output_lines = 2000
 context_window = 1024000
 max_output_tokens = 384000
-thinking_enabled = true
+thinking_enabled = false
 reasoning_effort = "max"
 allow_parallel_shell = false
 allow_interactive_shell = false
@@ -145,13 +160,8 @@ allow_interactive_shell = false
 - `/resume [session]`
 - `/rename [name]`
 - `/fork [name]`
-- `/root_agent [name]`
-- `/skills`
-- `/skills [name] on|off`
-- `/shell_config`
-- `/think_config`
-- `/think_config root|sub [agent] enabled on|off`
-- `/think_config root|sub [agent] effort high|max`
+- `/root_agent [name]` (alias: `/model`)
+- `/model_config`
 - `/compact [instructions]` reserved
 - `/btw <question>` reserved
 - `/exit`
@@ -169,7 +179,7 @@ Skills are directory-based packages. Asayn discovers only directories that conta
 <workplace>/.Asayn/skills/<skill-name>/SKILL.md
 ```
 
-`SKILL.md` should include YAML frontmatter metadata, commonly `name` and `description`, followed by Markdown instructions. Visible skill metadata and source are exposed to the model; the full `SKILL.md` body is loaded only through the `read_skill` tool after the skill is enabled with `/skills [name] on` or listed in the active agent config.
+`SKILL.md` should include YAML frontmatter metadata, commonly `name` and `description`, followed by Markdown instructions. Visible skill metadata and source are exposed to the model; the full `SKILL.md` body is loaded only through the `read_skill` tool after the skill is enabled with `/model_config` or listed in the active agent config.
 
 ## Diff Tool
 

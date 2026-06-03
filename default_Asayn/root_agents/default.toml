@@ -8,5 +8,5 @@ context_window = 1024000
 max_output_tokens = 384000
 allow_parallel_shell = false
 allow_interactive_shell = false
-thinking_enabled = true
+thinking_enabled = false
 reasoning_effort = "max"

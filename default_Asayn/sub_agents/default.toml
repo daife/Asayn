@@ -7,5 +7,5 @@ max_output_lines = 2000
 context_window = 1024000
 max_output_tokens = 384000
 allow_interactive_shell = false
-thinking_enabled = true
+thinking_enabled = false
 reasoning_effort = "max"

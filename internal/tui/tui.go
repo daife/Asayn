@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -47,19 +48,13 @@ type model struct {
 	rootAgentPicker     bool
 	rootAgentItems      []config.AgentInfo
 	rootAgentSelected   int
-	skillsPicker        bool
-	skillTargets        []skillTarget
-	skillTargetSelected int
+	modelConfigPicker   bool
+	modelConfigAgentSelected int
+	modelConfigAgents   []config.AgentInfo
+	modelConfigAgentKinds []string
+	modelConfigOptionSelected int
+	modelConfigModels   []string
 	skillItems          []config.Skill
-	skillSelected       int
-	shellConfigPicker   bool
-	shellConfigItems    []config.AgentInfo
-	shellConfigSelected int
-	shellConfigOption   int
-	thinkConfigPicker   bool
-	thinkTargets        []skillTarget
-	thinkTargetSelected int
-	thinkConfigOption   int
 	subViewID           string
 	spinner             int
 	pendingToolLine     string
@@ -102,13 +97,6 @@ type commandSpec struct {
 	Description string
 }
 
-type skillTarget struct {
-	Kind        string
-	Name        string
-	Description string
-	Source      string
-}
-
 var commands = []commandSpec{
 	{Name: "/help", Description: "show help"},
 	{Name: "/new", Description: "start a new session"},
@@ -116,9 +104,8 @@ var commands = []commandSpec{
 	{Name: "/rename", Description: "rename current session"},
 	{Name: "/fork", Description: "fork from the current point"},
 	{Name: "/root_agent", Description: "select root agent"},
-	{Name: "/skills", Description: "toggle visible skills"},
-	{Name: "/shell_config", Description: "configure root-agent shell tools"},
-	{Name: "/think_config", Description: "configure per-agent thinking mode"},
+	{Name: "/model", Description: "select root agent (alias for /root_agent)"},
+	{Name: "/model_config", Description: "configure agent settings"},
 	{Name: "/compact", Description: "reserved context compression"},
 	{Name: "/btw", Description: "reserved side-channel question"},
 	{Name: "/exit", Description: "exit CLI"},
@@ -216,20 +203,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return next, cmd
 			}
 		}
-		if m.skillsPicker {
-			next, cmd, handled := m.handleSkillsPickerKey(msg)
-			if handled {
-				return next, cmd
-			}
-		}
-		if m.shellConfigPicker {
-			next, cmd, handled := m.handleShellConfigPickerKey(msg)
-			if handled {
-				return next, cmd
-			}
-		}
-		if m.thinkConfigPicker {
-			next, cmd, handled := m.handleThinkConfigPickerKey(msg)
+		if m.modelConfigPicker {
+			next, cmd, handled := m.handleModelConfigPickerKey(msg)
 			if handled {
 				return next, cmd
 			}
@@ -461,7 +436,11 @@ func (m *model) appendLog(s string) {
 
 func (m *model) refreshLog(forceBottom bool) {
 	wasBottom := m.log.AtBottom()
-	m.log.SetContent(m.wrapContent(m.content))
+	if m.subViewID != "" {
+		m.log.SetContent(m.wrapContent(m.subAgentView()))
+	} else {
+		m.log.SetContent(m.wrapContent(m.content))
+	}
 	if forceBottom || wasBottom {
 		m.log.GotoBottom()
 	}
@@ -910,163 +889,6 @@ func (m model) handleRootAgentPickerKey(msg tea.KeyMsg) (model, tea.Cmd, bool) {
 	return m, nil, true
 }
 
-func (m model) handleSkillsPickerKey(msg tea.KeyMsg) (model, tea.Cmd, bool) {
-	switch msg.String() {
-	case "ctrl+c":
-		_ = m.cleanupEmptySession()
-		return m, tea.Quit, true
-	case "esc":
-		m.skillsPicker = false
-		m.skillItems = nil
-		m.skillSelected = 0
-		m.status = "ready"
-		return m, nil, true
-	case "up":
-		if len(m.skillItems) > 0 {
-			m.skillSelected--
-			if m.skillSelected < 0 {
-				m.skillSelected = len(m.skillItems) - 1
-			}
-		}
-		return m, nil, true
-	case "down":
-		if len(m.skillItems) > 0 {
-			m.skillSelected++
-			if m.skillSelected >= len(m.skillItems) {
-				m.skillSelected = 0
-			}
-		}
-		return m, nil, true
-	case "left", "right":
-		if len(m.skillTargets) > 0 {
-			if msg.String() == "left" {
-				m.skillTargetSelected--
-				if m.skillTargetSelected < 0 {
-					m.skillTargetSelected = len(m.skillTargets) - 1
-				}
-			} else {
-				m.skillTargetSelected++
-				if m.skillTargetSelected >= len(m.skillTargets) {
-					m.skillTargetSelected = 0
-				}
-			}
-			m.status = "select skills for " + m.currentSkillTargetLabel()
-		} else {
-			m.status = "select skills"
-		}
-		return m, nil, true
-	case " ", "space":
-		if len(m.skillItems) == 0 {
-			return m, nil, true
-		}
-		idx := m.skillSelected
-		if idx < 0 || idx >= len(m.skillItems) {
-			idx = 0
-		}
-		name := m.skillItems[idx].Name
-		m.toggleSkillForCurrentTarget(name)
-		return m, nil, true
-	}
-	return m, nil, true
-}
-
-func (m model) handleShellConfigPickerKey(msg tea.KeyMsg) (model, tea.Cmd, bool) {
-	switch msg.String() {
-	case "ctrl+c":
-		_ = m.cleanupEmptySession()
-		return m, tea.Quit, true
-	case "esc":
-		m.shellConfigPicker = false
-		m.shellConfigItems = nil
-		m.shellConfigSelected = 0
-		m.shellConfigOption = 0
-		m.status = "ready"
-		return m, nil, true
-	case "left":
-		if len(m.shellConfigItems) > 0 {
-			m.shellConfigSelected--
-			if m.shellConfigSelected < 0 {
-				m.shellConfigSelected = len(m.shellConfigItems) - 1
-			}
-		}
-		return m, nil, true
-	case "right":
-		if len(m.shellConfigItems) > 0 {
-			m.shellConfigSelected++
-			if m.shellConfigSelected >= len(m.shellConfigItems) {
-				m.shellConfigSelected = 0
-			}
-		}
-		return m, nil, true
-	case "up", "down":
-		if msg.String() == "up" {
-			m.shellConfigOption--
-			if m.shellConfigOption < 0 {
-				m.shellConfigOption = 1
-			}
-		} else {
-			m.shellConfigOption++
-			if m.shellConfigOption > 1 {
-				m.shellConfigOption = 0
-			}
-		}
-		return m, nil, true
-	case " ", "space":
-		if len(m.shellConfigItems) == 0 {
-			return m, nil, true
-		}
-		return m.toggleShellConfig(), nil, true
-	}
-	return m, nil, true
-}
-
-func (m model) handleThinkConfigPickerKey(msg tea.KeyMsg) (model, tea.Cmd, bool) {
-	switch msg.String() {
-	case "ctrl+c":
-		_ = m.cleanupEmptySession()
-		return m, tea.Quit, true
-	case "esc":
-		m.thinkConfigPicker = false
-		m.thinkTargets = nil
-		m.thinkTargetSelected = 0
-		m.thinkConfigOption = 0
-		m.status = "ready"
-		return m, nil, true
-	case "left", "right":
-		if len(m.thinkTargets) > 0 {
-			if msg.String() == "left" {
-				m.thinkTargetSelected--
-				if m.thinkTargetSelected < 0 {
-					m.thinkTargetSelected = len(m.thinkTargets) - 1
-				}
-			} else {
-				m.thinkTargetSelected++
-				if m.thinkTargetSelected >= len(m.thinkTargets) {
-					m.thinkTargetSelected = 0
-				}
-			}
-			m.status = "configure thinking for " + m.currentThinkTargetLabel()
-		}
-		return m, nil, true
-	case "up", "down":
-		if msg.String() == "up" {
-			m.thinkConfigOption--
-			if m.thinkConfigOption < 0 {
-				m.thinkConfigOption = 1
-			}
-		} else {
-			m.thinkConfigOption++
-			if m.thinkConfigOption > 1 {
-				m.thinkConfigOption = 0
-			}
-		}
-		return m, nil, true
-	case " ", "space":
-		return m.toggleThinkConfig(), nil, true
-	}
-	return m, nil, true
-}
-
 func (m model) handleCommand(raw string) (model, tea.Cmd) {
 	parts := strings.Fields(raw)
 	cmd := strings.TrimPrefix(parts[0], "/")
@@ -1120,82 +942,13 @@ func (m model) handleCommand(raw string) (model, tea.Cmd) {
 		m.session = sess
 		m.ctx.Tools.RestoreSubAgents(sess, sess.SubAgents, m.ctx.SubSessions)
 		m.setCommandOutput("forked current session: " + sess.ID)
-	case "root_agent":
+	case "root_agent", "model":
 		if arg == "" {
 			return m.startRootAgentPicker()
 		}
 		m = m.applyRootAgent(arg)
-	case "skills":
-		skills, err := config.ListSkills(m.ctx.Paths)
-		if err != nil {
-			m.setCommandOutput("error: " + err.Error())
-			return m, nil
-		}
-		if len(parts) == 1 {
-			return m.startSkillsPicker(skills)
-		}
-		if len(parts) >= 3 {
-			kind := config.RootAgentKind
-			agentName := m.session.RootAgent
-			skillIndex := 1
-			if parts[1] == "root" || parts[1] == "root_agent" {
-				kind = config.RootAgentKind
-				skillIndex = 3
-			} else if parts[1] == "sub" || parts[1] == "sub_agent" {
-				kind = config.SubAgentKind
-				skillIndex = 3
-			}
-			if skillIndex == 3 {
-				if len(parts) < 5 {
-					m.setCommandOutput("usage: /skills [root|sub] [agent] [skill] on|off")
-					return m, nil
-				}
-				agentName = parts[2]
-			}
-			if len(parts) <= skillIndex+1 {
-				m.setCommandOutput("usage: /skills [root|sub] [agent] [skill] on|off")
-				return m, nil
-			}
-			skillName := parts[skillIndex]
-			visible := parts[skillIndex+1] == "on" || parts[skillIndex+1] == "true"
-			if err := m.setAgentSkillVisible(kind, agentName, skillName, visible); err != nil {
-				m.setCommandOutput("error: " + err.Error())
-				return m, nil
-			}
-		}
-		rows := []string{"Skills (/skills opens picker; /skills [root|sub] [agent] [skill] on|off also works):"}
-		for _, skill := range skills {
-			rows = append(rows, fmt.Sprintf("%s [%s] description=%s", skill.Name, skill.Source, skill.Description))
-		}
-		m.setCommandOutput(strings.Join(rows, "\n"))
-	case "shell_config":
-		if len(parts) == 1 {
-			return m.startShellConfigPicker()
-		}
-		if len(parts) != 4 {
-			m.setCommandOutput("usage: /shell_config [root_agent] parallel|interactive on|off")
-			return m, nil
-		}
-		enabled := parts[3] == "on" || parts[3] == "true"
-		if err := m.setRootAgentShellOption(parts[1], parts[2], enabled); err != nil {
-			m.setCommandOutput("error: " + err.Error())
-		}
-	case "think_config":
-		if len(parts) == 1 {
-			return m.startThinkConfigPicker()
-		}
-		if len(parts) != 5 {
-			m.setCommandOutput("usage: /think_config root|sub [agent] enabled on|off  OR  /think_config root|sub [agent] effort high|max")
-			return m, nil
-		}
-		kind, err := agentKindFromArg(parts[1])
-		if err != nil {
-			m.setCommandOutput("error: " + err.Error())
-			return m, nil
-		}
-		if err := m.setAgentThinkOption(kind, parts[2], parts[3], parts[4]); err != nil {
-			m.setCommandOutput("error: " + err.Error())
-		}
+	case "model_config":
+		return m.startModelConfigPicker()
 	case "compact", "btw":
 		m.setCommandOutput("/" + cmd + " is reserved in this MVP; context isolation/compaction is not implemented yet.")
 	case "exit":
@@ -1243,252 +996,282 @@ func (m model) applyRootAgent(name string) model {
 	return m
 }
 
-func (m model) startShellConfigPicker() (model, tea.Cmd) {
-	items, err := config.ListAgentInfos(m.ctx.Paths, config.RootAgentKind)
+func (m model) startModelConfigPicker() (model, tea.Cmd) {
+	roots, err := config.ListAgentInfos(m.ctx.Paths, config.RootAgentKind)
 	if err != nil {
 		m.setCommandOutput("error: " + err.Error())
 		return m, nil
 	}
-	m.shellConfigItems = items
-	m.shellConfigSelected = 0
-	for i, item := range items {
-		if item.Name == m.session.RootAgent {
-			m.shellConfigSelected = i
-			break
-		}
-	}
-	m.shellConfigOption = 0
-	m.shellConfigPicker = true
-	m.status = "configure shell tools"
-	return m, nil
-}
-
-func (m model) toggleShellConfig() model {
-	item, ok := m.currentShellConfigAgent()
-	if !ok {
-		return m
-	}
-	cfg, err := config.LoadAgent(m.ctx.Paths, config.RootAgentKind, item.Name)
-	if err != nil {
-		m.setCommandOutput("error: " + err.Error())
-		return m
-	}
-	switch m.shellConfigOption {
-	case 0:
-		cfg.AllowParallelShell = !cfg.AllowParallelShell
-		if !cfg.AllowParallelShell {
-			cfg.AllowInteractiveShell = false
-		}
-	case 1:
-		if cfg.AllowParallelShell {
-			cfg.AllowInteractiveShell = !cfg.AllowInteractiveShell
-		} else {
-			cfg.AllowParallelShell = true
-			cfg.AllowInteractiveShell = true
-		}
-	}
-	if err := m.saveRootShellConfig(cfg.Name, cfg.AllowParallelShell, cfg.AllowInteractiveShell); err != nil {
-		m.setCommandOutput("error: " + err.Error())
-	}
-	return m
-}
-
-func (m *model) setRootAgentShellOption(agentName, option string, enabled bool) error {
-	cfg, err := config.LoadAgent(m.ctx.Paths, config.RootAgentKind, agentName)
-	if err != nil {
-		return err
-	}
-	switch option {
-	case "parallel", "parallel_shell", "allow_parallel_shell":
-		cfg.AllowParallelShell = enabled
-		if !enabled {
-			cfg.AllowInteractiveShell = false
-		}
-	case "interactive", "interactive_shell", "allow_interactive_shell":
-		cfg.AllowInteractiveShell = enabled
-		if enabled {
-			cfg.AllowParallelShell = true
-		}
-	default:
-		return fmt.Errorf("unknown shell option %q", option)
-	}
-	return m.saveRootShellConfig(cfg.Name, cfg.AllowParallelShell, cfg.AllowInteractiveShell)
-}
-
-func (m *model) saveRootShellConfig(agentName string, allowParallel, allowInteractive bool) error {
-	cfg, err := config.SaveRootAgentShellConfig(m.ctx.Paths, agentName, allowParallel, allowInteractive)
-	if err != nil {
-		return err
-	}
-	if cfg.Name == m.session.RootAgent {
-		m.ctx.Root = cfg
-		m.ctx.Tools.SetAgentLimits(cfg.MaxOutputLines, cfg.AllowParallelShell, cfg.AllowInteractiveShell)
-		m.ctx.Agent = llm.NewAgent(m.ctx.API, cfg, m.ctx.Paths, m.ctx.Tools)
-		m.ctx.Agent.RefreshSystemPrompt(m.session)
-	}
-	m.setCommandOutput(fmt.Sprintf("shell_config %s: parallel=%t interactive=%t", cfg.Name, cfg.AllowParallelShell, cfg.AllowInteractiveShell))
-	return nil
-}
-
-func (m model) startThinkConfigPicker() (model, tea.Cmd) {
-	targets, err := m.listSkillTargets()
+	subs, err := config.ListAgentInfos(m.ctx.Paths, config.SubAgentKind)
 	if err != nil {
 		m.setCommandOutput("error: " + err.Error())
 		return m, nil
 	}
-	m.thinkTargets = targets
-	m.thinkTargetSelected = 0
-	for i, target := range targets {
-		if target.Kind == config.RootAgentKind && target.Name == m.session.RootAgent {
-			m.thinkTargetSelected = i
-			break
-		}
-	}
-	m.thinkConfigOption = 0
-	m.thinkConfigPicker = true
-	m.status = "configure thinking for " + m.currentThinkTargetLabel()
-	return m, nil
-}
 
-func (m model) currentThinkTarget() (skillTarget, bool) {
-	if len(m.thinkTargets) == 0 {
-		return skillTarget{}, false
+	m.modelConfigAgents = append([]config.AgentInfo(nil), roots...)
+	m.modelConfigAgentKinds = make([]string, len(roots))
+	for i := range roots {
+		m.modelConfigAgentKinds[i] = "root"
 	}
-	idx := m.thinkTargetSelected
-	if idx < 0 || idx >= len(m.thinkTargets) {
-		idx = 0
+	m.modelConfigAgents = append(m.modelConfigAgents, subs...)
+	for range subs {
+		m.modelConfigAgentKinds = append(m.modelConfigAgentKinds, "sub")
 	}
-	return m.thinkTargets[idx], true
-}
 
-func (m model) currentThinkTargetLabel() string {
-	target, ok := m.currentThinkTarget()
-	if !ok {
-		return "no agent"
-	}
-	return target.Name + " (" + skillTargetKindLabel(target.Kind) + ")"
-}
-
-func (m model) toggleThinkConfig() model {
-	target, ok := m.currentThinkTarget()
-	if !ok {
-		return m
-	}
-	cfg, err := config.LoadAgent(m.ctx.Paths, target.Kind, target.Name)
-	if err != nil {
-		m.setCommandOutput("error: " + err.Error())
-		return m
-	}
-	switch m.thinkConfigOption {
-	case 0:
-		cfg.ThinkingEnabled = !cfg.ThinkingEnabled
-	case 1:
-		if cfg.ReasoningEffort == "max" {
-			cfg.ReasoningEffort = "high"
-		} else {
-			cfg.ReasoningEffort = "max"
-		}
-	}
-	if err := m.saveAgentThinkConfig(target.Kind, cfg.Name, cfg.ThinkingEnabled, cfg.ReasoningEffort); err != nil {
-		m.setCommandOutput("error: " + err.Error())
-	}
-	return m
-}
-
-func (m *model) setAgentThinkOption(kind, agentName, option, value string) error {
-	cfg, err := config.LoadAgent(m.ctx.Paths, kind, agentName)
-	if err != nil {
-		return err
-	}
-	switch option {
-	case "enabled", "thinking", "thinking_enabled":
-		cfg.ThinkingEnabled = value == "on" || value == "true" || value == "enabled"
-	case "effort", "reasoning_effort":
-		switch value {
-		case "high", "max":
-			cfg.ReasoningEffort = value
-		default:
-			return fmt.Errorf("reasoning effort must be high or max")
-		}
-	default:
-		return fmt.Errorf("unknown think option %q", option)
-	}
-	return m.saveAgentThinkConfig(kind, cfg.Name, cfg.ThinkingEnabled, cfg.ReasoningEffort)
-}
-
-func (m *model) saveAgentThinkConfig(kind, agentName string, thinkingEnabled bool, reasoningEffort string) error {
-	cfg, err := config.SaveAgentThinkingConfig(m.ctx.Paths, kind, agentName, thinkingEnabled, reasoningEffort)
-	if err != nil {
-		return err
-	}
-	if kind == config.RootAgentKind && cfg.Name == m.session.RootAgent {
-		m.ctx.Root = cfg
-		m.ctx.Agent = llm.NewAgent(m.ctx.API, cfg, m.ctx.Paths, m.ctx.Tools)
-		m.ctx.Agent.RefreshSystemPrompt(m.session)
-	}
-	m.setCommandOutput(fmt.Sprintf("think_config %s/%s: enabled=%t effort=%s", skillTargetKindLabel(kind), cfg.Name, cfg.ThinkingEnabled, cfg.ReasoningEffort))
-	return nil
-}
-
-func agentKindFromArg(value string) (string, error) {
-	switch value {
-	case "root", "root_agent", "root_agents":
-		return config.RootAgentKind, nil
-	case "sub", "sub_agent", "sub_agents":
-		return config.SubAgentKind, nil
-	default:
-		return "", fmt.Errorf("agent kind must be root or sub")
-	}
-}
-
-func (m model) startSkillsPicker(skills []config.Skill) (model, tea.Cmd) {
-	targets, err := m.listSkillTargets()
+	skills, err := config.ListSkills(m.ctx.Paths)
 	if err != nil {
 		m.setCommandOutput("error: " + err.Error())
 		return m, nil
 	}
 	m.skillItems = skills
-	m.skillTargets = targets
-	m.skillSelected = 0
-	m.skillTargetSelected = 0
-	for i, target := range targets {
-		if target.Kind == config.RootAgentKind && target.Name == m.session.RootAgent {
-			m.skillTargetSelected = i
+
+	m.modelConfigModels = nil
+	providers := m.ctx.API.Providers
+	pNames := make([]string, 0, len(providers))
+	for k := range providers {
+		pNames = append(pNames, k)
+	}
+	sort.Strings(pNames)
+	for _, pn := range pNames {
+		p := providers[pn]
+		for _, mName := range p.AllowedModels {
+			m.modelConfigModels = append(m.modelConfigModels, fmt.Sprintf("%s (%s)", mName, pn))
+		}
+	}
+
+	m.modelConfigPicker = true
+	m.modelConfigAgentSelected = 0
+	for i, agent := range m.modelConfigAgents {
+		if m.modelConfigAgentKinds[i] == "root" && agent.Name == m.session.RootAgent {
+			m.modelConfigAgentSelected = i
 			break
 		}
 	}
-	m.skillsPicker = true
-	m.status = "select skills for " + m.currentSkillTargetLabel()
+	m.modelConfigOptionSelected = 0
+	m.status = "model config"
 	return m, nil
 }
 
-func (m model) listSkillTargets() ([]skillTarget, error) {
-	targets := []skillTarget{}
-	roots, err := config.ListAgentInfos(m.ctx.Paths, config.RootAgentKind)
+func (m model) handleModelConfigPickerKey(msg tea.KeyMsg) (model, tea.Cmd, bool) {
+	switch msg.String() {
+	case "ctrl+c":
+		_ = m.cleanupEmptySession()
+		return m, tea.Quit, true
+	case "esc":
+		m.modelConfigPicker = false
+		m.status = "ready"
+		return m, nil, true
+	case "left":
+		if len(m.modelConfigAgents) > 0 {
+			m.modelConfigAgentSelected--
+			if m.modelConfigAgentSelected < 0 {
+				m.modelConfigAgentSelected = len(m.modelConfigAgents) - 1
+			}
+			m.modelConfigOptionSelected = 0
+		}
+		return m, nil, true
+	case "right":
+		if len(m.modelConfigAgents) > 0 {
+			m.modelConfigAgentSelected++
+			if m.modelConfigAgentSelected >= len(m.modelConfigAgents) {
+				m.modelConfigAgentSelected = 0
+			}
+			m.modelConfigOptionSelected = 0
+		}
+		return m, nil, true
+	case "up":
+		m.modelConfigOptionSelected--
+		maxOptions := 5 + len(m.skillItems)
+		if m.modelConfigOptionSelected < 0 {
+			m.modelConfigOptionSelected = maxOptions - 1
+		}
+		return m, nil, true
+	case "down":
+		m.modelConfigOptionSelected++
+		maxOptions := 5 + len(m.skillItems)
+		if m.modelConfigOptionSelected >= maxOptions {
+			m.modelConfigOptionSelected = 0
+		}
+		return m, nil, true
+	case " ", "enter":
+		return m.handleModelConfigAction(), nil, true
+	}
+	return m, nil, true
+}
+
+func (m model) handleModelConfigAction() model {
+	agentInfo := m.modelConfigAgents[m.modelConfigAgentSelected]
+	kind := m.modelConfigAgentKinds[m.modelConfigAgentSelected]
+	configKind := config.RootAgentKind
+	if kind == "sub" {
+		configKind = config.SubAgentKind
+	}
+
+	update := func(cfg *config.AgentConfig) {
+		switch m.modelConfigOptionSelected {
+		case 0: // Model
+			if len(m.modelConfigModels) > 0 {
+				current := fmt.Sprintf("%s (%s)", cfg.Model, cfg.Provider)
+				idx := -1
+				for i, mod := range m.modelConfigModels {
+					if mod == current {
+						idx = i
+						break
+					}
+				}
+				idx = (idx + 1) % len(m.modelConfigModels)
+				next := m.modelConfigModels[idx]
+				parts := strings.Split(next, " (")
+				cfg.Model = parts[0]
+				cfg.Provider = strings.TrimSuffix(parts[1], ")")
+			}
+		case 1: // Thinking Enabled
+			cfg.ThinkingEnabled = !cfg.ThinkingEnabled
+		case 2: // Reasoning Effort
+			efforts := []string{"low", "medium", "high", "xhigh", "max"}
+			idx := -1
+			for i, e := range efforts {
+				if e == cfg.ReasoningEffort {
+					idx = i
+					break
+				}
+			}
+			idx = (idx + 1) % len(efforts)
+			cfg.ReasoningEffort = efforts[idx]
+		case 3: // Parallel Shell
+			if configKind == config.RootAgentKind {
+				cfg.AllowParallelShell = !cfg.AllowParallelShell
+				if !cfg.AllowParallelShell {
+					cfg.AllowInteractiveShell = false
+				}
+			}
+		case 4: // Interactive Shell
+			if configKind == config.RootAgentKind {
+				cfg.AllowInteractiveShell = !cfg.AllowInteractiveShell
+				if cfg.AllowInteractiveShell {
+					cfg.AllowParallelShell = true
+				}
+			}
+		default: // Skills
+			skillIdx := m.modelConfigOptionSelected - 5
+			if skillIdx >= 0 && skillIdx < len(m.skillItems) {
+				skillName := m.skillItems[skillIdx].Name
+				found := -1
+				for i, s := range cfg.VisibleSkills {
+					if s == skillName {
+						found = i
+						break
+					}
+				}
+				if found >= 0 {
+					cfg.VisibleSkills = append(cfg.VisibleSkills[:found], cfg.VisibleSkills[found+1:]...)
+				} else {
+					cfg.VisibleSkills = append(cfg.VisibleSkills, skillName)
+				}
+				sort.Strings(cfg.VisibleSkills)
+			}
+		}
+	}
+
+	newCfg, err := config.SaveAgent(m.ctx.Paths, configKind, agentInfo.Name, update)
 	if err != nil {
-		return nil, err
+		m.setCommandOutput("error saving agent: " + err.Error())
+		return m
 	}
-	for _, info := range roots {
-		targets = append(targets, skillTarget{
-			Kind:        config.RootAgentKind,
-			Name:        info.Name,
-			Description: info.Description,
-			Source:      info.Source,
-		})
+
+	if configKind == config.RootAgentKind && newCfg.Name == m.session.RootAgent {
+		m.ctx.Root = newCfg
+		m.ctx.Tools.SetAgentLimits(newCfg.MaxOutputLines, newCfg.AllowParallelShell, newCfg.AllowInteractiveShell)
+		m.ctx.Agent = llm.NewAgent(m.ctx.API, newCfg, m.ctx.Paths, m.ctx.Tools)
+		m.ctx.Agent.RefreshSystemPrompt(m.session)
 	}
-	subs, err := config.ListAgentInfos(m.ctx.Paths, config.SubAgentKind)
+
+	return m
+}
+
+func (m model) modelConfigPickerView() string {
+	if len(m.modelConfigAgents) == 0 {
+		return "\n no agents found"
+	}
+
+	agentInfo := m.modelConfigAgents[m.modelConfigAgentSelected]
+	kind := m.modelConfigAgentKinds[m.modelConfigAgentSelected]
+
+	configKind := config.RootAgentKind
+	if kind == "sub" {
+		configKind = config.SubAgentKind
+	}
+
+	cfg, err := config.LoadAgent(m.ctx.Paths, configKind, agentInfo.Name)
 	if err != nil {
-		return nil, err
+		return "\n error loading agent: " + err.Error()
 	}
-	for _, info := range subs {
-		targets = append(targets, skillTarget{
-			Kind:        config.SubAgentKind,
-			Name:        info.Name,
-			Description: info.Description,
-			Source:      info.Source,
-		})
+
+	rows := []string{
+		fmt.Sprintf("< %s (%s) >", cfg.Name, kind),
+		"",
 	}
-	return targets, nil
+
+	options := []string{
+		fmt.Sprintf("Model: %s (%s)", cfg.Model, cfg.Provider),
+		fmt.Sprintf("Thinking: %s", checkbox(cfg.ThinkingEnabled)),
+		fmt.Sprintf("Reasoning: %s", cfg.ReasoningEffort),
+	}
+
+	if kind == "root" {
+		options = append(options,
+			fmt.Sprintf("Parallel Shell: %s", checkbox(cfg.AllowParallelShell)),
+			fmt.Sprintf("Interactive Shell: %s", checkbox(cfg.AllowInteractiveShell)),
+		)
+	} else {
+		options = append(options,
+			mutedStyle.Render("Parallel Shell: n/a"),
+			mutedStyle.Render("Interactive Shell: n/a"),
+		)
+	}
+
+	for i, opt := range options {
+		marker := "  "
+		if i == m.modelConfigOptionSelected {
+			marker = "> "
+		}
+		rows = append(rows, marker+opt)
+	}
+
+	rows = append(rows, "", "Skills:")
+	for i, skill := range m.skillItems {
+		marker := "  "
+		if i+5 == m.modelConfigOptionSelected {
+			marker = "> "
+		}
+		checked := "[ ]"
+		for _, s := range cfg.VisibleSkills {
+			if s == skill.Name {
+				checked = "[x]"
+				break
+			}
+		}
+		rows = append(rows, fmt.Sprintf("%s%s %-15s %s", marker, checked, skill.Name, mutedStyle.Render(skill.Description)))
+	}
+
+	return "\n" + lipgloss.NewStyle().
+		Width(m.log.Width).
+		Foreground(lipgloss.Color("8")).
+		Render(wrapANSI(panelBlock("model config", rows), m.log.Width))
+}
+
+func onOff(enabled bool) string {
+	if enabled {
+		return "on"
+	}
+	return "off"
+}
+
+func checkbox(b bool) string {
+	if b {
+		return "[x]"
+	}
+	return "[ ]"
 }
 
 func (m model) startResumePicker() (model, tea.Cmd) {
@@ -1531,14 +1314,8 @@ func (m model) assistView() string {
 	if m.rootAgentPicker {
 		return m.rootAgentPickerView()
 	}
-	if m.skillsPicker {
-		return m.skillsPickerView()
-	}
-	if m.shellConfigPicker {
-		return m.shellConfigPickerView()
-	}
-	if m.thinkConfigPicker {
-		return m.thinkConfigPickerView()
+	if m.modelConfigPicker {
+		return m.modelConfigPickerView()
 	}
 	suggestions := m.commandSuggestions()
 	if len(suggestions) == 0 {
@@ -1665,146 +1442,6 @@ func (m model) rootAgentPickerView() string {
 		Width(m.log.Width).
 		Foreground(lipgloss.Color("8")).
 		Render(wrapANSI(panelBlock("root agents", rows), m.log.Width))
-}
-
-func (m model) skillsPickerView() string {
-	rows := []string{fmt.Sprintf("skills: left/right target, up/down select, space toggle, esc close")}
-	rows = append(rows, "target: "+m.skillTargetsLine())
-	if len(m.skillItems) == 0 {
-		rows = append(rows, "  no skills found")
-		return "\n" + lipgloss.NewStyle().
-			Width(m.log.Width).
-			Foreground(lipgloss.Color("8")).
-			Render(wrapANSI(strings.Join(rows, "\n"), m.log.Width))
-	}
-
-	selected := m.skillSelected
-	if selected < 0 || selected >= len(m.skillItems) {
-		selected = 0
-	}
-	start := selected - 3
-	if start < 0 {
-		start = 0
-	}
-	end := start + 8
-	if end > len(m.skillItems) {
-		end = len(m.skillItems)
-	}
-	for i := start; i < end; i++ {
-		item := m.skillItems[i]
-		marker := " "
-		if i == selected {
-			marker = ">"
-		}
-		checked := "[ ]"
-		if m.currentTargetSkillVisible(item.Name) {
-			checked = "[x]"
-		}
-		rows = append(rows, fmt.Sprintf("%s %s %-20s %-28s %s", marker, checked, item.Name, item.Source, item.Description))
-	}
-	if len(m.skillItems) > end {
-		rows = append(rows, fmt.Sprintf("  ... %d more", len(m.skillItems)-end))
-	}
-	return "\n" + lipgloss.NewStyle().
-		Width(m.log.Width).
-		Foreground(lipgloss.Color("8")).
-		Render(wrapANSI(panelBlock("skills", rows), m.log.Width))
-}
-
-func (m model) shellConfigPickerView() string {
-	rows := []string{"shell_config: left/right root agent, up/down option, space toggle, esc close"}
-	item, ok := m.currentShellConfigAgent()
-	if !ok {
-		rows = append(rows, "  no root agents found")
-		return "\n" + lipgloss.NewStyle().
-			Width(m.log.Width).
-			Foreground(lipgloss.Color("8")).
-			Render(wrapANSI(strings.Join(rows, "\n"), m.log.Width))
-	}
-	cfg, err := config.LoadAgent(m.ctx.Paths, config.RootAgentKind, item.Name)
-	if err != nil {
-		rows = append(rows, "  error: "+err.Error())
-	} else {
-		rows = append(rows, "agent: "+cfg.Name)
-		options := []struct {
-			Name    string
-			Enabled bool
-			Note    string
-		}{
-			{Name: "allow parallel shell", Enabled: cfg.AllowParallelShell, Note: "adds shell_run_async + shell_async_status + shell_async_kill"},
-			{Name: "allow interactive shell", Enabled: cfg.AllowInteractiveShell, Note: "requires parallel; adds shell_async_write"},
-		}
-		for i, option := range options {
-			marker := " "
-			if i == m.shellConfigOption {
-				marker = ">"
-			}
-			checked := "[ ]"
-			if option.Enabled {
-				checked = "[x]"
-			}
-			rows = append(rows, fmt.Sprintf("%s %s %-24s %s", marker, checked, option.Name, option.Note))
-		}
-	}
-	return "\n" + lipgloss.NewStyle().
-		Width(m.log.Width).
-		Foreground(lipgloss.Color("8")).
-		Render(wrapANSI(panelBlock("shell config", rows), m.log.Width))
-}
-
-func (m model) thinkConfigPickerView() string {
-	rows := []string{"think_config: left/right agent, up/down option, space toggle, esc close"}
-	target, ok := m.currentThinkTarget()
-	if !ok {
-		rows = append(rows, "  no agents found")
-		return "\n" + lipgloss.NewStyle().
-			Width(m.log.Width).
-			Foreground(lipgloss.Color("8")).
-			Render(wrapANSI(strings.Join(rows, "\n"), m.log.Width))
-	}
-	cfg, err := config.LoadAgent(m.ctx.Paths, target.Kind, target.Name)
-	if err != nil {
-		rows = append(rows, "  error: "+err.Error())
-	} else {
-		rows = append(rows, "agent: "+target.Name+" ("+skillTargetKindLabel(target.Kind)+")")
-		options := []struct {
-			Name  string
-			Value string
-			Note  string
-		}{
-			{Name: "thinking mode", Value: onOff(cfg.ThinkingEnabled), Note: "sends thinking.type enabled/disabled"},
-			{Name: "reasoning effort", Value: cfg.ReasoningEffort, Note: "high or max when thinking is enabled"},
-		}
-		for i, option := range options {
-			marker := " "
-			if i == m.thinkConfigOption {
-				marker = ">"
-			}
-			rows = append(rows, fmt.Sprintf("%s %-20s %-8s %s", marker, option.Name, option.Value, option.Note))
-		}
-	}
-	return "\n" + lipgloss.NewStyle().
-		Width(m.log.Width).
-		Foreground(lipgloss.Color("8")).
-		Render(wrapANSI(panelBlock("thinking config", rows), m.log.Width))
-}
-
-func onOff(enabled bool) string {
-	if enabled {
-		return "on"
-	}
-	return "off"
-}
-
-func (m model) currentShellConfigAgent() (config.AgentInfo, bool) {
-	if len(m.shellConfigItems) == 0 {
-		return config.AgentInfo{}, false
-	}
-	idx := m.shellConfigSelected
-	if idx < 0 || idx >= len(m.shellConfigItems) {
-		idx = 0
-	}
-	return m.shellConfigItems[idx], true
 }
 
 func (m model) resumePickerView() string {
@@ -2204,102 +1841,6 @@ func (m model) subAgentSnapshot(id string) (tools.SubAgentSnapshot, bool) {
 
 func (m model) effectiveSkillVisible(name string) bool {
 	return containsString(m.ctx.Root.VisibleSkills, name)
-}
-
-func (m model) currentSkillTarget() (skillTarget, bool) {
-	if len(m.skillTargets) == 0 {
-		return skillTarget{}, false
-	}
-	idx := m.skillTargetSelected
-	if idx < 0 || idx >= len(m.skillTargets) {
-		idx = 0
-	}
-	return m.skillTargets[idx], true
-}
-
-func (m model) currentSkillTargetLabel() string {
-	target, ok := m.currentSkillTarget()
-	if !ok {
-		return "no agent"
-	}
-	return target.Name + " (" + skillTargetKindLabel(target.Kind) + ")"
-}
-
-func (m model) skillTargetsLine() string {
-	if len(m.skillTargets) == 0 {
-		return "none"
-	}
-	parts := []string{}
-	for i, target := range m.skillTargets {
-		label := target.Name + "(" + skillTargetKindLabel(target.Kind) + ")"
-		if i == m.skillTargetSelected {
-			label = "[" + label + "]"
-		}
-		parts = append(parts, label)
-	}
-	return strings.Join(parts, " ")
-}
-
-func skillTargetKindLabel(kind string) string {
-	if kind == config.SubAgentKind {
-		return "sub"
-	}
-	return "root"
-}
-
-func (m model) currentTargetSkillVisible(name string) bool {
-	target, ok := m.currentSkillTarget()
-	if !ok {
-		return false
-	}
-	cfg, err := config.LoadAgent(m.ctx.Paths, target.Kind, target.Name)
-	if err != nil {
-		return false
-	}
-	return containsString(cfg.VisibleSkills, name)
-}
-
-func (m *model) toggleSkillForCurrentTarget(skillName string) {
-	target, ok := m.currentSkillTarget()
-	if !ok {
-		return
-	}
-	visible := !m.currentTargetSkillVisible(skillName)
-	if err := m.setAgentSkillVisible(target.Kind, target.Name, skillName, visible); err != nil {
-		m.setCommandOutput("error: " + err.Error())
-	}
-}
-
-func (m *model) setAgentSkillVisible(kind, agentName, skillName string, visible bool) error {
-	cfg, err := config.LoadAgent(m.ctx.Paths, kind, agentName)
-	if err != nil {
-		return err
-	}
-	next := append([]string(nil), cfg.VisibleSkills...)
-	if visible {
-		if !containsString(next, skillName) {
-			next = append(next, skillName)
-		}
-	} else {
-		filtered := []string{}
-		for _, item := range next {
-			if item != skillName {
-				filtered = append(filtered, item)
-			}
-		}
-		next = filtered
-	}
-	cfg, err = config.SaveAgentVisibleSkills(m.ctx.Paths, kind, agentName, next)
-	if err != nil {
-		return err
-	}
-	if kind == config.RootAgentKind && agentName == m.session.RootAgent {
-		m.ctx.Root = cfg
-		m.ctx.Tools.SetAgentLimits(cfg.MaxOutputLines, cfg.AllowParallelShell, cfg.AllowInteractiveShell)
-		m.ctx.Agent = llm.NewAgent(m.ctx.API, cfg, m.ctx.Paths, m.ctx.Tools)
-		m.ctx.Agent.RefreshSystemPrompt(m.session)
-	}
-	return nil
 }
 
 func containsString(items []string, wanted string) bool {

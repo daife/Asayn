@@ -51,8 +51,21 @@ func (e AgentEvent) Display() string {
 }
 
 func NewAgent(api config.APIConfig, root config.AgentConfig, paths config.Paths, executor *tools.Executor) *Agent {
+	prov, ok := api.Providers[root.Provider]
+	if !ok {
+		// fallback to DeepSeek if missing, or maybe SiliconFlow
+		if p, exists := api.Providers["DeepSeek"]; exists {
+			prov = p
+		} else {
+			// pick first
+			for _, p := range api.Providers {
+				prov = p
+				break
+			}
+		}
+	}
 	return &Agent{
-		client: NewClient(api),
+		client: NewClient(prov),
 		root:   root,
 		paths:  paths,
 		tools:  executor,

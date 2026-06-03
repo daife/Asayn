@@ -16,7 +16,7 @@ import (
 )
 
 type Client struct {
-	cfg    config.APIConfig
+	cfg    config.ProviderConfig
 	http   *http.Client
 	apiURL string
 }
@@ -80,7 +80,7 @@ type streamToolFunctionDelta struct {
 	Arguments string `json:"arguments,omitempty"`
 }
 
-func NewClient(cfg config.APIConfig) *Client {
+func NewClient(cfg config.ProviderConfig) *Client {
 	timeout := time.Duration(cfg.TimeoutSeconds) * time.Second
 	if timeout <= 0 {
 		timeout = 120 * time.Second
@@ -99,42 +99,63 @@ func (c *Client) Chat(ctx context.Context, model string, messages []types.ChatMe
 	if err != nil {
 		return types.ChatMessage{}, types.Usage{}, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiURL, bytes.NewReader(data))
-	if err != nil {
-		return types.ChatMessage{}, types.Usage{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if c.cfg.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
-	}
-	for k, v := range c.cfg.Headers {
-		req.Header.Set(k, v)
-	}
 
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return types.ChatMessage{}, types.Usage{}, err
-	}
-	defer resp.Body.Close()
+	maxRetries := 5
+	baseWait := 1 * time.Second
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return types.ChatMessage{}, types.Usage{}, err
-	}
-	var parsed chatResponse
-	if err := json.Unmarshal(body, &parsed); err != nil {
-		return types.ChatMessage{}, types.Usage{}, fmt.Errorf("decode API response: %w: %s", err, string(body))
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		if parsed.Error != nil {
-			return types.ChatMessage{}, types.Usage{}, fmt.Errorf("API error %d: %s", resp.StatusCode, parsed.Error.Message)
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiURL, bytes.NewReader(data))
+		if err != nil {
+			return types.ChatMessage{}, types.Usage{}, err
 		}
-		return types.ChatMessage{}, types.Usage{}, fmt.Errorf("API error %d: %s", resp.StatusCode, string(body))
+		req.Header.Set("Content-Type", "application/json")
+		if c.cfg.APIKey != "" {
+			req.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
+		}
+
+		resp, err := c.http.Do(req)
+		if err != nil {
+			if ctx.Err() != nil {
+				return types.ChatMessage{}, types.Usage{}, err
+			}
+			return types.ChatMessage{}, types.Usage{}, err
+		}
+		
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return types.ChatMessage{}, types.Usage{}, err
+		}
+
+		if resp.StatusCode == http.StatusTooManyRequests {
+			if attempt == maxRetries {
+				return types.ChatMessage{}, types.Usage{}, fmt.Errorf("API rate limit exceeded after %d retries", maxRetries)
+			}
+			wait := baseWait * (1 << attempt)
+			select {
+			case <-time.After(wait):
+				continue
+			case <-ctx.Done():
+				return types.ChatMessage{}, types.Usage{}, ctx.Err()
+			}
+		}
+
+		var parsed chatResponse
+		if err := json.Unmarshal(body, &parsed); err != nil {
+			return types.ChatMessage{}, types.Usage{}, fmt.Errorf("decode API response: %w: %s", err, string(body))
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			if parsed.Error != nil {
+				return types.ChatMessage{}, types.Usage{}, fmt.Errorf("API error %d: %s", resp.StatusCode, parsed.Error.Message)
+			}
+			return types.ChatMessage{}, types.Usage{}, fmt.Errorf("API error %d: %s", resp.StatusCode, string(body))
+		}
+		if len(parsed.Choices) == 0 {
+			return types.ChatMessage{}, types.Usage{}, fmt.Errorf("API returned no choices")
+		}
+		return parsed.Choices[0].Message, parsed.Usage, nil
 	}
-	if len(parsed.Choices) == 0 {
-		return types.ChatMessage{}, types.Usage{}, fmt.Errorf("API returned no choices")
-	}
-	return parsed.Choices[0].Message, parsed.Usage, nil
+	return types.ChatMessage{}, types.Usage{}, fmt.Errorf("unreachable code")
 }
 
 func (c *Client) ChatStream(ctx context.Context, model string, messages []types.ChatMessage, tools []types.ToolSchema, thinkingEnabled bool, reasoningEffort string, onDelta func(StreamDelta)) (types.ChatMessage, types.Usage, error) {
@@ -144,22 +165,44 @@ func (c *Client) ChatStream(ctx context.Context, model string, messages []types.
 	if err != nil {
 		return types.ChatMessage{}, types.Usage{}, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiURL, bytes.NewReader(data))
-	if err != nil {
-		return types.ChatMessage{}, types.Usage{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
-	if c.cfg.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
-	}
-	for k, v := range c.cfg.Headers {
-		req.Header.Set(k, v)
-	}
 
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return types.ChatMessage{}, types.Usage{}, err
+	maxRetries := 5
+	baseWait := 1 * time.Second
+
+	var resp *http.Response
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiURL, bytes.NewReader(data))
+		if err != nil {
+			return types.ChatMessage{}, types.Usage{}, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "text/event-stream")
+		if c.cfg.APIKey != "" {
+			req.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
+		}
+
+		resp, err = c.http.Do(req)
+		if err != nil {
+			if ctx.Err() != nil {
+				return types.ChatMessage{}, types.Usage{}, err
+			}
+			return types.ChatMessage{}, types.Usage{}, err
+		}
+
+		if resp.StatusCode == http.StatusTooManyRequests {
+			resp.Body.Close()
+			if attempt == maxRetries {
+				return types.ChatMessage{}, types.Usage{}, fmt.Errorf("API rate limit exceeded after %d retries", maxRetries)
+			}
+			wait := baseWait * (1 << attempt)
+			select {
+			case <-time.After(wait):
+				continue
+			case <-ctx.Done():
+				return types.ChatMessage{}, types.Usage{}, ctx.Err()
+			}
+		}
+		break
 	}
 	defer resp.Body.Close()
 

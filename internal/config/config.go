@@ -25,17 +25,20 @@ type Paths struct {
 	Workplace    string
 }
 
+type ProviderConfig struct {
+	BaseURL        string   `toml:"url" json:"url"`
+	APIKey         string   `toml:"api_key" json:"api_key"`
+	TimeoutSeconds int      `toml:"timeout_seconds" json:"timeout_seconds"`
+	AllowedModels  []string `toml:"allowed_models" json:"allowed_models"`
+}
+
 type APIConfig struct {
-	BaseURL         string            `toml:"url" json:"url"`
-	APIKey          string            `toml:"api_key" json:"api_key"`
-	ReasoningEffort string            `toml:"reasoning_effort" json:"reasoning_effort"`
-	ThinkingEnabled bool              `toml:"thinking_enabled" json:"thinking_enabled"`
-	TimeoutSeconds  int               `toml:"timeout_seconds" json:"timeout_seconds"`
-	Headers         map[string]string `toml:"headers" json:"headers"`
+	Providers map[string]ProviderConfig `toml:"providers" json:"providers"`
 }
 
 type AgentConfig struct {
 	Name                  string   `toml:"name" json:"name"`
+	Provider              string   `toml:"provider" json:"provider"`
 	Model                 string   `toml:"model" json:"model"`
 	Description           string   `toml:"description" json:"description"`
 	SystemPrompt          string   `toml:"system_prompt" json:"system_prompt"`
@@ -122,15 +125,11 @@ func LoadAPIConfig(paths Paths) (APIConfig, error) {
 	if err := readTOML(path, &cfg); err != nil {
 		return cfg, err
 	}
-	cfg.APIKey = resolveSecret(cfg.APIKey)
-	if cfg.BaseURL == "" {
-		cfg.BaseURL = "https://api.deepseek.com"
-	}
-	if cfg.ReasoningEffort == "" {
-		cfg.ReasoningEffort = "max"
-	}
-	if cfg.TimeoutSeconds <= 0 {
-		cfg.TimeoutSeconds = 120
+	for k, p := range cfg.Providers {
+		if p.TimeoutSeconds <= 0 {
+			p.TimeoutSeconds = 120
+		}
+		cfg.Providers[k] = p
 	}
 	return cfg, nil
 }
@@ -155,6 +154,9 @@ func LoadAgent(paths Paths, kind, name string) (AgentConfig, error) {
 	}
 	if cfg.Name == "" {
 		cfg.Name = name
+	}
+	if cfg.Provider == "" {
+		cfg.Provider = "DeepSeek"
 	}
 	if cfg.Model == "" {
 		if kind == SubAgentKind {
@@ -193,7 +195,7 @@ func (c *AgentConfig) NormalizeThinkingConfig() {
 	c.ReasoningEffort = normalizeReasoningEffort(c.ReasoningEffort)
 }
 
-func SaveAgentVisibleSkills(paths Paths, kind, name string, visibleSkills []string) (AgentConfig, error) {
+func SaveAgent(paths Paths, kind, name string, update func(*AgentConfig)) (AgentConfig, error) {
 	if name == "" {
 		name = "default"
 	}
@@ -201,7 +203,9 @@ func SaveAgentVisibleSkills(paths Paths, kind, name string, visibleSkills []stri
 	if err != nil {
 		return cfg, err
 	}
-	cfg.VisibleSkills = uniqueSorted(visibleSkills)
+	update(&cfg)
+	cfg.NormalizeShellConfig()
+	cfg.NormalizeThinkingConfig()
 	if cfg.Name == "" {
 		cfg.Name = name
 	}
@@ -214,60 +218,39 @@ func SaveAgentVisibleSkills(paths Paths, kind, name string, visibleSkills []stri
 		return cfg, err
 	}
 	return cfg, os.WriteFile(path, data, 0o644)
+}
+
+func SaveAgentVisibleSkills(paths Paths, kind, name string, visibleSkills []string) (AgentConfig, error) {
+	return SaveAgent(paths, kind, name, func(c *AgentConfig) {
+		c.VisibleSkills = uniqueSorted(visibleSkills)
+	})
 }
 
 func SaveRootAgentShellConfig(paths Paths, name string, allowParallel, allowInteractive bool) (AgentConfig, error) {
-	if name == "" {
-		name = "default"
-	}
-	cfg, err := LoadAgent(paths, RootAgentKind, name)
-	if err != nil {
-		return cfg, err
-	}
-	cfg.AllowParallelShell = allowParallel
-	cfg.AllowInteractiveShell = allowInteractive && allowParallel
-	cfg.NormalizeShellConfig()
-	if cfg.Name == "" {
-		cfg.Name = name
-	}
-	path := paths.WorkspacePath(RootAgentKind, name+".toml")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return cfg, err
-	}
-	data, err := toml.Marshal(cfg)
-	if err != nil {
-		return cfg, err
-	}
-	return cfg, os.WriteFile(path, data, 0o644)
+	return SaveAgent(paths, RootAgentKind, name, func(c *AgentConfig) {
+		c.AllowParallelShell = allowParallel
+		c.AllowInteractiveShell = allowInteractive && allowParallel
+	})
 }
 
 func SaveAgentThinkingConfig(paths Paths, kind, name string, thinkingEnabled bool, reasoningEffort string) (AgentConfig, error) {
-	if name == "" {
-		name = "default"
-	}
-	cfg, err := LoadAgent(paths, kind, name)
-	if err != nil {
-		return cfg, err
-	}
-	cfg.ThinkingEnabled = thinkingEnabled
-	cfg.ReasoningEffort = normalizeReasoningEffort(reasoningEffort)
-	if cfg.Name == "" {
-		cfg.Name = name
-	}
-	path := paths.WorkspacePath(kind, name+".toml")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return cfg, err
-	}
-	data, err := toml.Marshal(cfg)
-	if err != nil {
-		return cfg, err
-	}
-	return cfg, os.WriteFile(path, data, 0o644)
+	return SaveAgent(paths, kind, name, func(c *AgentConfig) {
+		c.ThinkingEnabled = thinkingEnabled
+		c.ReasoningEffort = normalizeReasoningEffort(reasoningEffort)
+	})
 }
 
 func normalizeReasoningEffort(effort string) string {
 	switch strings.ToLower(strings.TrimSpace(effort)) {
-	case "max", "xhigh":
+	case "low":
+		return "low"
+	case "medium":
+		return "medium"
+	case "high":
+		return "high"
+	case "xhigh":
+		return "xhigh"
+	case "max":
 		return "max"
 	default:
 		return "high"
@@ -547,22 +530,39 @@ func ensureGitIgnore(workplace string) error {
 
 func defaultAPIConfig() APIConfig {
 	return APIConfig{
-		BaseURL:         "https://api.deepseek.com",
-		APIKey:          "env:DEEPSEEK_API_KEY",
-		ReasoningEffort: "max",
-		ThinkingEnabled: true,
-		TimeoutSeconds:  120,
-		Headers:         map[string]string{},
+		Providers: map[string]ProviderConfig{
+			"SiliconFlow": {
+				BaseURL:        "https://api.siliconflow.cn/v1",
+				APIKey:         "your_api_key",
+				TimeoutSeconds: 120,
+				AllowedModels: []string{
+					"deepseek-ai/DeepSeek-V4-Flash",
+					"deepseek-ai/DeepSeek-V4-Pro",
+					"nex-agi/Nex-N2-Pro",
+				},
+			},
+			"DeepSeek": {
+				BaseURL:        "https://api.deepseek.com",
+				APIKey:         "your_api_key",
+				TimeoutSeconds: 120,
+				AllowedModels: []string{
+					"deepseek-v4-pro",
+					"deepseek-v4-flash",
+				},
+			},
+		},
 	}
 }
 
 func defaultAgentConfig(kind, name string) AgentConfig {
 	model := "deepseek-v4-pro"
+	provider := "DeepSeek"
 	if kind == SubAgentKind {
 		model = "deepseek-v4-flash"
 	}
 	return AgentConfig{
 		Name:            name,
+		Provider:        provider,
 		Model:           model,
 		Description:     defaultAgentDescription(kind, name),
 		SystemPrompt:    "You are a helpful assistant.",
@@ -570,7 +570,7 @@ func defaultAgentConfig(kind, name string) AgentConfig {
 		MaxOutputLines:  2000,
 		ContextWindow:   1024000,
 		MaxOutputTokens: 384000,
-		ThinkingEnabled: true,
+		ThinkingEnabled: false,
 		ReasoningEffort: "max",
 	}
 }
@@ -583,13 +583,6 @@ func defaultAgentDescription(kind, name string) string {
 		return "General-purpose agent."
 	}
 	return ""
-}
-
-func resolveSecret(value string) string {
-	if strings.HasPrefix(value, "env:") {
-		return os.Getenv(strings.TrimPrefix(value, "env:"))
-	}
-	return value
 }
 
 func readTOML(path string, out any) error {
