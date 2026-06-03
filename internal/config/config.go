@@ -29,7 +29,6 @@ type Paths struct {
 type APIConfig struct {
 	BaseURL         string            `toml:"url" json:"url"`
 	APIKey          string            `toml:"api_key" json:"api_key"`
-	Model           string            `toml:"model" json:"model"`
 	ReasoningEffort string            `toml:"reasoning_effort" json:"reasoning_effort"`
 	ThinkingEnabled bool              `toml:"thinking_enabled" json:"thinking_enabled"`
 	TimeoutSeconds  int               `toml:"timeout_seconds" json:"timeout_seconds"`
@@ -38,6 +37,7 @@ type APIConfig struct {
 
 type AgentConfig struct {
 	Name                  string   `toml:"name" json:"name"`
+	Model                 string   `toml:"model" json:"model"`
 	Description           string   `toml:"description" json:"description"`
 	SystemPrompt          string   `toml:"system_prompt" json:"system_prompt"`
 	VisibleSkills         []string `toml:"visible_skills" json:"visible_skills"`
@@ -123,9 +123,6 @@ func LoadAPIConfig(paths Paths) (APIConfig, error) {
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = "https://api.deepseek.com"
 	}
-	if cfg.Model == "" {
-		cfg.Model = "deepseek-v4-pro"
-	}
 	if cfg.ReasoningEffort == "" {
 		cfg.ReasoningEffort = "max"
 	}
@@ -139,7 +136,7 @@ func LoadAgent(paths Paths, kind, name string) (AgentConfig, error) {
 	if name == "" {
 		name = "default"
 	}
-	cfg := defaultAgentConfig(name)
+	cfg := defaultAgentConfig(kind, name)
 	path := firstExisting(
 		paths.WorkspacePath(kind, name+".toml"),
 		paths.HomePath(kind, name+".toml"),
@@ -155,6 +152,13 @@ func LoadAgent(paths Paths, kind, name string) (AgentConfig, error) {
 	}
 	if cfg.Name == "" {
 		cfg.Name = name
+	}
+	if cfg.Model == "" {
+		if kind == SubAgentKind {
+			cfg.Model = "deepseek-v4-flash"
+		} else {
+			cfg.Model = "deepseek-v4-pro"
+		}
 	}
 	if cfg.Description == "" {
 		cfg.Description = defaultAgentDescription(kind, cfg.Name)
@@ -259,7 +263,7 @@ func ListAgentInfos(paths Paths, kind string) ([]AgentInfo, error) {
 				continue
 			}
 			name := strings.TrimSuffix(ent.Name(), ".toml")
-			cfg := defaultAgentConfig(name)
+			cfg := defaultAgentConfig(kind, name)
 			_ = readTOML(filepath.Join(base.root, ent.Name()), &cfg)
 			if cfg.Name == "" {
 				cfg.Name = name
@@ -508,7 +512,6 @@ func defaultAPIConfig() APIConfig {
 	return APIConfig{
 		BaseURL:         "https://api.deepseek.com",
 		APIKey:          "env:DEEPSEEK_API_KEY",
-		Model:           "deepseek-v4-pro",
 		ReasoningEffort: "max",
 		ThinkingEnabled: true,
 		TimeoutSeconds:  120,
@@ -516,10 +519,15 @@ func defaultAPIConfig() APIConfig {
 	}
 }
 
-func defaultAgentConfig(name string) AgentConfig {
+func defaultAgentConfig(kind, name string) AgentConfig {
+	model := "deepseek-v4-pro"
+	if kind == SubAgentKind {
+		model = "deepseek-v4-flash"
+	}
 	return AgentConfig{
 		Name:           name,
-		Description:    defaultAgentDescription("", name),
+		Model:          model,
+		Description:    defaultAgentDescription(kind, name),
 		SystemPrompt:   "You are a helpful assistant.",
 		VisibleSkills:  []string{},
 		MaxOutputChars: 5000,

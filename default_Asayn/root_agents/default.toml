@@ -1,4 +1,5 @@
 name = "default"
+model = "deepseek-v4-pro"
 description = "General-purpose root agent."
 system_prompt = "You are a helpful assistant."
 visible_skills = []

@@ -79,7 +79,7 @@ func (a *Agent) AskWithEvents(ctx context.Context, sess *session.Session, prompt
 		if emit != nil {
 			emit(AgentEvent{Kind: "thinking_start"})
 		}
-		msg, err := a.client.ChatStream(ctx, messagesForAPI(sess.Messages, a.visibleSkillSet(sess)), toolSchemas, func(delta StreamDelta) {
+		msg, err := a.client.ChatStream(ctx, a.root.Model, messagesForAPI(sess.Messages, a.visibleSkillSet(sess)), toolSchemas, func(delta StreamDelta) {
 			if emit != nil && delta.ReasoningContent != "" {
 				emit(AgentEvent{Kind: "thinking_delta", Text: delta.ReasoningContent})
 			}

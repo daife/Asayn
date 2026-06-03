@@ -28,3 +28,49 @@ func TestBootstrapCopiesEmbeddedDefaultsToHome(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadAgentModel(t *testing.T) {
+	home := t.TempDir()
+	work := t.TempDir()
+	t.Setenv("HOME", home)
+
+	paths, err := Bootstrap(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Test default root agent model
+	root, err := LoadAgent(paths, RootAgentKind, "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if root.Model != "deepseek-v4-pro" {
+		t.Errorf("expected root agent model deepseek-v4-pro, got %s", root.Model)
+	}
+
+	// Test default sub agent model
+	sub, err := LoadAgent(paths, SubAgentKind, "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sub.Model != "deepseek-v4-flash" {
+		t.Errorf("expected sub agent model deepseek-v4-flash, got %s", sub.Model)
+	}
+
+	// Test custom model in TOML
+	customPath := filepath.Join(paths.WorkspaceDir, RootAgentKind, "custom.toml")
+	content := `name = "custom"
+model = "custom-model"
+`
+	if err := os.WriteFile(customPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	custom, err := LoadAgent(paths, RootAgentKind, "custom")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if custom.Model != "custom-model" {
+		t.Errorf("expected custom model custom-model, got %s", custom.Model)
+	}
+}

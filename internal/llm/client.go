@@ -89,9 +89,9 @@ func NewClient(cfg config.APIConfig) *Client {
 	}
 }
 
-func (c *Client) Chat(ctx context.Context, messages []types.ChatMessage, tools []types.ToolSchema) (types.ChatMessage, error) {
+func (c *Client) Chat(ctx context.Context, model string, messages []types.ChatMessage, tools []types.ToolSchema) (types.ChatMessage, error) {
 	reqBody := chatRequest{
-		Model:           c.cfg.Model,
+		Model:           model,
 		Messages:        messages,
 		Tools:           tools,
 		ReasoningEffort: c.cfg.ReasoningEffort,
@@ -144,9 +144,9 @@ func (c *Client) Chat(ctx context.Context, messages []types.ChatMessage, tools [
 	return parsed.Choices[0].Message, nil
 }
 
-func (c *Client) ChatStream(ctx context.Context, messages []types.ChatMessage, tools []types.ToolSchema, onDelta func(StreamDelta)) (types.ChatMessage, error) {
+func (c *Client) ChatStream(ctx context.Context, model string, messages []types.ChatMessage, tools []types.ToolSchema, onDelta func(StreamDelta)) (types.ChatMessage, error) {
 	reqBody := chatRequest{
-		Model:           c.cfg.Model,
+		Model:           model,
 		Messages:        messages,
 		Tools:           tools,
 		ReasoningEffort: c.cfg.ReasoningEffort,
