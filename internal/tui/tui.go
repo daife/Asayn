@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -24,6 +25,7 @@ type model struct {
 	session             *session.Session
 	input               textinput.Model
 	log                 viewport.Model
+	renderer            *glamour.TermRenderer
 	content             string
 	commandOutput       string
 	width               int
@@ -153,8 +155,20 @@ func Run(ctx *app.Context) error {
 		pendingThinkStart:  -1,
 		pendingAnswerStart: -1,
 	}
+	m.initRenderer(80)
 	_, err = tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
 	return err
+}
+
+func (m *model) initRenderer(width int) {
+	if width <= 0 {
+		width = 80
+	}
+	r, _ := glamour.NewTermRenderer(
+		glamour.WithStandardStyle("dark"),
+		glamour.WithWordWrap(width),
+	)
+	m.renderer = r
 }
 
 func (m model) Init() tea.Cmd {
@@ -180,6 +194,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.log.Height = 3
 		}
 		m.input.Width = m.log.Width
+		m.initRenderer(m.log.Width)
+		m.content = renderSessionContent(m.ctx, m.session, m.renderer, m.log.Width)
 		m.log.SetContent(m.wrapContent(m.content))
 	case tea.KeyMsg:
 		if m.resumePicker {
@@ -314,13 +330,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !thinkingAlreadyRendered {
 				m.emitFinalThinking()
 			}
-			if m.streamAnswerText == "" {
-				m.appendLog("\n" + agentStyle.Render("Asayn") + ":\n" + msg.answer + "\n")
-			} else {
-				m.finalizeStreamAnswer(msg.answer)
-			}
+			m.content = renderSessionContent(m.ctx, m.session, m.renderer, m.log.Width)
 			m.pendingAnswerStart = -1
 			m.streamAnswerText = ""
+			m.refreshLog(false)
 			m.appendDivider()
 			_ = m.ctx.Sessions.Save(m.session)
 		}
@@ -403,13 +416,16 @@ func (m model) View() string {
 		return "Asayn"
 	}
 	body := m.log.View()
-	main := lipgloss.NewStyle().Width(m.log.Width).Height(m.log.Height).Render(body) + "\n" + m.input.View() + m.assistView()
+	mainWidth := m.log.Width
+	main := lipgloss.NewStyle().Width(mainWidth).Height(m.log.Height).Render(body) + "\n" + m.input.View() + m.assistView()
 	sidebarWidth := 30
 	if m.width < 100 {
 		return main
 	}
 	side := m.sidebar(sidebarWidth)
-	return lipgloss.JoinHorizontal(lipgloss.Top, main, "  ", side)
+	// Ensure main is padded to its full width to prevent sidebar misalignment
+	mainBlock := lipgloss.NewStyle().Width(m.width - sidebarWidth - 2).Render(main)
+	return lipgloss.JoinHorizontal(lipgloss.Top, mainBlock, " ", side)
 }
 
 func (m *model) appendLog(s string) {
@@ -608,11 +624,8 @@ func (m *model) appendAgentEvent(event llm.AgentEvent) {
 		if !thinkingAlreadyRendered {
 			m.emitFinalThinking()
 		}
-		if m.streamAnswerText == "" {
-			m.appendLog(answerBlock(event.Text))
-		} else {
-			m.finalizeStreamAnswer(m.streamAnswerText + event.Text)
-		}
+		m.content = renderSessionContent(m.ctx, m.session, m.renderer, m.log.Width)
+		m.refreshLog(false)
 		m.pendingAnswerStart = -1
 		m.streamAnswerText = ""
 	case "assistant_delta":
@@ -665,14 +678,9 @@ func (m *model) finalizeStreamAnswer(final string) {
 	if m.pendingAnswerStart < 0 {
 		return
 	}
-	if final != "" && final != m.streamAnswerText {
-		m.content = m.content[:m.pendingAnswerStart] + final
-		m.streamAnswerText = final
-	}
-	if !strings.HasSuffix(m.content, "\n") {
-		m.content += "\n"
-	}
 	m.pendingAnswerStart = -1
+	m.streamAnswerText = ""
+	m.content = renderSessionContent(m.ctx, m.session, m.renderer, m.log.Width)
 	m.refreshLog(false)
 }
 
@@ -1483,7 +1491,7 @@ func (m model) resumeSession(idOrName string) (model, tea.Cmd) {
 	m.historyIndex = -1
 	m.historyDraft = ""
 	m.ctx.Tools.RestoreSubAgents(sess, sess.SubAgents, m.ctx.SubSessions)
-	m.content = renderSessionContent(m.ctx, sess)
+	m.content = renderSessionContent(m.ctx, sess, m.renderer, m.log.Width)
 	m.refreshLog(true)
 	m.status = "ready"
 	return m, nil
@@ -2077,7 +2085,7 @@ func (m model) subAgentView() string {
 				if sess, err := m.ctx.SubSessions.LoadByID(snap.SessionID); err == nil && len(sess.Messages) > 0 {
 					body := mutedStyle.Render("Sub-agent conversation (read-only). User cannot directly chat with this sub-agent; root agent controls follow-ups.")
 					body += "\n" + mutedStyle.Render("Esc returns to root conversation.") + "\n"
-					body += renderSessionContent(m.ctx, sess)
+					body += renderSessionContent(m.ctx, sess, m.renderer, m.log.Width)
 					return lipgloss.NewStyle().
 						Width(m.log.Width).
 						Height(m.log.Height).
@@ -2226,7 +2234,7 @@ func containsString(items []string, wanted string) bool {
 	return false
 }
 
-func renderSessionContent(ctx *app.Context, sess *session.Session) string {
+func renderSessionContent(ctx *app.Context, sess *session.Session, renderer *glamour.TermRenderer, width int) string {
 	var b strings.Builder
 	toolLabels := map[string]string{}
 	for _, msg := range sess.Messages {
@@ -2248,9 +2256,14 @@ func renderSessionContent(ctx *app.Context, sess *session.Session) string {
 				b.WriteString("\n")
 				b.WriteString(agentStyle.Render("Asayn"))
 				b.WriteString(":\n")
-				b.WriteString(msg.Content)
+				if renderer != nil {
+					out, _ := renderer.Render(msg.Content)
+					b.WriteString(strings.TrimRight(out, "\n"))
+				} else {
+					b.WriteString(msg.Content)
+				}
 				b.WriteString("\n")
-				b.WriteString(renderDivider(80, ""))
+				b.WriteString(renderDivider(width, ""))
 				b.WriteString("\n")
 			}
 			for _, call := range msg.ToolCalls {
@@ -2338,11 +2351,21 @@ func truncateDisplayLine(line string, width int) string {
 	for i := 0; i < len(line); {
 		if line[i] == '\x1b' {
 			j := i + 1
-			for j < len(line) {
-				b := line[j]
+			if j < len(line) && line[j] == '[' { // CSI
 				j++
-				if b >= '@' && b <= '~' {
-					break
+				for j < len(line) && (line[j] < 0x40 || line[j] > 0x7E) {
+					j++
+				}
+				if j < len(line) {
+					j++
+				}
+			} else {
+				for j < len(line) {
+					b := line[j]
+					j++
+					if b >= 0x40 && b <= 0x7E {
+						break
+					}
 				}
 			}
 			out.WriteString(line[i:j])
@@ -2488,11 +2511,21 @@ func wrapANSI(s string, width int) string {
 		}
 		if s[i] == '\x1b' {
 			j := i + 1
-			for j < len(s) {
-				b := s[j]
+			if j < len(s) && s[j] == '[' { // CSI
 				j++
-				if b >= '@' && b <= '~' {
-					break
+				for j < len(s) && (s[j] < 0x40 || s[j] > 0x7E) {
+					j++
+				}
+				if j < len(s) {
+					j++
+				}
+			} else {
+				for j < len(s) {
+					b := s[j]
+					j++
+					if b >= 0x40 && b <= 0x7E {
+						break
+					}
 				}
 			}
 			out.WriteString(s[i:j])
