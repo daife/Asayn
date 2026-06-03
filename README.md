@@ -8,7 +8,7 @@ Asayn means **agent skills are all you need**. It is a Go + Bubble Tea TUI agent
 - Global config: `~/.Asayn/`.
 - Workplace config: `./.Asayn/`.
 - First-run setup: creates `.Asayn/` and `.Asayn/.sessions/`. If the workplace already has `.gitignore`, Asayn adds `.Asayn/` once; it does not run `git init` or create `.gitignore`.
-- Config precedence: workplace files win over global files. Skills are visible from both `./.Asayn/skills` when that folder exists and `~/.Asayn/skills`; duplicate skill names prefer the workplace skill. Workspace setup does not copy global skills.
+- Config precedence: workplace files win over global files (except `api_config.toml` which is global-only). Skills are visible from both `./.Asayn/skills` when that folder exists and `~/.Asayn/skills`; duplicate skill names prefer the workplace skill. Workspace setup does not copy global skills.
 - DeepSeek chat client using the OpenAI-compatible `/chat/completions` format.
 - Thinking mode support with `reasoning_effort` and `thinking.type`.
 - Session history and per-session file change chains.
@@ -45,7 +45,6 @@ default_Asayn/        # repository defaults embedded into the binary
       SKILL.md
 
 <workplace>/.Asayn/
-  api_config.toml
   root_agents/
   sub_agents/
   special_agents/
@@ -88,7 +87,7 @@ cd /path/to/your/project
 asayn
 ```
 
-The first run creates `~/.Asayn/` with global defaults and creates `<project>/.Asayn/` for the current workplace. Project-local `.Asayn/` data is used for sessions and workplace-specific configuration.
+The first run creates `~/.Asayn/` with global defaults and creates `<project>/.Asayn/` for the current workplace. `api_config.toml` is stored exclusively in `~/.Asayn/` and is never copied to or read from the project directory.
 
 ## Build From Source
 

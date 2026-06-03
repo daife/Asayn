@@ -400,6 +400,9 @@ func (e *Executor) searchGrep(args map[string]any) (string, error) {
 		if readErr != nil {
 			return nil
 		}
+		if isBinary(data) {
+			return nil
+		}
 		for i, line := range strings.Split(string(data), "\n") {
 			if re.MatchString(line) {
 				matches = append(matches, fmt.Sprintf("%s:%d: %s", rel, i+1, line))
@@ -1015,6 +1018,19 @@ func cleanDiffPath(path string) string {
 		path = path[2:]
 	}
 	return filepath.ToSlash(path)
+}
+
+func isBinary(data []byte) bool {
+	limit := 1024
+	if len(data) < limit {
+		limit = len(data)
+	}
+	for i := 0; i < limit; i++ {
+		if data[i] == 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func applyParsedPatch(before string, plan diffApplyPlan) (string, error) {

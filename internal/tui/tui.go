@@ -415,17 +415,38 @@ func (m model) View() string {
 	if m.width == 0 {
 		return "Asayn"
 	}
-	body := m.log.View()
-	mainWidth := m.log.Width
-	main := lipgloss.NewStyle().Width(mainWidth).Height(m.log.Height).Render(body) + "\n" + m.input.View() + m.assistView()
 	sidebarWidth := 30
-	if m.width < 100 {
+	hasSidebar := m.width >= 100
+
+	mainWidth := m.width
+	if hasSidebar {
+		mainWidth = m.width - sidebarWidth - 2
+	}
+	if mainWidth < 20 {
+		mainWidth = 20
+	}
+
+	body := m.log.View()
+	main := lipgloss.JoinVertical(lipgloss.Left,
+		lipgloss.NewStyle().Width(mainWidth).Height(m.log.Height).Render(body),
+		m.input.View(),
+		m.assistView(),
+	)
+
+	if !hasSidebar {
 		return main
 	}
+
 	side := m.sidebar(sidebarWidth)
-	// Ensure main is padded to its full width to prevent sidebar misalignment
-	mainBlock := lipgloss.NewStyle().Width(m.width - sidebarWidth - 2).Render(main)
-	return lipgloss.JoinHorizontal(lipgloss.Top, mainBlock, " ", side)
+
+	// Ensure each line of the main block is truncated and padded to exactly mainWidth
+	lines := strings.Split(main, "\n")
+	for i, line := range lines {
+		lines[i] = lipgloss.NewStyle().Width(mainWidth).MaxWidth(mainWidth).Render(line)
+	}
+	mainFixed := strings.Join(lines, "\n")
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, mainFixed, " ", side)
 }
 
 func (m *model) appendLog(s string) {

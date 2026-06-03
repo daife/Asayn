@@ -113,8 +113,8 @@ func (p Paths) HomePath(parts ...string) string {
 
 func LoadAPIConfig(paths Paths) (APIConfig, error) {
 	cfg := defaultAPIConfig()
-	path := firstExisting(paths.WorkspacePath("api_config.toml"), paths.HomePath("api_config.toml"))
-	if path == "" {
+	path := paths.HomePath("api_config.toml")
+	if !exists(path) {
 		return cfg, nil
 	}
 	if err := readTOML(path, &cfg); err != nil {
@@ -502,7 +502,7 @@ func ensureWorkspace(paths Paths) error {
 			return err
 		}
 	}
-	for _, rel := range []string{"api_config.toml", RootAgentKind, SubAgentKind, SpecialAgentKind} {
+	for _, rel := range []string{RootAgentKind, SubAgentKind, SpecialAgentKind} {
 		dst := paths.WorkspacePath(rel)
 		if exists(dst) {
 			continue
