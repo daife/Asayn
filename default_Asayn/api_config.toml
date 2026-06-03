@@ -1,0 +1,8 @@
+url = "https://api.deepseek.com"
+api_key = "env:DEEPSEEK_API_KEY"
+model = "deepseek-v4-pro"
+reasoning_effort = "max"
+thinking_enabled = true
+timeout_seconds = 120
+
+[headers]

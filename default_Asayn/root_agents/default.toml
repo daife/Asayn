@@ -1,0 +1,7 @@
+name = "default"
+description = "General-purpose root agent."
+system_prompt = "You are a helpful assistant."
+visible_skills = []
+max_output_chars = 5000
+allow_parallel_shell = false
+allow_interactive_shell = false

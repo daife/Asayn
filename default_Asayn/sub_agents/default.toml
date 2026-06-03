@@ -1,0 +1,6 @@
+name = "default"
+description = "General-purpose read-only sub-agent."
+system_prompt = "You are a helpful assistant. Work as a focused sub-agent. Research, inspect, and report concise findings to the root agent."
+visible_skills = []
+max_output_chars = 5000
+allow_interactive_shell = false

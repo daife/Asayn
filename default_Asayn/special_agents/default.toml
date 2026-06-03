@@ -1,0 +1,6 @@
+name = "default"
+description = "Reserved default special agent."
+system_prompt = "You are a helpful assistant."
+visible_skills = []
+max_output_chars = 5000
+allow_interactive_shell = false
