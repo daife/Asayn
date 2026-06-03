@@ -1234,7 +1234,7 @@ func (m model) applyRootAgent(name string) model {
 		return m
 	}
 	m.ctx.Root = root
-	m.ctx.Tools.SetAgentLimits(root.MaxOutputChars, root.AllowParallelShell, root.AllowInteractiveShell)
+	m.ctx.Tools.SetAgentLimits(root.MaxOutputLines, root.AllowParallelShell, root.AllowInteractiveShell)
 	m.ctx.Agent = llm.NewAgent(m.ctx.API, root, m.ctx.Paths, m.ctx.Tools)
 	m.session.RootAgent = root.Name
 	m.ctx.Agent.RefreshSystemPrompt(m.session)
@@ -1322,7 +1322,7 @@ func (m *model) saveRootShellConfig(agentName string, allowParallel, allowIntera
 	}
 	if cfg.Name == m.session.RootAgent {
 		m.ctx.Root = cfg
-		m.ctx.Tools.SetAgentLimits(cfg.MaxOutputChars, cfg.AllowParallelShell, cfg.AllowInteractiveShell)
+		m.ctx.Tools.SetAgentLimits(cfg.MaxOutputLines, cfg.AllowParallelShell, cfg.AllowInteractiveShell)
 		m.ctx.Agent = llm.NewAgent(m.ctx.API, cfg, m.ctx.Paths, m.ctx.Tools)
 		m.ctx.Agent.RefreshSystemPrompt(m.session)
 	}
@@ -2295,7 +2295,7 @@ func (m *model) setAgentSkillVisible(kind, agentName, skillName string, visible 
 	}
 	if kind == config.RootAgentKind && agentName == m.session.RootAgent {
 		m.ctx.Root = cfg
-		m.ctx.Tools.SetAgentLimits(cfg.MaxOutputChars, cfg.AllowParallelShell, cfg.AllowInteractiveShell)
+		m.ctx.Tools.SetAgentLimits(cfg.MaxOutputLines, cfg.AllowParallelShell, cfg.AllowInteractiveShell)
 		m.ctx.Agent = llm.NewAgent(m.ctx.API, cfg, m.ctx.Paths, m.ctx.Tools)
 		m.ctx.Agent.RefreshSystemPrompt(m.session)
 	}

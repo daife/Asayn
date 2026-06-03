@@ -40,7 +40,7 @@ type AgentConfig struct {
 	Description           string   `toml:"description" json:"description"`
 	SystemPrompt          string   `toml:"system_prompt" json:"system_prompt"`
 	VisibleSkills         []string `toml:"visible_skills" json:"visible_skills"`
-	MaxOutputChars        int      `toml:"max_output_chars" json:"max_output_chars"`
+	MaxOutputLines        int      `toml:"max_output_lines" json:"max_output_lines"`
 	ContextWindow         int      `toml:"context_window" json:"context_window"`
 	MaxOutputTokens       int      `toml:"max_output_tokens" json:"max_output_tokens"`
 	AllowParallelShell    bool     `toml:"allow_parallel_shell" json:"allow_parallel_shell"`
@@ -169,8 +169,8 @@ func LoadAgent(paths Paths, kind, name string) (AgentConfig, error) {
 	if cfg.SystemPrompt == "" {
 		cfg.SystemPrompt = "You are a helpful assistant."
 	}
-	if cfg.MaxOutputChars <= 0 {
-		cfg.MaxOutputChars = 5000
+	if cfg.MaxOutputLines <= 0 {
+		cfg.MaxOutputLines = 2000
 	}
 	if cfg.ContextWindow <= 0 {
 		cfg.ContextWindow = 1024000
@@ -567,7 +567,7 @@ func defaultAgentConfig(kind, name string) AgentConfig {
 		Description:     defaultAgentDescription(kind, name),
 		SystemPrompt:    "You are a helpful assistant.",
 		VisibleSkills:   []string{},
-		MaxOutputChars:  5000,
+		MaxOutputLines:  2000,
 		ContextWindow:   1024000,
 		MaxOutputTokens: 384000,
 		ThinkingEnabled: true,

@@ -22,7 +22,7 @@ import (
 type Executor struct {
 	paths                 config.Paths
 	store                 *session.Store
-	maxOutputChars        int
+	maxOutputLines        int
 	allowParallelShell    bool
 	allowInteractiveShell bool
 	readOnly              bool
@@ -31,9 +31,9 @@ type Executor struct {
 	mu                    sync.Mutex
 }
 
-func NewExecutor(paths config.Paths, store *session.Store, maxOutputChars int, allowParallelShell, allowInteractiveShell bool) *Executor {
-	if maxOutputChars <= 0 {
-		maxOutputChars = 5000
+func NewExecutor(paths config.Paths, store *session.Store, maxOutputLines int, allowParallelShell, allowInteractiveShell bool) *Executor {
+	if maxOutputLines <= 0 {
+		maxOutputLines = 2000
 	}
 	if allowInteractiveShell {
 		allowParallelShell = true
@@ -41,17 +41,17 @@ func NewExecutor(paths config.Paths, store *session.Store, maxOutputChars int, a
 	exec := &Executor{
 		paths:                 paths,
 		store:                 store,
-		maxOutputChars:        maxOutputChars,
+		maxOutputLines:        maxOutputLines,
 		allowParallelShell:    allowParallelShell,
 		allowInteractiveShell: allowInteractiveShell,
 	}
-	exec.shells = NewShellManager(paths.Workplace, maxOutputChars)
-	exec.subAgents = NewSubAgentManager(maxOutputChars)
+	exec.shells = NewShellManager(paths.Workplace, maxOutputLines)
+	exec.subAgents = NewSubAgentManager(maxOutputLines)
 	return exec
 }
 
-func NewReadOnlyExecutor(paths config.Paths, store *session.Store, maxOutputChars int) *Executor {
-	exec := NewExecutor(paths, store, maxOutputChars, false, false)
+func NewReadOnlyExecutor(paths config.Paths, store *session.Store, maxOutputLines int) *Executor {
+	exec := NewExecutor(paths, store, maxOutputLines, false, false)
 	exec.readOnly = true
 	return exec
 }
@@ -60,20 +60,20 @@ func (e *Executor) SetSubAgentRunner(runner SubAgentRunner) {
 	e.subAgents.SetRunner(runner)
 }
 
-func (e *Executor) SetAgentLimits(maxOutputChars int, allowParallelShell, allowInteractiveShell bool) {
-	if maxOutputChars <= 0 {
-		maxOutputChars = 5000
+func (e *Executor) SetAgentLimits(maxOutputLines int, allowParallelShell, allowInteractiveShell bool) {
+	if maxOutputLines <= 0 {
+		maxOutputLines = 2000
 	}
 	if allowInteractiveShell {
 		allowParallelShell = true
 	}
 	e.mu.Lock()
-	e.maxOutputChars = maxOutputChars
+	e.maxOutputLines = maxOutputLines
 	e.allowParallelShell = allowParallelShell
 	e.allowInteractiveShell = allowInteractiveShell
 	e.mu.Unlock()
-	e.shells.SetLimit(maxOutputChars)
-	e.subAgents.SetLimit(maxOutputChars)
+	e.shells.SetLimit(maxOutputLines)
+	e.subAgents.SetLimit(maxOutputLines)
 }
 
 func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
@@ -297,7 +297,7 @@ func (e *Executor) readSkill(args map[string]any) (string, error) {
 	}
 	sort.Strings(meta)
 	out := fmt.Sprintf("name: %s\nsource: %s\npath: %s\nmetadata: %s\n\n%s", skill.Name, skill.Source, skill.Path, strings.Join(meta, " "), strings.TrimSpace(skill.Body))
-	return truncate(out, e.maxOutputChars), nil
+	return truncate(out, e.maxOutputLines), nil
 }
 
 func (e *Executor) SubAgentSnapshots() []SubAgentSnapshot {
@@ -339,7 +339,7 @@ func (e *Executor) readFile(args map[string]any) (string, error) {
 		return "", fmt.Errorf("start_line is after end_line")
 	}
 	out := strings.Join(lines[start-1:end], "\n")
-	return truncate(out, e.maxOutputChars), nil
+	return truncate(out, e.maxOutputLines), nil
 }
 
 func (e *Executor) viewDir(args map[string]any) (string, error) {
@@ -364,7 +364,7 @@ func (e *Executor) viewDir(args map[string]any) (string, error) {
 		rows = append(rows, ent.Name()+suffix)
 	}
 	sort.Strings(rows)
-	return truncate(strings.Join(rows, "\n"), e.maxOutputChars), nil
+	return truncate(strings.Join(rows, "\n"), e.maxOutputLines), nil
 }
 
 func (e *Executor) searchGrep(args map[string]any) (string, error) {
@@ -419,7 +419,7 @@ func (e *Executor) searchGrep(args map[string]any) (string, error) {
 	if len(matches) == 0 {
 		return "no matches", nil
 	}
-	return truncate(strings.Join(matches, "\n"), e.maxOutputChars), nil
+	return truncate(strings.Join(matches, "\n"), e.maxOutputLines), nil
 }
 
 func compileSearchPattern(query string, caseSensitive bool) (*regexp.Regexp, error) {
@@ -510,7 +510,7 @@ func (e *Executor) diffFile(sess *session.Session, args map[string]any) (string,
 	}
 	diff := unifiedDiff(filepath.ToSlash(stringArg(args, "path")), before, after)
 	if mode == "preview" {
-		return truncate(diff, e.maxOutputChars), nil
+		return truncate(diff, e.maxOutputLines), nil
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", err
@@ -534,7 +534,7 @@ func (e *Executor) diffFile(sess *session.Session, args map[string]any) (string,
 	if err := e.store.AddChange(sess, change); err != nil {
 		return "", err
 	}
-	return truncate(fmt.Sprintf("change_id=%s\n%s", change.ID, diff), e.maxOutputChars), nil
+	return truncate(fmt.Sprintf("change_id=%s\n%s", change.ID, diff), e.maxOutputLines), nil
 }
 
 func replaceTextBlock(before string, args map[string]any) (string, error) {
@@ -641,7 +641,7 @@ func (e *Executor) applyDiffs(sess *session.Session, args map[string]any, previe
 		}
 		outputs = append(outputs, fmt.Sprintf("change_id=%s\n%s", change.ID, diff))
 	}
-	return truncate(strings.Join(outputs, "\n"), e.maxOutputChars), nil
+	return truncate(strings.Join(outputs, "\n"), e.maxOutputLines), nil
 }
 
 func (e *Executor) revertChange(sess *session.Session, changeID string) (string, error) {
@@ -683,7 +683,7 @@ func (e *Executor) revertChange(sess *session.Session, changeID string) (string,
 		if err := e.store.AddChange(sess, revert); err != nil {
 			return "", err
 		}
-		return truncate(fmt.Sprintf("reverted=%s\nchange_id=%s\n%s", changeID, revert.ID, diff), e.maxOutputChars), nil
+		return truncate(fmt.Sprintf("reverted=%s\nchange_id=%s\n%s", changeID, revert.ID, diff), e.maxOutputLines), nil
 	}
 	return "", fmt.Errorf("change_id not found")
 }
@@ -700,7 +700,7 @@ func (e *Executor) revertChanges(sess *session.Session, changeIDs []string) (str
 		}
 		out = append(out, result)
 	}
-	return truncate(strings.Join(out, "\n"), e.maxOutputChars), nil
+	return truncate(strings.Join(out, "\n"), e.maxOutputLines), nil
 }
 
 func (e *Executor) changeHistory(sess *session.Session, path string, limit int) (string, error) {
@@ -721,7 +721,7 @@ func (e *Executor) changeHistory(sess *session.Session, path string, limit int) 
 	if len(rows) == 0 {
 		return "no changes", nil
 	}
-	return truncate(strings.Join(rows, "\n"), e.maxOutputChars), nil
+	return truncate(strings.Join(rows, "\n"), e.maxOutputLines), nil
 }
 
 func (e *Executor) showChanges(sess *session.Session, changeID string, changeIDs []string) (string, error) {
@@ -743,7 +743,7 @@ func (e *Executor) showChanges(sess *session.Session, changeID string, changeIDs
 	if len(out) == 0 {
 		return "change_id not found", nil
 	}
-	return truncate(strings.Join(out, "\n"), e.maxOutputChars), nil
+	return truncate(strings.Join(out, "\n"), e.maxOutputLines), nil
 }
 
 func appendChangeIDs(first string, rest []string) []string {
@@ -872,18 +872,28 @@ func boolArg(args map[string]any, key string, def bool) bool {
 	}
 }
 
-func truncate(s string, limit int) string {
-	if limit <= 0 || len(s) <= limit {
+func truncate(s string, limitLines int) string {
+	if limitLines <= 0 {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) <= limitLines {
 		return s
 	}
 	head := 500
-	tail := 1000
-	if limit < 1800 {
-		head = limit / 3
-		tail = limit / 3
+	tail := limitLines - head
+	if limitLines < 1000 {
+		head = limitLines / 3
+		tail = limitLines - head
 	}
-	omitted := len(s) - head - tail
-	return s[:head] + fmt.Sprintf("\n--- (输出过长，已省略中间 %d 字符；可以将输出保存到文件后用 search_grep/read_file 查看) ---\n", omitted) + s[len(s)-tail:]
+	truncStart := head + 1
+	truncEnd := len(lines) - tail
+
+	var out strings.Builder
+	out.WriteString(strings.Join(lines[:head], "\n"))
+	out.WriteString(fmt.Sprintf("\n\n--- (输出过长，已截断第 %d 到第 %d 行，共 %d 行；您可以将输出重定向到文件或使用 search_grep/read_file 查看) ---\n\n", truncStart, truncEnd, len(lines)))
+	out.WriteString(strings.Join(lines[len(lines)-tail:], "\n"))
+	return out.String()
 }
 
 func unifiedDiff(path, before, after string) string {
