@@ -9,6 +9,19 @@ type ChatMessage struct {
 	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
 }
 
+type Usage struct {
+	PromptTokens          int          `json:"prompt_tokens"`
+	CompletionTokens      int          `json:"completion_tokens"`
+	TotalTokens           int          `json:"total_tokens"`
+	PromptCacheHitTokens  int          `json:"prompt_cache_hit_tokens"`
+	PromptCacheMissTokens int          `json:"prompt_cache_miss_tokens"`
+	Details               UsageDetails `json:"prompt_tokens_details"`
+}
+
+type UsageDetails struct {
+	CachedTokens int `json:"cached_tokens"`
+}
+
 type ToolCall struct {
 	ID       string       `json:"id"`
 	Type     string       `json:"type"`

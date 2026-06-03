@@ -11,6 +11,8 @@ import (
 	"github.com/asayn/asayn/internal/app"
 	"github.com/asayn/asayn/internal/config"
 	"github.com/asayn/asayn/internal/llm"
+	"github.com/asayn/asayn/internal/llm/types"
+	"github.com/asayn/asayn/internal/llm/usage"
 	"github.com/asayn/asayn/internal/session"
 	"github.com/asayn/asayn/internal/tools"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -68,10 +70,12 @@ type model struct {
 	pendingThinkStart   int
 	pendingAnswerStart  int
 	streamAnswerText    string
+	usageStats          usage.Stats
 }
 
 type agentMsg struct {
 	answer string
+	usage  types.Usage
 	err    error
 }
 
@@ -155,6 +159,7 @@ func Run(ctx *app.Context) error {
 		pendingThinkStart:  -1,
 		pendingAnswerStart: -1,
 	}
+	m.usageStats, _ = m.ctx.UsageTracker.GetStats(m.session.ID)
 	m.initRenderer(80)
 	_, err = tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
 	return err
@@ -314,6 +319,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendingThinkSpin = false
 		m.pendingThinkLine = ""
 		m.pendingThinkStart = -1
+
+		if msg.err == nil {
+			_ = m.ctx.UsageTracker.Log(m.session.ID, m.session.Name, m.ctx.Root.Model, msg.usage)
+		}
+		m.usageStats, _ = m.ctx.UsageTracker.GetStats(m.session.ID)
+
 		if msg.err != nil {
 			m.pendingAnswerStart = -1
 			m.streamAnswerText = ""
@@ -567,10 +578,10 @@ func (m model) ask(prompt string) (tea.Cmd, context.CancelFunc, chan agentRunEve
 	cmd := func() tea.Msg {
 		go func() {
 			defer cancel()
-			answer, err := agent.AskWithEvents(ctx, sess, prompt, func(event llm.AgentEvent) {
+			answer, usage, err := agent.AskWithEvents(ctx, sess, prompt, func(event llm.AgentEvent) {
 				events <- agentRunEvent{event: event}
 			})
-			events <- agentRunEvent{done: &agentMsg{answer: answer, err: err}}
+			events <- agentRunEvent{done: &agentMsg{answer: answer, usage: usage, err: err}}
 			close(events)
 		}()
 		return agentPollMsg{}
@@ -1505,6 +1516,7 @@ func (m model) resumeSession(idOrName string) (model, tea.Cmd) {
 	m.historyDraft = ""
 	m.ctx.Tools.RestoreSubAgents(sess, sess.SubAgents, m.ctx.SubSessions)
 	m.content = renderSessionContent(m.ctx, sess, m.renderer, m.log.Width)
+	m.usageStats, _ = m.ctx.UsageTracker.GetStats(m.session.ID)
 	m.refreshLog(true)
 	m.status = "ready"
 	return m, nil
@@ -2047,6 +2059,24 @@ func (m model) rootSidebarLines(width int) ([]string, int, int) {
 			lines = append(lines, fmt.Sprintf("%s %s %s", statusDot(sub.Status, m.spinner), short, label))
 		}
 	}
+
+	lines = append(lines, "", sectionStyle.Render("Usage Statistics"))
+	lines = append(lines, "Global:")
+	lines = append(lines, fmt.Sprintf("  In: %s  Out: %s", usage.FormatTokens(m.usageStats.TotalInput), usage.FormatTokens(m.usageStats.TotalOutput)))
+	hitRate := 0.0
+	if m.usageStats.TotalInput > 0 {
+		hitRate = float64(m.usageStats.TotalCacheHit) / float64(m.usageStats.TotalInput) * 100
+	}
+	lines = append(lines, fmt.Sprintf("  Hit: %s (%.1f%%)", usage.FormatTokens(m.usageStats.TotalCacheHit), hitRate))
+
+	lines = append(lines, "Current Session:")
+	lines = append(lines, fmt.Sprintf("  In: %s  Out: %s", usage.FormatTokens(m.usageStats.SessionInput), usage.FormatTokens(m.usageStats.SessionOutput)))
+	sessHitRate := 0.0
+	if m.usageStats.SessionInput > 0 {
+		sessHitRate = float64(m.usageStats.SessionCacheHit) / float64(m.usageStats.SessionInput) * 100
+	}
+	lines = append(lines, fmt.Sprintf("  Hit: %s (%.1f%%)", usage.FormatTokens(m.usageStats.SessionCacheHit), sessHitRate))
+
 	for i := range lines {
 		lines[i] = truncateDisplayLine(lines[i], contentWidth)
 	}

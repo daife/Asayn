@@ -65,22 +65,23 @@ func NewSubAgent(api config.APIConfig, root config.AgentConfig, paths config.Pat
 	return agent
 }
 
-func (a *Agent) Ask(ctx context.Context, sess *session.Session, prompt string) (string, error) {
+func (a *Agent) Ask(ctx context.Context, sess *session.Session, prompt string) (string, types.Usage, error) {
 	return a.AskWithEvents(ctx, sess, prompt, nil)
 }
 
-func (a *Agent) AskWithEvents(ctx context.Context, sess *session.Session, prompt string, emit func(AgentEvent)) (string, error) {
+func (a *Agent) AskWithEvents(ctx context.Context, sess *session.Session, prompt string, emit func(AgentEvent)) (string, types.Usage, error) {
 	a.EnsureSystemPrompt(sess)
 	baseLen := len(sess.Messages)
 	sess.Messages = append(sess.Messages, types.ChatMessage{Role: "user", Content: prompt})
 
+	var totalUsage types.Usage
 	toolSchemas := a.tools.Schemas(a.isSubAgent)
 	for {
 		if emit != nil {
 			emit(AgentEvent{Kind: "thinking_start"})
 		}
 		contentStreamed := false
-		msg, err := a.client.ChatStream(ctx, a.root.Model, messagesForAPI(sess.Messages, a.visibleSkillSet(sess), a.root.ThinkingEnabled), toolSchemas, a.root.ThinkingEnabled, a.root.ReasoningEffort, func(delta StreamDelta) {
+		msg, usage, err := a.client.ChatStream(ctx, a.root.Model, messagesForAPI(sess.Messages, a.visibleSkillSet(sess), a.root.ThinkingEnabled), toolSchemas, a.root.ThinkingEnabled, a.root.ReasoningEffort, func(delta StreamDelta) {
 			if emit == nil {
 				return
 			}
@@ -96,8 +97,14 @@ func (a *Agent) AskWithEvents(ctx context.Context, sess *session.Session, prompt
 			if len(sess.Messages) > baseLen {
 				sess.Messages = sess.Messages[:baseLen]
 			}
-			return "", err
+			return "", totalUsage, err
 		}
+		totalUsage.PromptTokens += usage.PromptTokens
+		totalUsage.CompletionTokens += usage.CompletionTokens
+		totalUsage.TotalTokens += usage.TotalTokens
+		totalUsage.PromptCacheHitTokens += usage.PromptCacheHitTokens
+		totalUsage.PromptCacheMissTokens += usage.PromptCacheMissTokens
+
 		sess.Messages = append(sess.Messages, msg)
 		if emit != nil && msg.ReasoningContent != "" {
 			emit(AgentEvent{Kind: "thinking", Text: msg.ReasoningContent})
@@ -106,7 +113,7 @@ func (a *Agent) AskWithEvents(ctx context.Context, sess *session.Session, prompt
 			emit(AgentEvent{Kind: "assistant", Text: msg.Content})
 		}
 		if len(msg.ToolCalls) == 0 {
-			return msg.Content, nil
+			return msg.Content, totalUsage, nil
 		}
 		for _, call := range msg.ToolCalls {
 			result := a.runToolCall(sess, call, emit)

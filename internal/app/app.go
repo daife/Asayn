@@ -8,18 +8,20 @@ import (
 
 	"github.com/asayn/asayn/internal/config"
 	"github.com/asayn/asayn/internal/llm"
+	"github.com/asayn/asayn/internal/llm/usage"
 	"github.com/asayn/asayn/internal/session"
 	"github.com/asayn/asayn/internal/tools"
 )
 
 type Context struct {
-	Paths       config.Paths
-	API         config.APIConfig
-	Root        config.AgentConfig
-	Sessions    *session.Store
-	SubSessions *session.Store
-	Tools       *tools.Executor
-	Agent       *llm.Agent
+	Paths        config.Paths
+	API          config.APIConfig
+	Root         config.AgentConfig
+	Sessions     *session.Store
+	SubSessions  *session.Store
+	Tools        *tools.Executor
+	Agent        *llm.Agent
+	UsageTracker *usage.Tracker
 }
 
 func Bootstrap(cwd string) (*Context, error) {
@@ -42,6 +44,8 @@ func Bootstrap(cwd string) (*Context, error) {
 	subStore := session.NewStore(paths.SubAgentSessionsDir())
 	executor := tools.NewExecutor(paths, store, root.MaxOutputChars, root.AllowParallelShell, root.AllowInteractiveShell)
 	agent := llm.NewAgent(api, root, paths, executor)
+	usageTracker := usage.NewTracker(paths)
+
 	var subSessions sync.Map
 	executor.SetSubAgentRunner(func(parent context.Context, taskID, sessionID, agentName, name, instruction string, emit func(string), bind func(string)) string {
 		if agentName == "" {
@@ -75,7 +79,10 @@ func Bootstrap(cwd string) (*Context, error) {
 		sub.RefreshSystemPrompt(subSess)
 		ctx, cancel := context.WithTimeout(parent, 10*time.Minute)
 		defer cancel()
-		answer, err := sub.AskWithEvents(ctx, subSess, instruction, nil)
+		answer, use, err := sub.AskWithEvents(ctx, subSess, instruction, nil)
+		if err == nil {
+			_ = usageTracker.Log(subSess.ID, subSess.Name, subCfg.Model, use)
+		}
 		if saveErr := subStore.Save(subSess); saveErr != nil && err == nil {
 			err = saveErr
 		}
@@ -86,12 +93,13 @@ func Bootstrap(cwd string) (*Context, error) {
 	})
 
 	return &Context{
-		Paths:       paths,
-		API:         api,
-		Root:        root,
-		Sessions:    store,
-		SubSessions: subStore,
-		Tools:       executor,
-		Agent:       agent,
+		Paths:        paths,
+		API:          api,
+		Root:         root,
+		Sessions:     store,
+		SubSessions:  subStore,
+		Tools:        executor,
+		Agent:        agent,
+		UsageTracker: usageTracker,
 	}, nil
 }

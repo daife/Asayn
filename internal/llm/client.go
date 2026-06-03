@@ -34,6 +34,7 @@ type chatResponse struct {
 	Choices []struct {
 		Message types.ChatMessage `json:"message"`
 	} `json:"choices"`
+	Usage types.Usage `json:"usage"`
 	Error *struct {
 		Message string `json:"message"`
 		Type    string `json:"type"`
@@ -44,6 +45,7 @@ type chatResponse struct {
 type StreamDelta struct {
 	ReasoningContent string
 	Content          string
+	Usage            *types.Usage
 }
 
 type streamResponse struct {
@@ -51,6 +53,7 @@ type streamResponse struct {
 		Delta        streamChoiceDelta `json:"delta"`
 		FinishReason string            `json:"finish_reason"`
 	} `json:"choices"`
+	Usage *types.Usage `json:"usage"`
 	Error *struct {
 		Message string `json:"message"`
 		Type    string `json:"type"`
@@ -89,16 +92,16 @@ func NewClient(cfg config.APIConfig) *Client {
 	}
 }
 
-func (c *Client) Chat(ctx context.Context, model string, messages []types.ChatMessage, tools []types.ToolSchema, thinkingEnabled bool, reasoningEffort string) (types.ChatMessage, error) {
+func (c *Client) Chat(ctx context.Context, model string, messages []types.ChatMessage, tools []types.ToolSchema, thinkingEnabled bool, reasoningEffort string) (types.ChatMessage, types.Usage, error) {
 	reqBody := buildChatRequest(model, messages, tools, thinkingEnabled, reasoningEffort, false)
 
 	data, err := json.Marshal(reqBody)
 	if err != nil {
-		return types.ChatMessage{}, err
+		return types.ChatMessage{}, types.Usage{}, err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiURL, bytes.NewReader(data))
 	if err != nil {
-		return types.ChatMessage{}, err
+		return types.ChatMessage{}, types.Usage{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if c.cfg.APIKey != "" {
@@ -110,40 +113,40 @@ func (c *Client) Chat(ctx context.Context, model string, messages []types.ChatMe
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return types.ChatMessage{}, err
+		return types.ChatMessage{}, types.Usage{}, err
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return types.ChatMessage{}, err
+		return types.ChatMessage{}, types.Usage{}, err
 	}
 	var parsed chatResponse
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		return types.ChatMessage{}, fmt.Errorf("decode API response: %w: %s", err, string(body))
+		return types.ChatMessage{}, types.Usage{}, fmt.Errorf("decode API response: %w: %s", err, string(body))
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		if parsed.Error != nil {
-			return types.ChatMessage{}, fmt.Errorf("API error %d: %s", resp.StatusCode, parsed.Error.Message)
+			return types.ChatMessage{}, types.Usage{}, fmt.Errorf("API error %d: %s", resp.StatusCode, parsed.Error.Message)
 		}
-		return types.ChatMessage{}, fmt.Errorf("API error %d: %s", resp.StatusCode, string(body))
+		return types.ChatMessage{}, types.Usage{}, fmt.Errorf("API error %d: %s", resp.StatusCode, string(body))
 	}
 	if len(parsed.Choices) == 0 {
-		return types.ChatMessage{}, fmt.Errorf("API returned no choices")
+		return types.ChatMessage{}, types.Usage{}, fmt.Errorf("API returned no choices")
 	}
-	return parsed.Choices[0].Message, nil
+	return parsed.Choices[0].Message, parsed.Usage, nil
 }
 
-func (c *Client) ChatStream(ctx context.Context, model string, messages []types.ChatMessage, tools []types.ToolSchema, thinkingEnabled bool, reasoningEffort string, onDelta func(StreamDelta)) (types.ChatMessage, error) {
+func (c *Client) ChatStream(ctx context.Context, model string, messages []types.ChatMessage, tools []types.ToolSchema, thinkingEnabled bool, reasoningEffort string, onDelta func(StreamDelta)) (types.ChatMessage, types.Usage, error) {
 	reqBody := buildChatRequest(model, messages, tools, thinkingEnabled, reasoningEffort, true)
 
 	data, err := json.Marshal(reqBody)
 	if err != nil {
-		return types.ChatMessage{}, err
+		return types.ChatMessage{}, types.Usage{}, err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiURL, bytes.NewReader(data))
 	if err != nil {
-		return types.ChatMessage{}, err
+		return types.ChatMessage{}, types.Usage{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
@@ -156,7 +159,7 @@ func (c *Client) ChatStream(ctx context.Context, model string, messages []types.
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return types.ChatMessage{}, err
+		return types.ChatMessage{}, types.Usage{}, err
 	}
 	defer resp.Body.Close()
 
@@ -164,12 +167,13 @@ func (c *Client) ChatStream(ctx context.Context, model string, messages []types.
 		body, _ := io.ReadAll(resp.Body)
 		var parsed chatResponse
 		if err := json.Unmarshal(body, &parsed); err == nil && parsed.Error != nil {
-			return types.ChatMessage{}, fmt.Errorf("API error %d: %s", resp.StatusCode, parsed.Error.Message)
+			return types.ChatMessage{}, types.Usage{}, fmt.Errorf("API error %d: %s", resp.StatusCode, parsed.Error.Message)
 		}
-		return types.ChatMessage{}, fmt.Errorf("API error %d: %s", resp.StatusCode, string(body))
+		return types.ChatMessage{}, types.Usage{}, fmt.Errorf("API error %d: %s", resp.StatusCode, string(body))
 	}
 
 	msg := types.ChatMessage{Role: "assistant"}
+	var finalUsage types.Usage
 	toolCalls := map[int]types.ToolCall{}
 	maxToolIndex := -1
 	scanner := bufio.NewScanner(resp.Body)
@@ -188,12 +192,18 @@ func (c *Client) ChatStream(ctx context.Context, model string, messages []types.
 		}
 		var chunk streamResponse
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
-			return types.ChatMessage{}, fmt.Errorf("decode stream chunk: %w: %s", err, payload)
+			return types.ChatMessage{}, types.Usage{}, fmt.Errorf("decode stream chunk: %w: %s", err, payload)
 		}
 		if chunk.Error != nil {
-			return types.ChatMessage{}, fmt.Errorf("API stream error: %s", chunk.Error.Message)
+			return types.ChatMessage{}, types.Usage{}, fmt.Errorf("API stream error: %s", chunk.Error.Message)
+		}
+		if chunk.Usage != nil {
+			finalUsage = *chunk.Usage
 		}
 		if len(chunk.Choices) == 0 {
+			if onDelta != nil && chunk.Usage != nil {
+				onDelta(StreamDelta{Usage: chunk.Usage})
+			}
 			continue
 		}
 		delta := chunk.Choices[0].Delta
@@ -206,8 +216,8 @@ func (c *Client) ChatStream(ctx context.Context, model string, messages []types.
 		if delta.Content != "" {
 			msg.Content += delta.Content
 		}
-		if onDelta != nil && (delta.ReasoningContent != "" || delta.Content != "") {
-			onDelta(StreamDelta{ReasoningContent: delta.ReasoningContent, Content: delta.Content})
+		if onDelta != nil && (delta.ReasoningContent != "" || delta.Content != "" || chunk.Usage != nil) {
+			onDelta(StreamDelta{ReasoningContent: delta.ReasoningContent, Content: delta.Content, Usage: chunk.Usage})
 		}
 		for _, part := range delta.ToolCalls {
 			call := toolCalls[part.Index]
@@ -230,7 +240,7 @@ func (c *Client) ChatStream(ctx context.Context, model string, messages []types.
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return types.ChatMessage{}, err
+		return types.ChatMessage{}, types.Usage{}, err
 	}
 	if maxToolIndex >= 0 {
 		msg.ToolCalls = make([]types.ToolCall, 0, maxToolIndex+1)
@@ -245,7 +255,7 @@ func (c *Client) ChatStream(ctx context.Context, model string, messages []types.
 			msg.ToolCalls = append(msg.ToolCalls, call)
 		}
 	}
-	return msg, nil
+	return msg, finalUsage, nil
 }
 
 func buildChatRequest(model string, messages []types.ChatMessage, tools []types.ToolSchema, thinkingEnabled bool, reasoningEffort string, stream bool) chatRequest {
