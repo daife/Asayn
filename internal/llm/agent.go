@@ -39,6 +39,8 @@ func (e AgentEvent) Display() string {
 		return "thinking: " + e.Text
 	case "assistant":
 		return "assistant: " + e.Text
+	case "assistant_delta":
+		return "assistant: " + e.Text
 	case "tool_start":
 		return "tool: " + e.Text
 	case "tool_result":
@@ -79,9 +81,17 @@ func (a *Agent) AskWithEvents(ctx context.Context, sess *session.Session, prompt
 		if emit != nil {
 			emit(AgentEvent{Kind: "thinking_start"})
 		}
+		contentStreamed := false
 		msg, err := a.client.ChatStream(ctx, a.root.Model, messagesForAPI(sess.Messages, a.visibleSkillSet(sess)), toolSchemas, func(delta StreamDelta) {
-			if emit != nil && delta.ReasoningContent != "" {
+			if emit == nil {
+				return
+			}
+			if delta.ReasoningContent != "" {
 				emit(AgentEvent{Kind: "thinking_delta", Text: delta.ReasoningContent})
+			}
+			if delta.Content != "" {
+				contentStreamed = true
+				emit(AgentEvent{Kind: "assistant_delta", Text: delta.Content})
 			}
 		})
 		if err != nil {
@@ -94,7 +104,7 @@ func (a *Agent) AskWithEvents(ctx context.Context, sess *session.Session, prompt
 		if emit != nil && msg.ReasoningContent != "" {
 			emit(AgentEvent{Kind: "thinking", Text: msg.ReasoningContent})
 		}
-		if emit != nil && msg.Content != "" && len(msg.ToolCalls) > 0 {
+		if emit != nil && msg.Content != "" && len(msg.ToolCalls) > 0 && !contentStreamed {
 			emit(AgentEvent{Kind: "assistant", Text: msg.Content})
 		}
 		if len(msg.ToolCalls) == 0 {

@@ -78,7 +78,7 @@ func (m *SubAgentManager) Start(parent *session.Session, store *session.Store, a
 		Agent:      agentName,
 		CreatedAt:  now,
 		UpdatedAt:  now,
-		Transcript: []string{"user: " + instruction},
+		Transcript: []string{rootInstructionLine(instruction)},
 		parent:     parent,
 		store:      store,
 	}
@@ -104,7 +104,7 @@ func (m *SubAgentManager) ResumeAsync(id, instruction string) string {
 	}
 	task.Status = "running"
 	task.UpdatedAt = time.Now()
-	task.Transcript = append(task.Transcript, "user: "+instruction)
+	task.Transcript = append(task.Transcript, rootInstructionLine(instruction))
 	task.persistLocked()
 	m.mu.Unlock()
 	go m.run(task, instruction)
@@ -229,7 +229,7 @@ func (m *SubAgentManager) run(task *SubAgentTask, instruction string) {
 		}
 		task.UpdatedAt = time.Now()
 		task.Result = result
-		task.Transcript = append(task.Transcript, "assistant: "+task.Result)
+		task.Transcript = append(task.Transcript, subAgentAnswerLine(task.Name, task.Result))
 		task.persistLocked()
 		m.mu.Unlock()
 	}
@@ -272,7 +272,7 @@ func (m *SubAgentManager) Restore(parent *session.Session, store *session.Store,
 		}
 		if ref.SessionID != "" && subStore != nil {
 			if sess, err := subStore.LoadByID(ref.SessionID); err == nil {
-				task.Transcript = transcriptFromSession(sess)
+				task.Transcript = transcriptFromSession(sess, task.Name)
 				task.Result = lastAssistantContent(sess)
 			}
 		}
@@ -308,30 +308,16 @@ func (t *SubAgentTask) persistLocked() {
 	})
 }
 
-func transcriptFromSession(sess *session.Session) []string {
+func transcriptFromSession(sess *session.Session, subAgentName string) []string {
 	out := []string{}
-	toolNames := map[string]string{}
 	for _, msg := range sess.Messages {
 		switch msg.Role {
 		case "user":
-			out = append(out, "user: "+msg.Content)
+			out = append(out, rootInstructionLine(msg.Content))
 		case "assistant":
-			if msg.ReasoningContent != "" {
-				out = append(out, "thinking: "+msg.ReasoningContent)
-			}
 			if msg.Content != "" {
-				out = append(out, "assistant: "+msg.Content)
+				out = append(out, subAgentAnswerLine(subAgentName, msg.Content))
 			}
-			for _, call := range msg.ToolCalls {
-				toolNames[call.ID] = call.Function.Name
-				out = append(out, fmt.Sprintf("tool: %s(%s)", call.Function.Name, call.Function.Arguments))
-			}
-		case "tool":
-			name := toolNames[msg.ToolCallID]
-			if name == "" {
-				name = msg.ToolCallID
-			}
-			out = append(out, fmt.Sprintf("tool result: %s\n%s", name, msg.Content))
 		}
 	}
 	return out
@@ -353,19 +339,49 @@ func (m *SubAgentManager) describeForRoot(task *SubAgentTask) string {
 		fmt.Sprintf("status: %s", task.Status),
 		fmt.Sprintf("updated: %s", task.UpdatedAt.Format(time.RFC3339)),
 	}
-	for _, line := range task.Transcript {
-		if strings.HasPrefix(line, "assistant:") ||
-			strings.HasPrefix(line, "tool:") ||
-			strings.HasPrefix(line, "tool result:") ||
-			strings.HasPrefix(line, "tool error:") {
-			lines = append(lines, line)
-		}
-	}
-	if task.Result != "" {
-		lines = append(lines, "result: "+task.Result)
+	conversation := rootVisibleTranscript(task.Transcript, task.Name, task.Result)
+	if len(conversation) > 0 {
+		lines = append(lines, conversation...)
 	}
 	if task.Status == "running" {
 		lines = append(lines, "", "This sub-agent is still running. Continue useful work; use sub_agent_wait_check only for one deliberate wait when there is truly no useful work to do.")
 	}
 	return strings.Join(lines, "\n")
+}
+
+func rootInstructionLine(instruction string) string {
+	return "[root_agent]: " + strings.TrimSpace(instruction)
+}
+
+func subAgentAnswerLine(name, answer string) string {
+	if name == "" {
+		name = "sub_agent"
+	}
+	return fmt.Sprintf("[%s]: %s", name, strings.TrimSpace(answer))
+}
+
+func rootVisibleTranscript(transcript []string, name, result string) []string {
+	lines := []string{}
+	hasFinalAnswer := false
+	for _, line := range transcript {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(line, "[root_agent]:"):
+			lines = append(lines, line)
+		case strings.HasPrefix(line, "[") && strings.Contains(line, "]:"):
+			lines = append(lines, line)
+			if !strings.HasPrefix(line, "[root_agent]:") {
+				hasFinalAnswer = true
+			}
+		case strings.HasPrefix(line, "user:"):
+			lines = append(lines, rootInstructionLine(strings.TrimPrefix(line, "user:")))
+		}
+	}
+	if strings.TrimSpace(result) != "" && !hasFinalAnswer {
+		lines = append(lines, subAgentAnswerLine(name, result))
+	}
+	return lines
 }

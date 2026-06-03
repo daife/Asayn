@@ -60,6 +60,8 @@ type model struct {
 	pendingThinkSpin    bool
 	streamThinkText     string
 	pendingThinkStart   int
+	pendingAnswerLine   string
+	streamAnswerText    string
 }
 
 type agentMsg struct {
@@ -132,7 +134,7 @@ func Run(ctx *app.Context) error {
 	input.CharLimit = 8000
 	input.Prompt = "› "
 	vp := viewport.New(80, 20)
-	content := welcome(ctx)
+	content := ""
 	vp.SetContent(content)
 
 	m := model{
@@ -286,6 +288,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendingThinkLine = ""
 		m.pendingThinkStart = -1
 		if msg.err != nil {
+			m.pendingAnswerLine = ""
+			m.streamAnswerText = ""
 			if errors.Is(msg.err, context.Canceled) || strings.Contains(msg.err.Error(), "context canceled") {
 				m.status = "ready"
 				m.appendLog("\n" + mutedStyle.Render("interrupted") + "\n")
@@ -299,7 +303,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !thinkingAlreadyRendered {
 				m.emitFinalThinking()
 			}
-			m.appendLog("\n" + agentStyle.Render("Asayn") + ":\n" + msg.answer + "\n")
+			if m.streamAnswerText == "" {
+				m.appendLog("\n" + agentStyle.Render("Asayn") + ":\n" + msg.answer + "\n")
+			} else if msg.answer != "" && msg.answer != m.streamAnswerText {
+				m.updatePendingAnswer(answerBlock(msg.answer))
+			}
+			m.pendingAnswerLine = ""
+			m.streamAnswerText = ""
 			m.appendDivider()
 			_ = m.ctx.Sessions.Save(m.session)
 		}
@@ -587,9 +597,20 @@ func (m *model) appendAgentEvent(event llm.AgentEvent) {
 		if !thinkingAlreadyRendered {
 			m.emitFinalThinking()
 		}
-		m.appendLog("\n" + agentStyle.Render("Asayn") + ":\n" + event.Text + "\n")
+		if m.streamAnswerText == "" {
+			m.appendLog(answerBlock(event.Text))
+		} else {
+			m.updatePendingAnswer(answerBlock(m.streamAnswerText + event.Text))
+		}
+		m.pendingAnswerLine = ""
+		m.streamAnswerText = ""
+	case "assistant_delta":
+		m.streamAnswerText += event.Text
+		m.updatePendingAnswer(answerBlock(m.streamAnswerText))
 	case "tool_start":
-		m.clearPendingThinking()
+		m.finalizePendingThinking()
+		m.pendingAnswerLine = ""
+		m.streamAnswerText = ""
 		line := "\n" + toolRunStyle.Render(spinnerFrame(m.spinner)+" Tool called") + ": " + event.Text + "\n"
 		m.pendingToolLine = line
 		m.pendingToolName = event.Text
@@ -616,6 +637,20 @@ func (m *model) replacePendingTool(replacement string) {
 	}
 	m.appendLog(replacement)
 	m.pendingToolName = ""
+}
+
+func (m *model) updatePendingAnswer(replacement string) {
+	if m.pendingAnswerLine != "" {
+		if idx := strings.LastIndex(m.content, m.pendingAnswerLine); idx >= 0 {
+			m.content = m.content[:idx] + replacement + m.content[idx+len(m.pendingAnswerLine):]
+			m.pendingAnswerLine = replacement
+			m.log.SetContent(m.wrapContent(m.content))
+			m.log.GotoBottom()
+			return
+		}
+	}
+	m.pendingAnswerLine = replacement
+	m.appendLog(replacement)
 }
 
 func (m *model) replacePendingThinking(replacement string) {
@@ -955,7 +990,7 @@ func (m model) handleCommand(raw string) (model, tea.Cmd) {
 		m.historyIndex = -1
 		m.historyDraft = ""
 		m.ctx.Tools.RestoreSubAgents(sess, nil, m.ctx.SubSessions)
-		m.content = welcome(m.ctx)
+		m.content = ""
 		m.log.SetContent(m.wrapContent(m.content))
 	case "resume":
 		_ = m.cleanupEmptySession()
@@ -1284,6 +1319,9 @@ func (m model) assistView() string {
 		if strings.TrimSpace(m.commandOutput) != "" {
 			return m.commandOutputView()
 		}
+		if strings.TrimSpace(m.input.Value()) == "" {
+			return m.idleAssistView()
+		}
 		return ""
 	}
 	selected := m.clampedCommandSelected(len(suggestions))
@@ -1309,6 +1347,21 @@ func (m model) commandOutputView() string {
 		Width(m.log.Width).
 		Foreground(lipgloss.Color("8")).
 		Render(wrapANSI(panelBlock("command output", strings.Split(m.commandOutput, "\n")), m.log.Width))
+}
+
+func (m model) idleAssistView() string {
+	rows := []string{"Type /help for commands."}
+	if m.width < 100 {
+		rows = append(rows,
+			"session: "+m.session.Name+" ("+m.session.ID+")",
+			"workplace: "+m.ctx.Paths.Workplace,
+			"root_agent: "+m.session.RootAgent,
+		)
+	}
+	return "\n" + lipgloss.NewStyle().
+		Width(m.log.Width).
+		Foreground(lipgloss.Color("8")).
+		Render(wrapANSI(strings.Join(rows, "\n"), m.log.Width))
 }
 
 func (m *model) setCommandOutput(text string) {
@@ -1918,18 +1971,8 @@ func containsString(items []string, wanted string) bool {
 	return false
 }
 
-func welcome(ctx *app.Context) string {
-	return fmt.Sprintf("Asayn - agent skills are all you need\nworkplace: %s\nroot_agent: %s\nType /help for commands.\n", ctx.Paths.Workplace, ctx.Root.Name)
-}
-
 func renderSessionContent(ctx *app.Context, sess *session.Session) string {
 	var b strings.Builder
-	b.WriteString(mutedStyle.Render(fmt.Sprintf("Resumed %s (%s)", sess.Name, sess.ID)))
-	b.WriteString("\n")
-	b.WriteString(mutedStyle.Render(fmt.Sprintf("workplace: %s", ctx.Paths.Workplace)))
-	b.WriteString("\n")
-	b.WriteString(mutedStyle.Render(fmt.Sprintf("root_agent: %s", sess.RootAgent)))
-	b.WriteString("\n")
 	toolLabels := map[string]string{}
 	for _, msg := range sess.Messages {
 		switch msg.Role {
@@ -2114,6 +2157,10 @@ func minorBlock(title, text string, maxLines int) string {
 	return mutedStyle.Render(title + ":\n" + summarizeIndented(compactDisplayText(text), maxLines))
 }
 
+func answerBlock(text string) string {
+	return "\n" + agentStyle.Render("Asayn") + ":\n" + text + "\n"
+}
+
 func minorResult(text string, maxLines int) string {
 	if strings.TrimSpace(text) == "" {
 		return mutedStyle.Render("  (no output)")
@@ -2122,7 +2169,7 @@ func minorResult(text string, maxLines int) string {
 }
 
 func summarizeIndented(text string, maxLines int) string {
-	lines := strings.Split(strings.Trim(text, "\n"), "\n")
+	lines := compactLines(text)
 	omitted := 0
 	if maxLines > 0 && len(lines) > maxLines {
 		omitted = len(lines) - maxLines
@@ -2138,16 +2185,21 @@ func summarizeIndented(text string, maxLines int) string {
 }
 
 func compactDisplayText(text string) string {
+	lines := compactLines(text)
+	return strings.Join(lines, "\n")
+}
+
+func compactLines(text string) []string {
 	raw := strings.Split(strings.TrimSpace(text), "\n")
 	lines := []string{}
 	for _, line := range raw {
-		line = strings.TrimRight(line, " \t\r")
+		line = strings.TrimSpace(line)
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		lines = append(lines, line)
+		lines = append(lines, strings.Join(strings.Fields(line), " "))
 	}
-	return strings.Join(lines, "\n")
+	return lines
 }
 
 func renderDivider(width int, label string) string {

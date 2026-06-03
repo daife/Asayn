@@ -75,11 +75,7 @@ func Bootstrap(cwd string) (*Context, error) {
 		sub.RefreshSystemPrompt(subSess)
 		ctx, cancel := context.WithTimeout(parent, 10*time.Minute)
 		defer cancel()
-		answer, err := sub.AskWithEvents(ctx, subSess, instruction, func(event llm.AgentEvent) {
-			if emit != nil {
-				emit(event.Display())
-			}
-		})
+		answer, err := sub.AskWithEvents(ctx, subSess, instruction, nil)
 		if saveErr := subStore.Save(subSess); saveErr != nil && err == nil {
 			err = saveErr
 		}

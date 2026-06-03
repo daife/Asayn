@@ -120,6 +120,48 @@ func TestSubAgentWaitCheckReturnsStatusAfterDelay(t *testing.T) {
 	}
 }
 
+func TestSubAgentCheckReturnsSemanticTranscript(t *testing.T) {
+	work := t.TempDir()
+	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
+	sess, err := store.New("test", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
+	exec.SetSubAgentRunner(func(ctx context.Context, taskID, sessionID, agentName, name, instruction string, emit func(string), bind func(string)) string {
+		if emit != nil {
+			emit("assistant: 有一天")
+			emit("assistant: ，")
+			emit("tool result: read_file\ninternal details")
+		}
+		return "有一天，小白兔讲了一个笑话。"
+	})
+	start, err := exec.Run(context.Background(), sess, "sub_agent_start_async", map[string]any{
+		"name":        "笑话代理人B",
+		"instruction": "讲一个简短笑话",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer exec.Shutdown()
+	id := strings.TrimPrefix(strings.SplitN(start, "\n", 2)[0], "sub_agent_id=")
+	out, err := exec.Run(context.Background(), sess, "sub_agent_wait_check", map[string]any{
+		"sub_agent_id": id,
+		"wait_seconds": 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "[root_agent]: 讲一个简短笑话") || !strings.Contains(out, "[笑话代理人B]: 有一天，小白兔讲了一个笑话。") {
+		t.Fatalf("semantic transcript missing expected dialogue, got %s", out)
+	}
+	for _, unwanted := range []string{"assistant: 有一天", "assistant: ，", "tool result:", "result:"} {
+		if strings.Contains(out, unwanted) {
+			t.Fatalf("semantic transcript leaked %q in %s", unwanted, out)
+		}
+	}
+}
+
 func TestShellSchemasFollowShellConfig(t *testing.T) {
 	syncExec := NewExecutor(config.Paths{}, nil, 20000, false, false)
 	if !hasToolSchema(syncExec.Schemas(false), "shell_run_sync") {
