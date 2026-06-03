@@ -99,9 +99,9 @@ func (a *Agent) AskWithEvents(ctx context.Context, sess *session.Session, prompt
 			}
 			return "", totalUsage, err
 		}
-		totalUsage.PromptTokens += usage.PromptTokens
+		totalUsage.PromptTokens += usage.PromptTokens // This is total tokens consumed across all turns.
 		totalUsage.CompletionTokens += usage.CompletionTokens
-		totalUsage.TotalTokens += usage.TotalTokens
+		totalUsage.TotalTokens = usage.TotalTokens // Represents the context window size of the latest call.
 		totalUsage.PromptCacheHitTokens += usage.PromptCacheHitTokens
 		totalUsage.PromptCacheMissTokens += usage.PromptCacheMissTokens
 

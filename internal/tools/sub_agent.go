@@ -20,7 +20,7 @@ type SubAgentManager struct {
 	runner SubAgentRunner
 }
 
-type SubAgentRunner func(ctx context.Context, taskID, sessionID, agentName, name, instruction string, emit func(string), bind func(string)) string
+type SubAgentRunner func(ctx context.Context, parentSessionID, taskID, sessionID, agentName, name, instruction string, emit func(string), bind func(string)) string
 
 type SubAgentTask struct {
 	ID         string
@@ -205,7 +205,7 @@ func (m *SubAgentManager) run(task *SubAgentTask, instruction string) {
 	case <-time.After(10 * time.Millisecond):
 		result := "Sub-agent runner is not configured."
 		if runner != nil {
-			result = runner(ctx, task.ID, task.SessionID, task.Agent, task.Name, instruction, func(line string) {
+			result = runner(ctx, task.parent.ID, task.ID, task.SessionID, task.Agent, task.Name, instruction, func(line string) {
 				m.mu.Lock()
 				task.Transcript = append(task.Transcript, line)
 				task.UpdatedAt = time.Now()

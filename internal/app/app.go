@@ -47,7 +47,7 @@ func Bootstrap(cwd string) (*Context, error) {
 	usageTracker := usage.NewTracker(paths)
 
 	var subSessions sync.Map
-	executor.SetSubAgentRunner(func(parent context.Context, taskID, sessionID, agentName, name, instruction string, emit func(string), bind func(string)) string {
+	executor.SetSubAgentRunner(func(parent context.Context, parentSessionID, taskID, sessionID, agentName, name, instruction string, emit func(string), bind func(string)) string {
 		if agentName == "" {
 			agentName = "default"
 		}
@@ -81,7 +81,7 @@ func Bootstrap(cwd string) (*Context, error) {
 		defer cancel()
 		answer, use, err := sub.AskWithEvents(ctx, subSess, instruction, nil)
 		if err == nil {
-			_ = usageTracker.Log(subSess.ID, subSess.Name, subCfg.Model, use)
+			_ = usageTracker.Log(parentSessionID, subSess.Name, subCfg.Model, use)
 		}
 		if saveErr := subStore.Save(subSess); saveErr != nil && err == nil {
 			err = saveErr

@@ -71,6 +71,7 @@ type model struct {
 	pendingAnswerStart  int
 	streamAnswerText    string
 	usageStats          usage.Stats
+	latestTotalTokens   int
 }
 
 type agentMsg struct {
@@ -322,6 +323,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if msg.err == nil {
 			_ = m.ctx.UsageTracker.Log(m.session.ID, m.session.Name, m.ctx.Root.Model, msg.usage)
+			m.latestTotalTokens = msg.usage.TotalTokens
 		}
 		m.usageStats, _ = m.ctx.UsageTracker.GetStats(m.session.ID)
 
@@ -2077,10 +2079,42 @@ func (m model) rootSidebarLines(width int) ([]string, int, int) {
 	}
 	lines = append(lines, fmt.Sprintf("  Hit: %s (%.1f%%)", usage.FormatTokens(m.usageStats.SessionCacheHit), sessHitRate))
 
+	lines = append(lines, "", sectionStyle.Render("Context Window"))
+	lines = append(lines, renderProgressBar(m.latestTotalTokens, m.ctx.Root.ContextWindow, m.ctx.Root.MaxOutputTokens, contentWidth))
+	lines = append(lines, fmt.Sprintf("%s / %s", usage.FormatTokens(int64(m.latestTotalTokens)), usage.FormatTokens(int64(m.ctx.Root.ContextWindow))))
+
 	for i := range lines {
 		lines[i] = truncateDisplayLine(lines[i], contentWidth)
 	}
 	return lines, subStart, len(subs)
+}
+
+func renderProgressBar(current, max, reserve, width int) string {
+	if max <= 0 {
+		max = 1
+	}
+	if width < 10 {
+		width = 10
+	}
+	barWidth := width - 2
+	filled := int(float64(current) / float64(max) * float64(barWidth))
+	if filled > barWidth {
+		filled = barWidth
+	}
+	if filled < 0 {
+		filled = 0
+	}
+	empty := barWidth - filled
+	
+	isWarning := current >= (max - reserve)
+	
+	barStyle := successStyle
+	if isWarning {
+		barStyle = errorStyle
+	}
+	
+	bar := barStyle.Render(strings.Repeat("█", filled)) + mutedStyle.Render(strings.Repeat("░", empty))
+	return "[" + bar + "]"
 }
 
 func (m model) subAgentSidebar(width int) string {

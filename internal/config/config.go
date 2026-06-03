@@ -41,6 +41,8 @@ type AgentConfig struct {
 	SystemPrompt          string   `toml:"system_prompt" json:"system_prompt"`
 	VisibleSkills         []string `toml:"visible_skills" json:"visible_skills"`
 	MaxOutputChars        int      `toml:"max_output_chars" json:"max_output_chars"`
+	ContextWindow         int      `toml:"context_window" json:"context_window"`
+	MaxOutputTokens       int      `toml:"max_output_tokens" json:"max_output_tokens"`
 	AllowParallelShell    bool     `toml:"allow_parallel_shell" json:"allow_parallel_shell"`
 	AllowInteractiveShell bool     `toml:"allow_interactive_shell" json:"allow_interactive_shell"`
 	ThinkingEnabled       bool     `toml:"thinking_enabled" json:"thinking_enabled"`
@@ -169,6 +171,12 @@ func LoadAgent(paths Paths, kind, name string) (AgentConfig, error) {
 	}
 	if cfg.MaxOutputChars <= 0 {
 		cfg.MaxOutputChars = 5000
+	}
+	if cfg.ContextWindow <= 0 {
+		cfg.ContextWindow = 1024000
+	}
+	if cfg.MaxOutputTokens <= 0 {
+		cfg.MaxOutputTokens = 384000
 	}
 	cfg.NormalizeShellConfig()
 	cfg.NormalizeThinkingConfig()
@@ -560,6 +568,8 @@ func defaultAgentConfig(kind, name string) AgentConfig {
 		SystemPrompt:    "You are a helpful assistant.",
 		VisibleSkills:   []string{},
 		MaxOutputChars:  5000,
+		ContextWindow:   1024000,
+		MaxOutputTokens: 384000,
 		ThinkingEnabled: true,
 		ReasoningEffort: "max",
 	}

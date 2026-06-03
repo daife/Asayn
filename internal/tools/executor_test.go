@@ -234,7 +234,7 @@ func TestSubAgentCheckReturnsSemanticTranscript(t *testing.T) {
 		t.Fatal(err)
 	}
 	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
-	exec.SetSubAgentRunner(func(ctx context.Context, taskID, sessionID, agentName, name, instruction string, emit func(string), bind func(string)) string {
+	exec.SetSubAgentRunner(func(ctx context.Context, parentSessionID, taskID, sessionID, agentName, name, instruction string, emit func(string), bind func(string)) string {
 		if emit != nil {
 			emit("assistant: 有一天")
 			emit("assistant: ，")
