@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -26,6 +27,43 @@ func TestBootstrapCopiesEmbeddedDefaultsToHome(t *testing.T) {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("expected embedded default %s: %v", path, err)
 		}
+	}
+}
+
+func TestBootstrapOnlyUpdatesExistingGitIgnore(t *testing.T) {
+	home := t.TempDir()
+	work := t.TempDir()
+	t.Setenv("HOME", home)
+
+	if _, err := Bootstrap(work); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(work, ".git")); !os.IsNotExist(err) {
+		t.Fatalf("bootstrap should not initialize git, stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(work, ".gitignore")); !os.IsNotExist(err) {
+		t.Fatalf("bootstrap should not create .gitignore when it does not exist, stat err=%v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(work, ".gitignore"), []byte("node_modules/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Bootstrap(work); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Bootstrap(work); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(work, ".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "node_modules/\n.Asayn/\n") {
+		t.Fatalf(".gitignore missing .Asayn entry:\n%s", content)
+	}
+	if strings.Count(content, ".Asayn/") != 1 {
+		t.Fatalf(".Asayn should be added once, got:\n%s", content)
 	}
 }
 

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -513,29 +512,19 @@ func ensureWorkspace(paths Paths) error {
 			return err
 		}
 	}
-	if err := ensureGit(paths.Workplace); err != nil {
-		return err
-	}
 	return ensureGitIgnore(paths.Workplace)
-}
-
-func ensureGit(workplace string) error {
-	check := exec.Command("git", "rev-parse", "--is-inside-work-tree")
-	check.Dir = workplace
-	if err := check.Run(); err == nil {
-		return nil
-	}
-	cmd := exec.Command("git", "init")
-	cmd.Dir = workplace
-	return cmd.Run()
 }
 
 func ensureGitIgnore(workplace string) error {
 	path := filepath.Join(workplace, ".gitignore")
-	var content string
-	if b, err := os.ReadFile(path); err == nil {
-		content = string(b)
+	b, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
 	}
+	if err != nil {
+		return err
+	}
+	content := string(b)
 	for _, line := range strings.Split(content, "\n") {
 		if strings.TrimSpace(line) == ".Asayn/" {
 			return nil

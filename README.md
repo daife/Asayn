@@ -7,7 +7,7 @@ Asayn means **agent skills are all you need**. It is a Go + Bubble Tea TUI agent
 - Workplaces: running `asayn` in any directory treats that directory as the workplace.
 - Global config: `~/.Asayn/`.
 - Workplace config: `./.Asayn/`.
-- First-run setup: creates `.Asayn/`, `.Asayn/.sessions/`, initializes git when needed, and adds `.Asayn/` to `.gitignore`.
+- First-run setup: creates `.Asayn/` and `.Asayn/.sessions/`. If the workplace already has `.gitignore`, Asayn adds `.Asayn/` once; it does not run `git init` or create `.gitignore`.
 - Config precedence: workplace files win over global files. Skills are visible from both `./.Asayn/skills` when that folder exists and `~/.Asayn/skills`; duplicate skill names prefer the workplace skill. Workspace setup does not copy global skills.
 - DeepSeek chat client using the OpenAI-compatible `/chat/completions` format.
 - Thinking mode support with `reasoning_effort` and `thinking.type`.
@@ -56,16 +56,48 @@ default_Asayn/        # repository defaults embedded into the binary
     special_agents/
 ```
 
-On first use, Asayn copies missing files from the embedded `default_Asayn/` into `~/.Asayn/`. Existing user files are not overwritten.
+On first use, Asayn copies missing files from the defaults embedded in the executable into `~/.Asayn/`. Existing user files are not overwritten.
 
-## Build
+## Binary Distribution
+
+Asayn is distributed as a single executable file. No repository checkout or `default_Asayn/` directory is needed at runtime because the default config files are embedded into the binary.
+
+If you receive an executable named `asayn`, install it somewhere on your `PATH`:
+
+```bash
+chmod +x asayn
+install -D -m 0755 asayn ~/.local/bin/asayn
+```
+
+Make sure `~/.local/bin` is on your `PATH`:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Configure your API key before first use:
+
+```bash
+export DEEPSEEK_API_KEY="your-api-key"
+```
+
+Then run `asayn` from any project directory:
+
+```bash
+cd /path/to/your/project
+asayn
+```
+
+The first run creates `~/.Asayn/` with global defaults and creates `<project>/.Asayn/` for the current workplace. Project-local `.Asayn/` data is used for sessions and workplace-specific configuration.
+
+## Build From Source
 
 ```bash
 go mod tidy
 go build -o asayn ./cmd/asayn
 ```
 
-Run from any project directory:
+Run the built binary from any project directory:
 
 ```bash
 ./asayn
