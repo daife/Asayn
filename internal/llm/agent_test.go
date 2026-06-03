@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -118,5 +119,26 @@ func TestChatRequestUsesPerAgentThinkingConfig(t *testing.T) {
 	enabled := buildChatRequest("model", []types.ChatMessage{{Role: "user", Content: "hi"}}, nil, true, "max", true)
 	if enabled.Thinking["type"] != "enabled" || enabled.ReasoningEffort != "max" || !enabled.Stream {
 		t.Fatalf("expected enabled/max streaming thinking, got thinking=%#v effort=%q stream=%t", enabled.Thinking, enabled.ReasoningEffort, enabled.Stream)
+	}
+}
+
+func TestChatRequestKeepsEmptyContentField(t *testing.T) {
+	req := buildChatRequest("model", []types.ChatMessage{{
+		Role: "assistant",
+		ToolCalls: []types.ToolCall{{
+			ID:   "call-1",
+			Type: "function",
+			Function: types.ToolFunction{
+				Name:      "view_dir",
+				Arguments: `{"path":"."}`,
+			},
+		}},
+	}}, nil, false, "", false)
+	data, err := json.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"content":""`) {
+		t.Fatalf("assistant tool-call messages must keep empty content field, got %s", data)
 	}
 }

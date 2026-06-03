@@ -2,7 +2,7 @@ package types
 
 type ChatMessage struct {
 	Role             string     `json:"role"`
-	Content          string     `json:"content,omitempty"`
+	Content          string     `json:"content"`
 	Name             string     `json:"name,omitempty"`
 	ToolCallID       string     `json:"tool_call_id,omitempty"`
 	ReasoningContent string     `json:"reasoning_content,omitempty"`

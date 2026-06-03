@@ -27,8 +27,6 @@ type AgentEvent struct {
 	Text string
 }
 
-const maxToolCallRounds = 24
-
 func (e AgentEvent) Display() string {
 	switch e.Kind {
 	case "thinking_start":
@@ -77,7 +75,7 @@ func (a *Agent) AskWithEvents(ctx context.Context, sess *session.Session, prompt
 	sess.Messages = append(sess.Messages, types.ChatMessage{Role: "user", Content: prompt})
 
 	toolSchemas := a.tools.Schemas(a.isSubAgent)
-	for step := 0; step < maxToolCallRounds; step++ {
+	for {
 		if emit != nil {
 			emit(AgentEvent{Kind: "thinking_start"})
 		}
@@ -119,9 +117,6 @@ func (a *Agent) AskWithEvents(ctx context.Context, sess *session.Session, prompt
 			})
 		}
 	}
-	answer := fmt.Sprintf("I ended this turn after %d tool-call rounds to avoid an infinite tool loop. Some tool or sub-agent work may still be in progress; send a follow-up message to continue from the current session state.", maxToolCallRounds)
-	sess.Messages = append(sess.Messages, types.ChatMessage{Role: "assistant", Content: answer})
-	return answer, nil
 }
 
 func messagesForAPI(messages []types.ChatMessage, visibleSkills map[string]bool, thinkingEnabled bool) []types.ChatMessage {

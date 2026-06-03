@@ -220,8 +220,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.subViewID != "" {
 				m.subViewID = ""
 				m.status = "ready"
-				m.log.SetContent(m.wrapContent(m.content))
-				m.log.GotoBottom()
+				m.refreshLog(true)
 				return m, nil
 			}
 			if m.thinking || len(m.queuedMessages) > 0 {
@@ -414,8 +413,15 @@ func (m model) View() string {
 
 func (m *model) appendLog(s string) {
 	m.content += s
+	m.refreshLog(false)
+}
+
+func (m *model) refreshLog(forceBottom bool) {
+	wasBottom := m.log.AtBottom()
 	m.log.SetContent(m.wrapContent(m.content))
-	m.log.GotoBottom()
+	if forceBottom || wasBottom {
+		m.log.GotoBottom()
+	}
 }
 
 func (m model) wrapContent(content string) string {
@@ -437,6 +443,7 @@ func (m model) startAgentTurn(value string, recordHistory bool) (model, tea.Cmd)
 	}
 	prompt := m.withActiveWorkContext(value)
 	m.appendLog("\n" + userStyle.Render("You") + ":\n" + prompt + "\n")
+	m.log.GotoBottom()
 	m.thinking = true
 	m.status = m.agentRunningStatus()
 	cmd, cancel, events := m.ask(prompt)
@@ -633,8 +640,7 @@ func (m *model) replacePendingTool(replacement string) {
 			m.content = m.content[:idx] + replacement + m.content[idx+len(m.pendingToolLine):]
 			m.pendingToolLine = ""
 			m.pendingToolName = ""
-			m.log.SetContent(m.wrapContent(m.content))
-			m.log.GotoBottom()
+			m.refreshLog(false)
 			return
 		}
 	}
@@ -647,8 +653,7 @@ func (m *model) updatePendingAnswer(replacement string) {
 		if idx := strings.LastIndex(m.content, m.pendingAnswerLine); idx >= 0 {
 			m.content = m.content[:idx] + replacement + m.content[idx+len(m.pendingAnswerLine):]
 			m.pendingAnswerLine = replacement
-			m.log.SetContent(m.wrapContent(m.content))
-			m.log.GotoBottom()
+			m.refreshLog(false)
 			return
 		}
 	}
@@ -661,8 +666,7 @@ func (m *model) replacePendingThinking(replacement string) {
 		if idx := strings.LastIndex(m.content, m.pendingThinkLine); idx >= 0 {
 			m.content = m.content[:idx] + replacement + m.content[idx+len(m.pendingThinkLine):]
 			m.pendingThinkLine = replacement
-			m.log.SetContent(m.wrapContent(m.content))
-			m.log.GotoBottom()
+			m.refreshLog(false)
 			return
 		}
 	}
@@ -676,8 +680,7 @@ func (m *model) updatePendingThinking(replacement string) {
 		if idx := strings.LastIndex(m.content, m.pendingThinkLine); idx >= 0 {
 			m.content = m.content[:idx] + replacement + m.content[idx+len(m.pendingThinkLine):]
 			m.pendingThinkLine = replacement
-			m.log.SetContent(m.wrapContent(m.content))
-			m.log.GotoBottom()
+			m.refreshLog(false)
 			return
 		}
 	}
@@ -696,8 +699,7 @@ func (m *model) clearPendingThinking() {
 		m.pendingThinkSpin = false
 		m.streamThinkText = ""
 		m.pendingThinkStart = -1
-		m.log.SetContent(m.wrapContent(m.content))
-		m.log.GotoBottom()
+		m.refreshLog(false)
 		return
 	}
 	m.pendingThinkLine = ""
@@ -712,8 +714,7 @@ func (m *model) truncatePendingThinking() {
 	}
 	m.content = m.content[:m.pendingThinkStart]
 	m.pendingThinkStart = -1
-	m.log.SetContent(m.wrapContent(m.content))
-	m.log.GotoBottom()
+	m.refreshLog(false)
 }
 
 func (m *model) finalizePendingThinking() bool {
@@ -768,8 +769,7 @@ func (m *model) refreshPendingSpinners() {
 		}
 	}
 	if changed {
-		m.log.SetContent(m.wrapContent(m.content))
-		m.log.GotoBottom()
+		m.refreshLog(false)
 	}
 }
 
@@ -1041,7 +1041,7 @@ func (m model) handleCommand(raw string) (model, tea.Cmd) {
 		m.historyDraft = ""
 		m.ctx.Tools.RestoreSubAgents(sess, nil, m.ctx.SubSessions)
 		m.content = ""
-		m.log.SetContent(m.wrapContent(m.content))
+		m.refreshLog(true)
 	case "resume":
 		_ = m.cleanupEmptySession()
 		if arg == "" {
@@ -1469,8 +1469,7 @@ func (m model) resumeSession(idOrName string) (model, tea.Cmd) {
 	m.historyDraft = ""
 	m.ctx.Tools.RestoreSubAgents(sess, sess.SubAgents, m.ctx.SubSessions)
 	m.content = renderSessionContent(m.ctx, sess)
-	m.log.SetContent(m.wrapContent(m.content))
-	m.log.GotoBottom()
+	m.refreshLog(true)
 	m.status = "ready"
 	return m, nil
 }
