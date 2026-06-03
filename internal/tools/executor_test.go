@@ -149,6 +149,45 @@ func TestDiffFileReplaceRequiresUniqueMatchByDefault(t *testing.T) {
 	}
 }
 
+func TestSearchGrepFilenameModeUsesRegex(t *testing.T) {
+	work := t.TempDir()
+	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
+	sess, err := store.New("test", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
+	files := []string{
+		"alpha.py",
+		"beta.txt",
+		"dir/gamma.py",
+		"dir/delta.md",
+	}
+	for _, file := range files {
+		path := filepath.Join(work, filepath.FromSlash(file))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	out, err := exec.Run(context.Background(), sess, "search_grep", map[string]any{
+		"query": `(^|/).*\.py$`,
+		"mode":  "filename",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "alpha.py") || !strings.Contains(out, "dir/gamma.py") {
+		t.Fatalf("expected regex filename matches, got %s", out)
+	}
+	if strings.Contains(out, "beta.txt") || strings.Contains(out, "dir/delta.md") {
+		t.Fatalf("unexpected filename matches, got %s", out)
+	}
+}
+
 func TestSubAgentWaitCheckSchemaIsRootOnly(t *testing.T) {
 	exec := NewExecutor(config.Paths{}, nil, 20000, false, false)
 	if !hasToolSchema(exec.Schemas(false), "sub_agent_wait_check") {

@@ -93,7 +93,7 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 				"path": prop("string", "Directory path under the workplace."),
 			},
 		}),
-		schema("search_grep", "Search file names or file contents in the workplace.", map[string]any{
+		schema("search_grep", "Search file names or file contents in the workplace with regular expressions. filename mode matches the relative path; content mode matches file lines.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"query":          prop("string", "Search string or regular expression."),
@@ -377,13 +377,9 @@ func (e *Executor) searchGrep(args map[string]any) (string, error) {
 		mode = "content"
 	}
 	caseSensitive := boolArg(args, "case_sensitive", false)
-	pattern := query
-	if !caseSensitive {
-		pattern = "(?i)" + pattern
-	}
-	re, err := regexp.Compile(pattern)
+	re, err := compileSearchPattern(query, caseSensitive)
 	if err != nil {
-		re = regexp.MustCompile(regexp.QuoteMeta(query))
+		return "", err
 	}
 	matches := []string{}
 	err = filepath.WalkDir(e.paths.Workplace, func(path string, d os.DirEntry, err error) error {
@@ -395,15 +391,7 @@ func (e *Executor) searchGrep(args map[string]any) (string, error) {
 			return nil
 		}
 		if mode == "filename" {
-			hay := rel
-			if !caseSensitive {
-				hay = strings.ToLower(hay)
-			}
-			needle := query
-			if !caseSensitive {
-				needle = strings.ToLower(needle)
-			}
-			if strings.Contains(hay, needle) {
+			if re.MatchString(filepath.ToSlash(rel)) {
 				matches = append(matches, rel)
 			}
 			return nil
@@ -429,6 +417,22 @@ func (e *Executor) searchGrep(args map[string]any) (string, error) {
 		return "no matches", nil
 	}
 	return truncate(strings.Join(matches, "\n"), e.maxOutputChars), nil
+}
+
+func compileSearchPattern(query string, caseSensitive bool) (*regexp.Regexp, error) {
+	pattern := query
+	if !caseSensitive {
+		pattern = "(?i)" + pattern
+	}
+	re, err := regexp.Compile(pattern)
+	if err == nil {
+		return re, nil
+	}
+	quoted := regexp.QuoteMeta(query)
+	if !caseSensitive {
+		quoted = "(?i)" + quoted
+	}
+	return regexp.Compile(quoted)
 }
 
 func (e *Executor) diffFile(sess *session.Session, args map[string]any) (string, error) {
