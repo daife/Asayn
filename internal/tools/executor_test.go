@@ -82,17 +82,17 @@ func TestDiffFileApplyHistoryShowRevertMany(t *testing.T) {
 	}
 }
 
-func TestSubAgentWaitSchemaIsRootOnly(t *testing.T) {
+func TestSubAgentWaitCheckSchemaIsRootOnly(t *testing.T) {
 	exec := NewExecutor(config.Paths{}, nil, 20000, false, false)
-	if !hasToolSchema(exec.Schemas(false), "sub_agent_wait") {
-		t.Fatal("root agent schemas should include sub_agent_wait")
+	if !hasToolSchema(exec.Schemas(false), "sub_agent_wait_check") {
+		t.Fatal("root agent schemas should include sub_agent_wait_check")
 	}
-	if hasToolSchema(exec.Schemas(true), "sub_agent_wait") {
-		t.Fatal("sub-agent schemas should not include sub_agent_wait")
+	if hasToolSchema(exec.Schemas(true), "sub_agent_wait_check") {
+		t.Fatal("sub-agent schemas should not include sub_agent_wait_check")
 	}
 }
 
-func TestSubAgentWaitReturnsStatusAfterDelay(t *testing.T) {
+func TestSubAgentWaitCheckReturnsStatusAfterDelay(t *testing.T) {
 	work := t.TempDir()
 	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
 	sess, err := store.New("test", "default")
@@ -100,7 +100,7 @@ func TestSubAgentWaitReturnsStatusAfterDelay(t *testing.T) {
 		t.Fatal(err)
 	}
 	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
-	start, err := exec.Run(context.Background(), sess, "sub_agent_start", map[string]any{
+	start, err := exec.Run(context.Background(), sess, "sub_agent_start_async", map[string]any{
 		"instruction": "inspect a file",
 	})
 	if err != nil {
@@ -108,7 +108,7 @@ func TestSubAgentWaitReturnsStatusAfterDelay(t *testing.T) {
 	}
 	defer exec.Shutdown()
 	id := strings.TrimPrefix(strings.SplitN(start, "\n", 2)[0], "sub_agent_id=")
-	out, err := exec.Run(context.Background(), sess, "sub_agent_wait", map[string]any{
+	out, err := exec.Run(context.Background(), sess, "sub_agent_wait_check", map[string]any{
 		"sub_agent_id": id,
 		"wait_seconds": 0,
 	})

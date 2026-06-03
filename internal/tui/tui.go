@@ -447,6 +447,10 @@ func (m model) activeWorkContext() string {
 		if sub.Status == "completed" || sub.Status == "stopped" {
 			continue
 		}
+		if sub.Status == "ready_for_check" {
+			rows = append(rows, fmt.Sprintf("[%s] is ready for check", sub.ID))
+			continue
+		}
 		subRows = append(subRows, fmt.Sprintf("- id=%s status=%s agent=%s name=%s session_id=%s", sub.ID, sub.Status, sub.Agent, sub.Name, sub.SessionID))
 	}
 	if len(subRows) > 0 {

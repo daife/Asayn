@@ -90,10 +90,10 @@ func (m *SubAgentManager) Start(parent *session.Session, store *session.Store, a
 	task.persist()
 
 	go m.run(task, instruction)
-	return fmt.Sprintf("sub_agent_id=%s\nstatus: running (parallel — continue with other work and check back later with sub_agent_status)", task.ID)
+	return fmt.Sprintf("sub_agent_id=%s\nstatus: running (parallel — continue with other work and check back later with sub_agent_check)", task.ID)
 }
 
-func (m *SubAgentManager) Send(id, instruction string) string {
+func (m *SubAgentManager) ResumeAsync(id, instruction string) string {
 	m.mu.Lock()
 	task := m.items[id]
 	if task == nil {
@@ -102,7 +102,7 @@ func (m *SubAgentManager) Send(id, instruction string) string {
 	}
 	if task.Status == "running" {
 		m.mu.Unlock()
-		return "sub-agent is still running; wait for completion or stop it first"
+		return "sub-agent is still running; wait for completion first"
 	}
 	if task.Status == "stopped" {
 		task.stop = make(chan struct{})
@@ -113,20 +113,13 @@ func (m *SubAgentManager) Send(id, instruction string) string {
 	task.persistLocked()
 	m.mu.Unlock()
 	go m.run(task, instruction)
-	return "sent"
+	return fmt.Sprintf("sub_agent_id=%s\nstatus: running (parallel — continue with other work and check back later with sub_agent_check)", task.ID)
 }
 
-func (m *SubAgentManager) Status(paths config.Paths, id string) string {
+func (m *SubAgentManager) List(paths config.Paths) string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if id != "" {
-		task := m.items[id]
-		if task == nil {
-			return "sub-agent not found"
-		}
-		return truncate(m.describeForRoot(task), m.limit)
-	}
-	rows := []string{"available sub-agents:"}
+	rows := []string{"available sub-agent configs:"}
 	if infos, err := config.ListAgentInfos(paths, config.SubAgentKind); err == nil && len(infos) > 0 {
 		for _, info := range infos {
 			rows = append(rows, fmt.Sprintf("- %s [%s]: %s", info.Name, info.Source, info.Description))
@@ -134,28 +127,33 @@ func (m *SubAgentManager) Status(paths config.Paths, id string) string {
 	} else {
 		rows = append(rows, "none")
 	}
-	rows = append(rows, "", "active/restored sub-agents:")
+	rows = append(rows, "", "active sub-agents:")
 	for _, task := range m.items {
-		rows = append(rows, fmt.Sprintf("%s %s agent=%s name=%s result=%s", task.ID, task.Status, task.Agent, task.Name, task.Result))
+		rows = append(rows, fmt.Sprintf("%s %s agent=%s name=%s", task.ID, task.Status, task.Agent, task.Name))
 	}
 	if len(m.items) == 0 {
 		rows = append(rows, "none")
-	} else {
-		hasRunning := false
-		for _, task := range m.items {
-			if task.Status == "running" {
-				hasRunning = true
-				break
-			}
-		}
-		if hasRunning {
-			rows = append(rows, "", "Some sub-agents are still running. Continue with other worthwhile parallel work first; if none remains, use sub_agent_wait for a specific sub-agent before checking again.")
-		}
 	}
 	return truncate(strings.Join(rows, "\n"), m.limit)
 }
 
-func (m *SubAgentManager) Wait(ctx context.Context, paths config.Paths, id string, waitSeconds int) (string, error) {
+func (m *SubAgentManager) Check(paths config.Paths, id string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	task := m.items[id]
+	if task == nil {
+		return "status: notfound"
+	}
+	res := m.describeForRoot(task)
+	if task.Status == "ready_for_check" {
+		task.Status = "completed"
+		task.UpdatedAt = time.Now()
+		task.persistLocked()
+	}
+	return truncate(res, m.limit)
+}
+
+func (m *SubAgentManager) WaitCheck(ctx context.Context, paths config.Paths, id string, waitSeconds int) (string, error) {
 	if id == "" {
 		return "", fmt.Errorf("sub_agent_id is required")
 	}
@@ -168,7 +166,7 @@ func (m *SubAgentManager) Wait(ctx context.Context, paths config.Paths, id strin
 	case <-ctx.Done():
 		return "", ctx.Err()
 	case <-timer.C:
-		return m.Status(paths, id), nil
+		return m.Check(paths, id), nil
 	}
 }
 
@@ -282,7 +280,7 @@ func (m *SubAgentManager) run(task *SubAgentTask, instruction string) {
 			m.mu.Unlock()
 			return
 		}
-		task.Status = "completed"
+		task.Status = "ready_for_check"
 		if strings.HasPrefix(result, "sub-agent error:") {
 			task.Status = "failed"
 		}

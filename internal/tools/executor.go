@@ -180,43 +180,38 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 
 func subAgentSchemas() []types.ToolSchema {
 	return []types.ToolSchema{
-		schema("sub_agent_start", "Start a parallel sub-agent. Sub-agents have file tools but no shell or sub-agent tools.", map[string]any{
+		schema("sub_agent_list", "List available sub-agent configurations and active sub-agents.", nil),
+		schema("sub_agent_start_async", "Start a parallel sub-agent. Sub-agents have file tools but no shell or sub-agent tools.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"agent":       prop("string", "Sub-agent config name from sub_agent_status available sub-agents."),
+				"agent":       prop("string", "Sub-agent config name from sub_agent_list available configs."),
 				"name":        prop("string", "Display name."),
 				"instruction": prop("string", "Task for the sub-agent."),
 			},
 			"required": []string{"instruction"},
 		}),
-		schema("sub_agent_status", "List sub-agent status or get one sub-agent transcript/result.", map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"sub_agent_id": prop("string", "Optional sub-agent ID."),
-			},
-		}),
-		schema("sub_agent_wait", "Wait for a specified number of seconds, then return one sub-agent transcript/result status. Use only when there is no other worthwhile parallel work to do.", map[string]any{
+		schema("sub_agent_check", "Check the status and result of a specific sub-agent. If the status was ready_for_check, it transitions to completed after this check.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"sub_agent_id": prop("string", "Sub-agent ID."),
-				"wait_seconds": prop("integer", "Seconds to wait before reading status. The root agent chooses this delay."),
+			},
+			"required": []string{"sub_agent_id"},
+		}),
+		schema("sub_agent_wait_check", "Wait for a specified number of seconds, then check the sub-agent status. Use only when there is no other worthwhile parallel work to do.", map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"sub_agent_id": prop("string", "Sub-agent ID."),
+				"wait_seconds": prop("integer", "Seconds to wait before checking status."),
 			},
 			"required": []string{"sub_agent_id", "wait_seconds"},
 		}),
-		schema("sub_agent_send", "Send a follow-up instruction to a completed or stopped sub-agent context.", map[string]any{
+		schema("sub_agent_resume_async", "Send a follow-up instruction to a completed sub-agent context.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"sub_agent_id": prop("string", "Sub-agent ID."),
 				"instruction":  prop("string", "Follow-up instruction."),
 			},
 			"required": []string{"sub_agent_id", "instruction"},
-		}),
-		schema("sub_agent_stop", "Stop a running sub-agent.", map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"sub_agent_id": prop("string", "Sub-agent ID."),
-			},
-			"required": []string{"sub_agent_id"},
 		}),
 	}
 }
@@ -258,16 +253,16 @@ func (e *Executor) Run(ctx context.Context, sess *session.Session, name string, 
 			return "", fmt.Errorf("shell_async_write is not available unless interactive shell is enabled")
 		}
 		return e.shells.Write(stringArg(args, "shell_id"), stringArg(args, "input"))
-	case "sub_agent_start":
+	case "sub_agent_list":
+		return e.subAgents.List(e.paths), nil
+	case "sub_agent_start_async":
 		return e.subAgents.Start(sess, e.store, stringArg(args, "agent"), stringArg(args, "name"), stringArg(args, "instruction")), nil
-	case "sub_agent_status":
-		return e.subAgents.Status(e.paths, stringArg(args, "sub_agent_id")), nil
-	case "sub_agent_wait":
-		return e.subAgents.Wait(ctx, e.paths, stringArg(args, "sub_agent_id"), intArg(args, "wait_seconds", 0))
-	case "sub_agent_send":
-		return e.subAgents.Send(stringArg(args, "sub_agent_id"), stringArg(args, "instruction")), nil
-	case "sub_agent_stop":
-		return e.subAgents.Stop(stringArg(args, "sub_agent_id")), nil
+	case "sub_agent_check":
+		return e.subAgents.Check(e.paths, stringArg(args, "sub_agent_id")), nil
+	case "sub_agent_wait_check":
+		return e.subAgents.WaitCheck(ctx, e.paths, stringArg(args, "sub_agent_id"), intArg(args, "wait_seconds", 0))
+	case "sub_agent_resume_async":
+		return e.subAgents.ResumeAsync(stringArg(args, "sub_agent_id"), stringArg(args, "instruction")), nil
 	default:
 		return "", fmt.Errorf("unknown tool %q", name)
 	}
@@ -311,7 +306,7 @@ func (e *Executor) ShellSnapshots() []ShellSnapshot {
 }
 
 func (e *Executor) SubAgentStatus(id string) string {
-	return e.subAgents.Status(e.paths, id)
+	return e.subAgents.Check(e.paths, id)
 }
 
 func (e *Executor) RestoreSubAgents(parent *session.Session, refs []session.SubAgentRef, subStore *session.Store) {
