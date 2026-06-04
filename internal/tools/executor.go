@@ -78,57 +78,57 @@ func (e *Executor) SetAgentLimits(maxOutputLines int, allowParallelShell, allowI
 
 func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 	schemas := []types.ToolSchema{
-		schema("read_file", "Read file content. Supports 1-based start_line/end_line.", map[string]any{
+		schema("read_file", "Read a file.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path":       prop("string", "Relative file path."),
-				"start_line": prop("integer", "Start line (1-based)."),
-				"end_line":   prop("integer", "End line (1-based)."),
+				"path":       prop("string", "Relative path."),
+				"start_line": prop("integer", "First line, 1-based."),
+				"end_line":   prop("integer", "Last line, 1-based."),
 			},
 			"required": []string{"path"},
 		}),
-		schema("view_dir", "List directory contents.", map[string]any{
+		schema("view_dir", "List a directory.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path": prop("string", "Relative directory path."),
+				"path": prop("string", "Relative path."),
 			},
 		}),
-		schema("search_grep", "Regex search. mode=filename matches file paths. mode=content matches lines within files.", map[string]any{
+		schema("search_grep", "Search files with a regex.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"query":          prop("string", "Search regex pattern."),
-				"mode":           prop("string", "'filename' or 'content'."),
-				"case_sensitive": prop("boolean", "Enable case-sensitive search."),
+				"query":          prop("string", "Regex pattern."),
+				"mode":           prop("string", "content or filename."),
+				"case_sensitive": prop("boolean", "Case-sensitive search."),
 			},
 			"required": []string{"query"},
 		}),
-		schema("read_skill", "Read active skill instructions.", map[string]any{
+		schema("read_skill", "Read a visible skill.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"name": prop("string", "Skill name."),
 			},
 			"required": []string{"name"},
 		}),
-		schema("diff_file", "Edit files and manage recorded changes. Prefer apply with dry_run=true for previews. Returns unified diffs.", map[string]any{
+		schema("diff_file", "Edit files and manage recorded changes.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"mode":             prop("string", "apply, replace, write, delete, history, revert, or revert_many."),
-				"dry_run":          prop("boolean", "Preview the change without writing. Use with apply or replace/write/delete."),
-				"path":             prop("string", "Relative file path."),
-				"content":          prop("string", "Complete file content for write."),
-				"unified_diff":     prop("string", "Unified diff. Uses path only when the diff has no file header."),
-				"patches":          prop("array", "Unified diff strings. Each diff may use its own header path or fallback to path."),
-				"old_text":         prop("string", "Exact text block to replace (replace)."),
-				"new_text":         prop("string", "Replacement text block (replace)."),
-				"replace_all":      prop("boolean", "Replace all occurrences of old_text. Default requires exactly 1 match."),
-				"find":             prop("string", "[Alias] Same as old_text."),
-				"replace":          prop("string", "[Alias] Same as new_text."),
-				"change_id":        prop("string", "Change ID for history, revert, or revert_many."),
-				"change_ids":       prop("array", "Change IDs for history or revert_many."),
-				"limit":            prop("integer", "Max history entries (history)."),
-				"allow_create":     prop("boolean", "Allow creating new files (apply/write)."),
-				"expected_current": prop("string", "Guard clause: assert current file content."),
-				"reverse":          prop("boolean", "Reverse change_ids before revert_many. Default true."),
+				"dry_run":          prop("boolean", "Preview only."),
+				"path":             prop("string", "Relative path."),
+				"content":          prop("string", "Full file content."),
+				"unified_diff":     prop("string", "Unified diff."),
+				"patches":          prop("array", "Unified diff strings."),
+				"old_text":         prop("string", "Text to replace."),
+				"new_text":         prop("string", "Replacement text."),
+				"replace_all":      prop("boolean", "Replace every match."),
+				"find":             prop("string", "Alias for old_text."),
+				"replace":          prop("string", "Alias for new_text."),
+				"change_id":        prop("string", "Recorded change ID."),
+				"change_ids":       prop("array", "Recorded change IDs."),
+				"limit":            prop("integer", "History entry limit."),
+				"allow_create":     prop("boolean", "Allow file creation."),
+				"expected_current": prop("string", "Expected current content."),
+				"reverse":          prop("boolean", "Reverse change_ids."),
 			},
 			"required": []string{"mode"},
 		}),
@@ -140,11 +140,11 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 	if shellCWD == "" {
 		shellCWD = "workplace"
 	}
-	schemas = append(schemas, schema("shell_run_sync", fmt.Sprintf("Run a blocking shell command in %q. Returns output only; killed on timeout.", shellCWD), map[string]any{
+	schemas = append(schemas, schema("shell_run_sync", fmt.Sprintf("Run a shell command in %q.", shellCWD), map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"command":     prop("string", "Shell command."),
-			"timeout_sec": prop("integer", "Timeout in seconds (default 60)."),
+			"timeout_sec": prop("integer", "Timeout seconds."),
 		},
 		"required": []string{"command"},
 	}))
@@ -152,14 +152,14 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 		return append(schemas, subAgentSchemas()...)
 	}
 	schemas = append(schemas,
-		schema("shell_run_async", fmt.Sprintf("Start a background shell command in %q. Returns shell_id.", shellCWD), map[string]any{
+		schema("shell_run_async", fmt.Sprintf("Start a background shell command in %q.", shellCWD), map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"command": prop("string", "Shell command."),
 			},
 			"required": []string{"command"},
 		}),
-		schema("shell_async_status", "Check status and output of a background shell command.", map[string]any{
+		schema("shell_async_status", "Check a background shell command.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"shell_id": prop("string", "Shell ID."),
@@ -175,11 +175,11 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 	)
 	if e.allowInteractiveShell {
 		schemas = append(schemas,
-			schema("shell_async_write", "Send input to an interactive background shell.", map[string]any{
+			schema("shell_async_write", "Write to an interactive shell.", map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"shell_id": prop("string", "Shell ID."),
-					"input":    prop("string", "Input text (include \\n if needed)."),
+					"input":    prop("string", "Input text."),
 				},
 				"required": []string{"shell_id", "input"},
 			}))
@@ -190,31 +190,31 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 func subAgentSchemas() []types.ToolSchema {
 	return []types.ToolSchema{
 		schema("sub_agent_list", "List available sub-agents.", nil),
-		schema("sub_agent_start_async", "Start a background sub-agent for file-scoped tasks.", map[string]any{
+		schema("sub_agent_start_async", "Start a background sub-agent.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"agent":       prop("string", "Sub-agent config name."),
+				"agent":       prop("string", "Sub-agent name."),
 				"name":        prop("string", "Task name."),
-				"instruction": prop("string", "Task instructions."),
+				"instruction": prop("string", "Instructions."),
 			},
 			"required": []string{"instruction"},
 		}),
-		schema("sub_agent_check", "Check status and result of a sub-agent. Transitions 'ready_for_check' to 'completed'.", map[string]any{
+		schema("sub_agent_check", "Check a sub-agent.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"sub_agent_id": prop("string", "Sub-agent ID."),
 			},
 			"required": []string{"sub_agent_id"},
 		}),
-		schema("sub_agent_wait_check", "Sleep before checking a sub-agent. Use only when explicitly requested or blocked.", map[string]any{
+		schema("sub_agent_wait_check", "Wait, then check a sub-agent.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"sub_agent_id": prop("string", "Sub-agent ID."),
-				"wait_seconds": prop("integer", "Seconds to wait."),
+				"wait_seconds": prop("integer", "Wait seconds."),
 			},
 			"required": []string{"sub_agent_id", "wait_seconds"},
 		}),
-		schema("sub_agent_resume_async", "Send follow-up instructions to a completed sub-agent.", map[string]any{
+		schema("sub_agent_resume_async", "Resume a completed sub-agent.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"sub_agent_id": prop("string", "Sub-agent ID."),
