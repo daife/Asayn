@@ -248,7 +248,7 @@ func toolUsePrompt(workplace string) string {
 	return fmt.Sprintf(`
 
 Tool rules:
-- Workplace: %q. Use relative paths.
+- Workplace: %q. Tool paths must be workspace-relative.
 - File tools: Prefer diff_file mode=replace with exact old_text/new_text for edits. Use mode=write only for new/small files.
 - Shell tools: Run in workplace root. shell_run_sync is blocking. shell_run_async runs in background.
 - Sub-agents: Run in background. Delegate isolated tasks. Check them when ready_for_check. Do not delegate shell coordination.

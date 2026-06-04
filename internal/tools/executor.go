@@ -81,7 +81,7 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 		schema("read_file", "Read a file.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path":       prop("string", "Relative path."),
+				"path":       prop("string", "Workspace-relative path."),
 				"start_line": prop("integer", "First line, 1-based."),
 				"end_line":   prop("integer", "Last line, 1-based."),
 			},
@@ -90,7 +90,7 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 		schema("view_dir", "List a directory.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path": prop("string", "Relative path."),
+				"path": prop("string", "Workspace-relative path."),
 			},
 		}),
 		schema("search_grep", "Search files with a regex.", map[string]any{
@@ -98,7 +98,7 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 			"properties": map[string]any{
 				"query":          prop("string", "Regex pattern."),
 				"mode":           prop("string", "content or filename."),
-				"case_sensitive": prop("boolean", "Case-sensitive search."),
+				"case_sensitive": prop("boolean", "Default true. Set false for case-insensitive search."),
 			},
 			"required": []string{"query"},
 		}),
@@ -113,22 +113,20 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 			"type": "object",
 			"properties": map[string]any{
 				"mode":             prop("string", "apply, replace, write, delete, history, revert, or revert_many."),
-				"dry_run":          prop("boolean", "Preview only."),
-				"path":             prop("string", "Relative path."),
+				"dry_run":          prop("boolean", "Preview any write mode."),
+				"path":             prop("string", "Workspace-relative path."),
 				"content":          prop("string", "Full file content."),
 				"unified_diff":     prop("string", "Unified diff."),
-				"patches":          prop("array", "Unified diff strings."),
+				"patches":          prop("array", "Array of unified diffs."),
 				"old_text":         prop("string", "Text to replace."),
 				"new_text":         prop("string", "Replacement text."),
 				"replace_all":      prop("boolean", "Replace every match."),
-				"find":             prop("string", "Alias for old_text."),
-				"replace":          prop("string", "Alias for new_text."),
 				"change_id":        prop("string", "Recorded change ID."),
 				"change_ids":       prop("array", "Recorded change IDs."),
 				"limit":            prop("integer", "History entry limit."),
 				"allow_create":     prop("boolean", "Allow file creation."),
 				"expected_current": prop("string", "Expected current content."),
-				"reverse":          prop("boolean", "Reverse change_ids."),
+				"reverse_order":    prop("boolean", "Reverse change_ids for revert_many."),
 			},
 			"required": []string{"mode"},
 		}),
@@ -175,11 +173,11 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 	)
 	if e.allowInteractiveShell {
 		schemas = append(schemas,
-			schema("shell_async_write", "Write to an interactive shell.", map[string]any{
+			schema("shell_async_write", "Send input to an interactive shell.", map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"shell_id": prop("string", "Shell ID."),
-					"input":    prop("string", "Input text."),
+					"input":    prop("string", "Interactive input text."),
 				},
 				"required": []string{"shell_id", "input"},
 			}))
@@ -378,7 +376,7 @@ func (e *Executor) searchGrep(args map[string]any) (string, error) {
 	if mode == "" {
 		mode = "content"
 	}
-	caseSensitive := boolArg(args, "case_sensitive", false)
+	caseSensitive := boolArg(args, "case_sensitive", true)
 	re, err := compileSearchPattern(query, caseSensitive)
 	if err != nil {
 		return "", err
@@ -455,7 +453,7 @@ func (e *Executor) diffFile(sess *session.Session, args map[string]any) (string,
 	case "show":
 		return e.showChanges(sess, changeID, stringSliceArg(args, "change_ids"))
 	case "revert_many":
-		return e.revertChanges(sess, appendChangeIDs(changeID, stringSliceArg(args, "change_ids")), boolArg(args, "reverse", true))
+		return e.revertChanges(sess, appendChangeIDs(changeID, stringSliceArg(args, "change_ids")), revertManyReverseOrder(args))
 	}
 	if mode == "revert" {
 		return e.revertChange(sess, changeID)
@@ -767,6 +765,13 @@ func appendChangeIDs(first string, rest []string) []string {
 	}
 	out = append(out, rest...)
 	return out
+}
+
+func revertManyReverseOrder(args map[string]any) bool {
+	if _, ok := args["reverse_order"]; ok {
+		return boolArg(args, "reverse_order", true)
+	}
+	return boolArg(args, "reverse", true)
 }
 
 func (e *Executor) resolveWorkplacePath(rel string) (string, error) {

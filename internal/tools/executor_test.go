@@ -237,6 +237,51 @@ func TestDiffFileRevertManyDefaultsToReverseOrder(t *testing.T) {
 	}
 }
 
+func TestDiffFileRevertManyReverseOrderFalseUsesProvidedOrder(t *testing.T) {
+	work := t.TempDir()
+	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
+	sess, err := store.New("test", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
+	if err := os.WriteFile(filepath.Join(work, "hello.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, item := range []struct {
+		old string
+		new string
+	}{
+		{"one", "two"},
+		{"two", "three"},
+	} {
+		if _, err := exec.Run(context.Background(), sess, "diff_file", map[string]any{
+			"mode":     "replace",
+			"path":     "hello.txt",
+			"old_text": item.old,
+			"new_text": item.new,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ids := []any{sess.Changes[0].ID, sess.Changes[1].ID}
+	if _, err := exec.Run(context.Background(), sess, "diff_file", map[string]any{
+		"mode":          "revert_many",
+		"change_ids":    ids,
+		"reverse_order": false,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(work, "hello.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "two\n" {
+		t.Fatalf("expected provided-order revert to leave second before-content, got %q", data)
+	}
+}
+
 func TestDiffFileReplaceMultiLineBlockReturnsDiff(t *testing.T) {
 	work := t.TempDir()
 	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
@@ -343,6 +388,40 @@ func TestSearchGrepFilenameModeUsesRegex(t *testing.T) {
 	}
 }
 
+func TestSearchGrepDefaultsToCaseSensitive(t *testing.T) {
+	work := t.TempDir()
+	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
+	sess, err := store.New("test", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
+	if err := os.WriteFile(filepath.Join(work, "case.txt"), []byte("Alpha\nalpha\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := exec.Run(context.Background(), sess, "search_grep", map[string]any{
+		"query": "alpha",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "Alpha") || !strings.Contains(out, "alpha") {
+		t.Fatalf("default search should be case-sensitive, got %s", out)
+	}
+
+	out, err = exec.Run(context.Background(), sess, "search_grep", map[string]any{
+		"query":          "alpha",
+		"case_sensitive": false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "Alpha") || !strings.Contains(out, "alpha") {
+		t.Fatalf("case-insensitive search should match both cases, got %s", out)
+	}
+}
+
 func TestSubAgentWaitCheckSchemaIsRootOnly(t *testing.T) {
 	exec := NewExecutor(config.Paths{}, nil, 20000, false, false)
 	if !hasToolSchema(exec.Schemas(false), "sub_agent_wait_check") {
@@ -446,6 +525,21 @@ func TestShellSchemasFollowShellConfig(t *testing.T) {
 	}
 }
 
+func TestDiffFileSchemaUsesCanonicalParameters(t *testing.T) {
+	exec := NewExecutor(config.Paths{}, nil, 20000, false, false)
+	props := toolProperties(t, exec.Schemas(false), "diff_file")
+	for _, name := range []string{"find", "replace", "reverse"} {
+		if _, ok := props[name]; ok {
+			t.Fatalf("diff_file schema should not expose legacy parameter %q", name)
+		}
+	}
+	for _, name := range []string{"old_text", "new_text", "reverse_order", "dry_run", "patches"} {
+		if _, ok := props[name]; !ok {
+			t.Fatalf("diff_file schema should expose %q", name)
+		}
+	}
+}
+
 func TestShellRunModes(t *testing.T) {
 	work := t.TempDir()
 	syncExec := NewExecutor(config.Paths{Workplace: work}, nil, 20000, false, false)
@@ -489,4 +583,20 @@ func hasToolSchema(schemas []types.ToolSchema, name string) bool {
 		}
 	}
 	return false
+}
+
+func toolProperties(t *testing.T, schemas []types.ToolSchema, name string) map[string]any {
+	t.Helper()
+	for _, item := range schemas {
+		if item.Function.Name != name {
+			continue
+		}
+		props, ok := item.Function.Parameters["properties"].(map[string]any)
+		if !ok {
+			t.Fatalf("%s schema properties missing", name)
+		}
+		return props
+	}
+	t.Fatalf("tool schema %q not found", name)
+	return nil
 }
