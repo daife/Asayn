@@ -78,12 +78,13 @@ func (e *Executor) SetAgentLimits(maxOutputLines int, allowParallelShell, allowI
 
 func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 	schemas := []types.ToolSchema{
-		schema("read_file", "Read a file.", map[string]any{
+		schema("read_file", "Read a file. Binary files and files without extensions are considered risky and will only show a preview unless force_binary is set.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"relative_path": prop("string", "File path relative to the workspace."),
 				"start_line":    prop("integer", "First line, 1-based."),
 				"end_line":      prop("integer", "Last line, 1-based."),
+				"force_binary":  prop("boolean", "Force reading a binary or extensionless file as text."),
 			},
 			"required": []string{"relative_path"},
 		}),
@@ -315,10 +316,41 @@ func (e *Executor) Shutdown() {
 	e.shells.KillAll()
 }
 
+var riskyExtensions = map[string]bool{
+	".7z": true, ".avi": true, ".bin": true, ".bmp": true, ".bz2": true,
+	".class": true, ".dat": true, ".dll": true, ".exe": true, ".flac": true,
+	".gif": true, ".gz": true, ".ico": true, ".jpg": true, ".jpeg": true,
+	".mkv": true, ".mov": true, ".mp3": true, ".mp4": true, ".o": true,
+	".otf": true, ".pdf": true, ".png": true, ".pyc": true, ".so": true,
+	".tar": true, ".ttf": true, ".wasm": true, ".wav": true, ".woff": true,
+	".woff2": true, ".xz": true, ".zip": true,
+}
+
+func isRiskyFile(name string) bool {
+	ext := strings.ToLower(filepath.Ext(name))
+	if ext == "" {
+		return true
+	}
+	return riskyExtensions[ext]
+}
+
 func (e *Executor) readFile(args map[string]any) (string, error) {
 	path, err := e.resolveWorkplacePath(stringArg(args, "relative_path"))
 	if err != nil {
 		return "", err
+	}
+	name := filepath.Base(path)
+	forceBinary := boolArg(args, "force_binary", false)
+	if isRiskyFile(name) && !forceBinary {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return "", err
+		}
+		preview := string(data)
+		if len(preview) > 200 {
+			preview = preview[:200]
+		}
+		return fmt.Sprintf("This file is likely a useless binary file. Preview (first %d chars):\n%s\n\nIf you are sure this is a text file, use force_binary=true.", len(preview), preview), nil
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
