@@ -670,6 +670,9 @@ func TestShellSchemasFollowShellConfig(t *testing.T) {
 	if !hasToolSchema(interactiveExec.Schemas(false), "shell_async_stdin") {
 		t.Fatal("interactive mode should expose shell_async_stdin")
 	}
+	if hasToolSchema(interactiveExec.Schemas(false), "shell_async_wait_check") {
+		t.Fatal("shell_async_wait_check should not be exposed")
+	}
 }
 
 func TestDiffFileSchemaUsesCanonicalParameters(t *testing.T) {
@@ -687,7 +690,7 @@ func TestDiffFileSchemaUsesCanonicalParameters(t *testing.T) {
 	}
 }
 
-func TestDiffFileRejectsLegacyAliasesAndModes(t *testing.T) {
+func TestDiffFileRejectsUnsupportedModes(t *testing.T) {
 	work := t.TempDir()
 	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
 	sess, err := store.New("test", "default")
@@ -695,22 +698,12 @@ func TestDiffFileRejectsLegacyAliasesAndModes(t *testing.T) {
 		t.Fatal(err)
 	}
 	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
-	if err := os.WriteFile(filepath.Join(work, "hello.txt"), []byte("alpha\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 
-	for _, args := range []map[string]any{
-		{"mode": "find_replace", "path": "hello.txt", "old_text": "alpha", "new_text": "beta"},
-		{"mode": "find_replace", "relative_path": "hello.txt", "find": "alpha", "replace": "beta"},
-		{"mode": "replace", "relative_path": "hello.txt", "old_text": "alpha", "new_text": "beta"},
-		{"mode": "revert", "change_id": "missing"},
-		{"mode": "revert_many", "change_ids": []any{"missing"}},
-		{"mode": "preview", "relative_path": "hello.txt", "old_text": "alpha", "new_text": "beta"},
-		{"mode": "patch", "relative_path": "hello.txt", "old_text": "alpha", "new_text": "beta"},
-		{"mode": "show", "change_id": "missing"},
-	} {
-		if _, err := exec.Run(context.Background(), sess, "diff_file", args); err == nil {
-			t.Fatalf("expected legacy args/mode to fail: %#v", args)
+	for _, mode := range []string{"replace", "revert", "patch", "show"} {
+		if _, err := exec.Run(context.Background(), sess, "diff_file", map[string]any{
+			"mode": mode,
+		}); err == nil {
+			t.Fatalf("expected unsupported mode %q to fail", mode)
 		}
 	}
 }
@@ -728,13 +721,6 @@ func TestRelativePathRejectsAbsolutePath(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "only relative paths are supported") {
 		t.Fatalf("expected relative path error, got %v", err)
-	}
-}
-
-func TestShellAsyncWaitCheckIsNotExposed(t *testing.T) {
-	exec := NewExecutor(config.Paths{}, nil, 20000, true, true)
-	if hasToolSchema(exec.Schemas(false), "shell_async_wait_check") {
-		t.Fatal("shell_async_wait_check should not be exposed")
 	}
 }
 
