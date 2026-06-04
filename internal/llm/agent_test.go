@@ -1,9 +1,14 @@
 package llm
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/asayn/asayn/internal/config"
 	"github.com/asayn/asayn/internal/llm/types"
@@ -180,6 +185,38 @@ func TestChatRequestUsesPerAgentThinkingConfig(t *testing.T) {
 	enabled := buildChatRequest("model", []types.ChatMessage{{Role: "user", Content: "hi"}}, nil, true, "max", true)
 	if enabled.Thinking["type"] != "enabled" || enabled.ReasoningEffort != "max" || !enabled.Stream {
 		t.Fatalf("expected enabled/max streaming thinking, got thinking=%#v effort=%q stream=%t", enabled.Thinking, enabled.ReasoningEffort, enabled.Stream)
+	}
+}
+
+func TestChatStreamIgnoresProviderRequestTimeoutWhileStreaming(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("test server does not support flushing")
+		}
+		fmt.Fprintln(w, `data: {"choices":[{"delta":{"role":"assistant","content":"first"}}]}`)
+		flusher.Flush()
+		time.Sleep(1100 * time.Millisecond)
+		fmt.Fprintln(w, `data: {"choices":[{"delta":{"content":" second"}}],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}`)
+		fmt.Fprintln(w, "data: [DONE]")
+	}))
+	defer server.Close()
+
+	client := NewClient(config.ProviderConfig{
+		BaseURL:        server.URL,
+		TimeoutSeconds: 1,
+	})
+
+	msg, usage, err := client.ChatStream(context.Background(), "model", []types.ChatMessage{{Role: "user", Content: "hi"}}, nil, false, "", nil)
+	if err != nil {
+		t.Fatalf("stream should not fail on provider request timeout: %v", err)
+	}
+	if msg.Content != "first second" {
+		t.Fatalf("unexpected streamed content: %q", msg.Content)
+	}
+	if usage.TotalTokens != 3 {
+		t.Fatalf("unexpected usage: %#v", usage)
 	}
 }
 

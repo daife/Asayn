@@ -35,6 +35,28 @@ func TestShouldAutoCompactAtEightyPercent(t *testing.T) {
 	}
 }
 
+func TestReplacePendingToolUsesStableStartIndex(t *testing.T) {
+	m := model{pendingToolStart: -1}
+	m.content = "before\n"
+	m.pendingToolName = "view_dir({})"
+	m.pendingToolLine = "\nold spinner line\n"
+	m.pendingToolStart = len(m.content)
+	m.content += m.pendingToolLine
+	m.content += "after\n"
+
+	m.replacePendingTool("\nresult block\n")
+
+	if strings.Count(m.content, "result block") != 1 {
+		t.Fatalf("expected one result block, got %q", m.content)
+	}
+	if strings.Contains(m.content, "old spinner line") {
+		t.Fatalf("spinner line should have been replaced, got %q", m.content)
+	}
+	if m.pendingToolStart != -1 || m.pendingToolLine != "" || m.pendingToolName != "" {
+		t.Fatalf("pending tool state not cleared: start=%d line=%q name=%q", m.pendingToolStart, m.pendingToolLine, m.pendingToolName)
+	}
+}
+
 func TestCompactPromptsSeparateInstructionFromRetainedContext(t *testing.T) {
 	if compactRetainedPrompt != "Recall what we worked on before." {
 		t.Fatalf("unexpected retained compact prompt: %q", compactRetainedPrompt)

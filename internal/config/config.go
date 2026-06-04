@@ -528,16 +528,6 @@ func ensureWorkspace(paths Paths) error {
 			return err
 		}
 	}
-	for _, rel := range []string{RootAgentKind, SubAgentKind, SpecialAgentKind} {
-		dst := paths.WorkspacePath(rel)
-		if exists(dst) {
-			continue
-		}
-		src := paths.HomePath(rel)
-		if err := copyPath(src, dst); err != nil {
-			return err
-		}
-	}
 	return ensureGitIgnore(paths.Workplace)
 }
 

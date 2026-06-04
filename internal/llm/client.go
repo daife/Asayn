@@ -16,9 +16,10 @@ import (
 )
 
 type Client struct {
-	cfg    config.ProviderConfig
-	http   *http.Client
-	apiURL string
+	cfg     config.ProviderConfig
+	http    *http.Client
+	apiURL  string
+	timeout time.Duration
 }
 
 const rateLimitMaxRetries = 10
@@ -88,13 +89,17 @@ func NewClient(cfg config.ProviderConfig) *Client {
 		timeout = 120 * time.Second
 	}
 	return &Client{
-		cfg:    cfg,
-		http:   &http.Client{Timeout: timeout},
-		apiURL: completionsURL(cfg.BaseURL),
+		cfg:     cfg,
+		http:    &http.Client{},
+		apiURL:  completionsURL(cfg.BaseURL),
+		timeout: timeout,
 	}
 }
 
 func (c *Client) Chat(ctx context.Context, model string, messages []types.ChatMessage, tools []types.ToolSchema, thinkingEnabled bool, reasoningEffort string) (types.ChatMessage, types.Usage, error) {
+	ctx, cancel := contextWithTimeoutIfSooner(ctx, c.timeout)
+	defer cancel()
+
 	reqBody := buildChatRequest(model, messages, tools, thinkingEnabled, reasoningEffort, false)
 
 	data, err := json.Marshal(reqBody)
@@ -301,6 +306,16 @@ func (c *Client) ChatStream(ctx context.Context, model string, messages []types.
 		}
 	}
 	return msg, finalUsage, nil
+}
+
+func contextWithTimeoutIfSooner(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout <= 0 {
+		return ctx, func() {}
+	}
+	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) <= timeout {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, timeout)
 }
 
 func buildChatRequest(model string, messages []types.ChatMessage, tools []types.ToolSchema, thinkingEnabled bool, reasoningEffort string, stream bool) chatRequest {

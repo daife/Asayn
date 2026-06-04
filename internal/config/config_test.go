@@ -96,7 +96,11 @@ func TestLoadAgentModel(t *testing.T) {
 	}
 
 	// Test custom model in TOML
-	customPath := filepath.Join(paths.WorkspaceDir, RootAgentKind, "custom.toml")
+	customDir := filepath.Join(paths.WorkspaceDir, RootAgentKind)
+	if err := os.MkdirAll(customDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	customPath := filepath.Join(customDir, "custom.toml")
 	content := `name = "custom"
 model = "custom-model"
 `

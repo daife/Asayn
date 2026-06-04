@@ -67,6 +67,7 @@ type model struct {
 	spinner                   int
 	pendingToolLine           string
 	pendingToolName           string
+	pendingToolStart          int
 	pendingThinkLine          string
 	pendingThinkSpin          bool
 	streamThinkText           string
@@ -204,6 +205,7 @@ func Run(ctx *app.Context) error {
 		content:            content,
 		status:             "ready",
 		historyIndex:       -1,
+		pendingToolStart:   -1,
 		pendingThinkStart:  -1,
 		pendingAnswerStart: -1,
 	}
@@ -357,6 +359,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendingThinkSpin = false
 		m.pendingThinkLine = ""
 		m.pendingThinkStart = -1
+		m.pendingToolLine = ""
+		m.pendingToolName = ""
+		m.pendingToolStart = -1
 
 		if msg.err == nil {
 			modelName := msg.model
@@ -792,6 +797,7 @@ func (m *model) appendAgentEvent(event llm.AgentEvent) bool {
 		line := "\n" + toolRunStyle.Render(spinnerFrame(m.spinner)+" Tool called") + ": " + event.Text + "\n"
 		m.pendingToolLine = line
 		m.pendingToolName = event.Text
+		m.pendingToolStart = len(m.content)
 		m.appendLog(line)
 	case "tool_result":
 		m.replacePendingTool("\n" + successStyle.Render("● Tool result") + ": " + mutedStyle.Render(m.pendingToolName) + minorResult(event.Text, 8) + "\n")
@@ -838,17 +844,28 @@ func (m *model) shouldAutoCompact(totalTokens int) bool {
 }
 
 func (m *model) replacePendingTool(replacement string) {
+	if m.pendingToolStart >= 0 && m.pendingToolStart <= len(m.content) && strings.HasPrefix(m.content[m.pendingToolStart:], m.pendingToolLine) {
+		m.content = m.content[:m.pendingToolStart] + replacement + m.content[m.pendingToolStart+len(m.pendingToolLine):]
+		m.pendingToolLine = ""
+		m.pendingToolName = ""
+		m.pendingToolStart = -1
+		m.refreshLog(false)
+		return
+	}
 	if m.pendingToolLine != "" {
 		if idx := strings.LastIndex(m.content, m.pendingToolLine); idx >= 0 {
 			m.content = m.content[:idx] + replacement + m.content[idx+len(m.pendingToolLine):]
 			m.pendingToolLine = ""
 			m.pendingToolName = ""
+			m.pendingToolStart = -1
 			m.refreshLog(false)
 			return
 		}
 	}
 	m.appendLog(replacement)
+	m.pendingToolLine = ""
 	m.pendingToolName = ""
+	m.pendingToolStart = -1
 }
 
 func (m *model) appendAnswerDelta(delta string) {
@@ -975,8 +992,13 @@ func (m *model) refreshPendingSpinners() {
 	}
 	if m.pendingToolLine != "" && m.pendingToolName != "" {
 		next := "\n" + toolRunStyle.Render(spinnerFrame(m.spinner)+" Tool called") + ": " + m.pendingToolName + "\n"
-		if idx := strings.LastIndex(m.content, m.pendingToolLine); idx >= 0 {
+		if m.pendingToolStart >= 0 && m.pendingToolStart <= len(m.content) && strings.HasPrefix(m.content[m.pendingToolStart:], m.pendingToolLine) {
+			m.content = m.content[:m.pendingToolStart] + next + m.content[m.pendingToolStart+len(m.pendingToolLine):]
+			m.pendingToolLine = next
+			changed = true
+		} else if idx := strings.LastIndex(m.content, m.pendingToolLine); idx >= 0 {
 			m.content = m.content[:idx] + next + m.content[idx+len(m.pendingToolLine):]
+			m.pendingToolStart = idx
 			m.pendingToolLine = next
 			changed = true
 		}
