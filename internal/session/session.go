@@ -14,16 +14,17 @@ import (
 )
 
 type Session struct {
-	ID            string              `json:"id"`
-	Name          string              `json:"name"`
-	RootAgent     string              `json:"root_agent"`
-	CreatedAt     time.Time           `json:"created_at"`
-	UpdatedAt     time.Time           `json:"updated_at"`
-	Messages      []types.ChatMessage `json:"messages"`
-	VisibleSkills map[string]bool     `json:"visible_skills"`
-	Changes       []FileChange        `json:"changes"`
-	SubAgents     []SubAgentRef       `json:"sub_agents"`
-	InputHistory  []string            `json:"input_history"`
+	ID              string              `json:"id"`
+	Name            string              `json:"name"`
+	RootAgent       string              `json:"root_agent"`
+	CreatedAt       time.Time           `json:"created_at"`
+	UpdatedAt       time.Time           `json:"updated_at"`
+	Messages        []types.ChatMessage `json:"messages"`
+	CompactedBefore int                 `json:"compacted_before,omitempty"`
+	VisibleSkills   map[string]bool     `json:"visible_skills"`
+	Changes         []FileChange        `json:"changes"`
+	SubAgents       []SubAgentRef       `json:"sub_agents"`
+	InputHistory    []string            `json:"input_history"`
 }
 
 type SubAgentRef struct {

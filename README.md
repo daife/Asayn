@@ -39,7 +39,7 @@ default_Asayn/        # repository defaults embedded into the binary
   sub_agents/
     default.toml
   special_agents/
-    default.toml
+    compact_agent.toml
   skills/
     example-skill/
       SKILL.md
@@ -123,9 +123,17 @@ allowed_models = [
   "nex-agi/Nex-N2-Pro"
 ]
 
-[providers.SiliconFlow.model_limits.nex-agi/Nex-N2-Pro]
+[providers.SiliconFlow.model_limits."nex-agi/Nex-N2-Pro"]
 context_window = 384000
 max_output_tokens = 32768
+
+[providers.SiliconFlow.model_limits."deepseek-ai/DeepSeek-V4-Flash"]
+context_window = 1024000
+max_output_tokens = 384000
+
+[providers.SiliconFlow.model_limits."deepseek-ai/DeepSeek-V4-Pro"]
+context_window = 1024000
+max_output_tokens = 384000
 
 [providers.DeepSeek]
 url = "https://api.deepseek.com"
@@ -135,6 +143,14 @@ allowed_models = [
   "deepseek-v4-pro",
   "deepseek-v4-flash"
 ]
+
+[providers.DeepSeek.model_limits.deepseek-v4-pro]
+context_window = 1024000
+max_output_tokens = 384000
+
+[providers.DeepSeek.model_limits.deepseek-v4-flash]
+context_window = 1024000
+max_output_tokens = 384000
 ```
 
 The optional `model_limits` table sets per-model context window and max output tokens. DeepSeek-class models default to 1 M context / 384 k output when not configured. The sidebar context-window bar reads these limits from the current provider/model combination in real time.
@@ -166,13 +182,17 @@ allow_interactive_shell = false
 - `/fork [name]`
 - `/root_agent [name]` (alias: `/model`)
 - `/model_config`
-- `/compact [instructions]` reserved
+- `/compact`
 - `/btw <question>` reserved
 - `/exit`
 
 ## Sub-Agents
 
-Root agents can list, start, check, wait-check, and resume sub-agents through the fixed `sub_agent_*` tools. `sub_agent_list` lists configured `sub_agents/*.toml` names and descriptions. `sub_agent_start_async` accepts an `agent` name from that list; workplace configs override global configs. A sub-agent keeps its own session history and cannot see `sub_agent_*`, `diff_file`, or shell tools. That keeps delegated work read-only by default, so a sub-agent can research and report without modifying the root agent's files.
+Root agents can list, start, check, wait-check, and resume sub-agents through the fixed `sub_agent_*` tools. `sub_agent_list` lists configured `sub_agents/*.toml` names and descriptions. `sub_agent_start_async` accepts an `agent` name from that list; workplace configs override global configs. A sub-agent keeps its own session history and cannot see `sub_agent_*` or shell tools.
+
+## Context Compression
+
+`/compact` runs `special_agents/compact_agent.toml` to summarize the current effective conversation into a compact continuation state. The compact agent receives detailed compression instructions as that temporary user turn, but the retained conversation replaces that long prompt with `Recall what we worked on before.` so later root-agent calls are not polluted by compression instructions. The visible transcript remains in the TUI, but subsequent model calls only send the root system prompt plus the new compact summary round and newer messages. Repeated compression only summarizes the current effective context; history hidden by an earlier compression is not sent to `compact_agent` again. Asayn also starts compression automatically when the latest context-window usage reaches 80%; if an agent turn is still running, it is canceled first and the compact agent summarizes the partial chain that had already been recorded. Compression token usage is logged against the same session. Special agents appear in `/model_config`; they use the same non-shell, non-sub-agent tool exposure as sub-agents and only see skills selected for that special agent.
 
 ## Skills
 

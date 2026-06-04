@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/asayn/asayn/internal/app"
@@ -40,6 +41,9 @@ type model struct {
 	status                    string
 	thinking                  bool
 	activeCancel              context.CancelFunc
+	activeRunKind             string
+	pendingCompact            bool
+	compactBaseLen            int
 	queuedMessages            []string
 	agentEvents               chan agentRunEvent
 	commandSelected           int
@@ -78,6 +82,8 @@ type agentMsg struct {
 	answer string
 	usage  types.Usage
 	err    error
+	kind   string
+	model  string
 }
 
 type agentRunEvent struct {
@@ -102,6 +108,54 @@ type commandSpec struct {
 	Description string
 }
 
+const compactRetainedPrompt = "Recall what we worked on before."
+
+const compactInstructionPrompt = `Create a rigorous continuation summary of the visible conversation so the future main agent can continue with this summary as its sole memory after compression.
+
+The summary is for the future main agent, not for the user. It must be complete enough to continue work without rereading hidden history. Do not write a vague narrative. Do not omit earlier user turns just because later turns look more important.
+
+Output exactly these top-level sections, in this order:
+
+## Conversation Ledger
+Cover every visible user turn in chronological order. For each turn, create an entry like:
+- Turn N:
+  - User request: what the user asked for, including exact constraints, corrections, wording requirements, and whether they asked to install, commit, verify, or only explain.
+  - Assistant actions: tools/commands/files inspected or edited, important design decisions, and any assumptions made.
+  - Tool results: key command outputs, errors, test results, file paths, model/API/config names, and any evidence that affected the work.
+  - Outcome: what was completed, what changed, what was installed or not installed, and what remains unresolved.
+
+If the input already contains an earlier compact summary, treat it as the authoritative record of history hidden by a previous compression. Include it as the earliest ledger entry or as prior-state context; do not invent details beyond it.
+
+## Current State
+Summarize the exact current project/session state:
+- Current user goal and latest intent.
+- Files changed or added, including config files outside the repository if mentioned.
+- Tests, builds, installs, and their latest known status.
+- Running, canceled, queued, or interrupted model/tool chains.
+- Active context boundary facts, including whether this summary follows a manual or automatic compression if visible.
+
+## Pending Work
+List the next concrete tasks, known bugs, missing verification, risks, and likely next command or file to inspect. Be explicit about anything that did not finish.
+
+## Standing User Preferences And Workflow Habits
+Extract recurring requirements and habits from the whole conversation, for example:
+- Whether the user expects changes to be committed after completion.
+- Whether the user expects go test ./..., a build, reinstall, or specific verification commands after changes.
+- Whether the user prefers Chinese or English for user-facing strings, prompts, status messages, or documentation in specific areas.
+- Any repeated preferences about tool exposure, skill visibility, binary filtering, retry behavior, context compression, or installation.
+Only state a habit if the conversation provides evidence. If there is no evidence for a habit, say it is not established.
+
+## Critical Constraints
+Preserve non-negotiable constraints, edge cases, and exact strings that future work must not break.
+
+Rules:
+- Be chronological and exhaustive about user turns.
+- Preserve exact error messages, command outputs, file paths, function names, config table names, model names, and user-facing strings when they may matter.
+- If a model/tool call chain was interrupted, summarize what had already happened and clearly state what did not finish.
+- Do not claim tests passed, files were installed, or commits were made unless the history shows that.
+- Do not include an introduction, apology, or meta-commentary about compression.
+- Output only the continuation summary.`
+
 var commands = []commandSpec{
 	{Name: "/help", Description: "show help"},
 	{Name: "/new", Description: "start a new session"},
@@ -112,7 +166,7 @@ var commands = []commandSpec{
 	{Name: "/root_agent", Description: "select root agent"},
 	{Name: "/model", Description: "select root agent (alias for /root_agent)"},
 	{Name: "/model_config", Description: "configure agent settings"},
-	{Name: "/compact", Description: "reserved context compression"},
+	{Name: "/compact", Description: "compress conversation context"},
 	{Name: "/btw", Description: "reserved side-channel question"},
 	{Name: "/exit", Description: "exit CLI"},
 }
@@ -296,6 +350,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.agentEvents = nil
 		m.activeCancel = nil
 		m.thinking = false
+		runKind := msg.kind
+		m.activeRunKind = ""
 		thinkingAlreadyRendered := m.finalizePendingThinking()
 		m.streamThinkText = ""
 		m.pendingThinkSpin = false
@@ -303,7 +359,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendingThinkStart = -1
 
 		if msg.err == nil {
-			_ = m.ctx.UsageTracker.Log(m.session.ID, m.session.Name, m.ctx.Root.Model, msg.usage)
+			modelName := msg.model
+			if modelName == "" {
+				modelName = m.ctx.Root.Model
+			}
+			// Compact runs are billed to the same root session because they are part of
+			// maintaining that conversation's usable context.
+			_ = m.ctx.UsageTracker.Log(m.session.ID, m.session.Name, modelName, msg.usage)
 			m.latestTotalTokens = msg.usage.TotalTokens
 		}
 		m.usageStats, _ = m.ctx.UsageTracker.GetStats(m.session.ID)
@@ -313,7 +375,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.streamAnswerText = ""
 			if errors.Is(msg.err, context.Canceled) || strings.Contains(msg.err.Error(), "context canceled") {
 				m.status = "ready"
-				m.appendLog("\n" + mutedStyle.Render("interrupted") + "\n")
+				if !m.pendingCompact {
+					m.appendLog("\n" + mutedStyle.Render("interrupted") + "\n")
+				}
 			} else {
 				m.status = "error"
 				m.appendLog("\n" + errorStyle.Render("● Asayn error") + ": " + msg.err.Error() + "\n")
@@ -321,6 +385,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.appendDivider()
 		} else {
 			m.status = "ready"
+			if runKind == "compact" {
+				m.session.Messages = append(m.session.Messages,
+					types.ChatMessage{Role: "user", Content: compactRetainedPrompt},
+					types.ChatMessage{Role: "assistant", Content: msg.answer},
+				)
+				m.session.CompactedBefore = m.compactBaseLen
+				m.compactBaseLen = 0
+			}
 			if !thinkingAlreadyRendered {
 				m.emitFinalThinking()
 			}
@@ -330,6 +402,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refreshLog(false)
 			m.appendDivider()
 			_ = m.ctx.Sessions.Save(m.session)
+		}
+		if m.pendingCompact {
+			return m.startCompactTurn()
 		}
 		if len(m.queuedMessages) > 0 {
 			next := m.queuedMessages[0]
@@ -343,7 +418,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.thinking || msg.events == nil || msg.events != m.agentEvents {
 			return m, nil
 		}
-		m.appendAgentEvent(msg.event)
+		if m.appendAgentEvent(msg.event) {
+			next, cmd := m.requestCompact(true)
+			return next, tea.Batch(cmd, pollAgentEvents(msg.events))
+		}
 		return m, pollAgentEvents(m.agentEvents)
 	case agentPollMsg:
 		if m.thinking {
@@ -474,8 +552,63 @@ func (m model) startAgentTurn(value string, recordHistory bool) (model, tea.Cmd)
 	m.appendLog("\n" + userStyle.Render("You") + ":\n" + prompt + "\n")
 	m.log.GotoBottom()
 	m.thinking = true
+	m.activeRunKind = "agent"
 	m.status = m.agentRunningStatus()
-	cmd, cancel, events := m.ask(prompt)
+	cmd, cancel, events := m.ask(prompt, m.ctx.Agent, m.session, "agent", m.ctx.Root.Model)
+	m.activeCancel = cancel
+	m.agentEvents = events
+	return m, tea.Batch(cmd, pollAgentEvents(events))
+}
+
+func (m model) requestCompact(auto bool) (model, tea.Cmd) {
+	m.commandOutput = ""
+	if m.thinking {
+		m.pendingCompact = true
+		if m.activeCancel != nil {
+			m.activeCancel()
+			m.activeCancel = nil
+		}
+		m.status = "auto compressing"
+		m.appendLog("\n" + mutedStyle.Render("auto compressing...") + "\n")
+		return m, nil
+	}
+	if auto {
+		m.appendLog("\n" + mutedStyle.Render("auto compressing...") + "\n")
+	}
+	return m.startCompactTurn()
+}
+
+func (m model) startCompactTurn() (model, tea.Cmd) {
+	cfg, err := config.LoadAgent(m.ctx.Paths, config.SpecialAgentKind, "compact_agent")
+	if err != nil {
+		m.setCommandOutput("error loading compact_agent: " + err.Error())
+		return m, nil
+	}
+	limits := config.ModelLimitsFor(m.ctx.API, cfg.Provider, cfg.Model)
+	cfg.ContextWindow = limits.ContextWindow
+	cfg.MaxOutputTokens = limits.MaxOutputTokens
+
+	temp := *m.session
+	temp.Messages = append([]types.ChatMessage(nil), m.session.Messages...)
+	temp.RootAgent = cfg.Name
+	temp.VisibleSkills = map[string]bool{}
+	for k, v := range m.session.VisibleSkills {
+		temp.VisibleSkills[k] = v
+	}
+
+	exec := tools.NewReadOnlyExecutor(m.ctx.Paths, m.ctx.Sessions, cfg.MaxOutputLines)
+	agent := llm.NewSubAgent(m.ctx.API, cfg, m.ctx.Paths, exec)
+	agent.RefreshSystemPrompt(&temp)
+
+	m.activeTurnUsage = types.Usage{}
+	m.compactBaseLen = len(m.session.Messages)
+	m.pendingCompact = false
+	m.appendLog("\n" + userStyle.Render("You") + ":\n" + compactRetainedPrompt + "\n")
+	m.log.GotoBottom()
+	m.thinking = true
+	m.activeRunKind = "compact"
+	m.status = "compressing context"
+	cmd, cancel, events := m.ask(compactInstructionPrompt, agent, &temp, "compact", cfg.Model)
 	m.activeCancel = cancel
 	m.agentEvents = events
 	return m, tea.Batch(cmd, pollAgentEvents(events))
@@ -558,9 +691,7 @@ func (m model) agentRunningStatus() string {
 	return "agent running"
 }
 
-func (m model) ask(prompt string) (tea.Cmd, context.CancelFunc, chan agentRunEvent) {
-	sess := m.session
-	agent := m.ctx.Agent
+func (m model) ask(prompt string, agent *llm.Agent, sess *session.Session, kind, modelName string) (tea.Cmd, context.CancelFunc, chan agentRunEvent) {
 	events := make(chan agentRunEvent, 64)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	cmd := func() tea.Msg {
@@ -569,7 +700,7 @@ func (m model) ask(prompt string) (tea.Cmd, context.CancelFunc, chan agentRunEve
 			answer, usage, err := agent.AskWithEvents(ctx, sess, prompt, func(event llm.AgentEvent) {
 				events <- agentRunEvent{event: event}
 			})
-			events <- agentRunEvent{done: &agentMsg{answer: answer, usage: usage, err: err}}
+			events <- agentRunEvent{done: &agentMsg{answer: answer, usage: usage, err: err, kind: kind, model: modelName}}
 			close(events)
 		}()
 		return agentPollMsg{}
@@ -603,20 +734,28 @@ func uiTick() tea.Cmd {
 	})
 }
 
-func (m *model) appendAgentEvent(event llm.AgentEvent) {
+func (m *model) appendAgentEvent(event llm.AgentEvent) bool {
 	if event.Kind == "thinking" && isNoiseThinking(event.Text) {
-		return
+		return false
 	}
 	switch event.Kind {
 	case "thinking_delta":
-		m.streamThinkText += event.Text
+		delta := sanitizeThinkingDelta(m.streamThinkText, event.Text)
+		if delta == "" {
+			return false
+		}
+		m.streamThinkText += delta
 		m.pendingThinkSpin = false
 		m.updatePendingThinking(minorBlock("Thinking", m.streamThinkText, 8) + "\n")
 	case "thinking":
+		text := sanitizeThinkingText(event.Text)
+		if text == "" {
+			return false
+		}
 		if m.streamThinkText != "" {
-			m.updatePendingThinking(minorBlock("Thinking", event.Text, 8) + "\n")
+			m.updatePendingThinking(minorBlock("Thinking", text, 8) + "\n")
 		} else {
-			m.replacePendingThinking(minorBlock("Thinking", event.Text, 8) + "\n")
+			m.replacePendingThinking(minorBlock("Thinking", text, 8) + "\n")
 		}
 		m.pendingThinkSpin = false
 		m.streamThinkText = ""
@@ -643,7 +782,9 @@ func (m *model) appendAgentEvent(event llm.AgentEvent) {
 	case "assistant_delta":
 		m.appendAnswerDelta(event.Text)
 	case "usage":
-		m.applyUsageEvent(event.Usage)
+		if m.applyUsageEvent(event.Usage) {
+			return true
+		}
 	case "tool_start":
 		m.finalizePendingThinking()
 		m.finalizeStreamAnswer("")
@@ -659,11 +800,12 @@ func (m *model) appendAgentEvent(event llm.AgentEvent) {
 	default:
 		m.appendLog("\n" + event.Display() + "\n")
 	}
+	return false
 }
 
-func (m *model) applyUsageEvent(next *types.Usage) {
+func (m *model) applyUsageEvent(next *types.Usage) bool {
 	if next == nil {
-		return
+		return false
 	}
 	deltaPrompt := next.PromptTokens - m.activeTurnUsage.PromptTokens
 	deltaCompletion := next.CompletionTokens - m.activeTurnUsage.CompletionTokens
@@ -685,6 +827,14 @@ func (m *model) applyUsageEvent(next *types.Usage) {
 	m.usageStats.SessionCacheHit += int64(deltaCacheHit)
 	m.latestTotalTokens = next.TotalTokens
 	m.activeTurnUsage = *next
+	return m.shouldAutoCompact(next.TotalTokens)
+}
+
+func (m *model) shouldAutoCompact(totalTokens int) bool {
+	if m.activeRunKind != "agent" || m.pendingCompact || totalTokens <= 0 || m.ctx.Root.ContextWindow <= 0 {
+		return false
+	}
+	return totalTokens*100 >= m.ctx.Root.ContextWindow*80
 }
 
 func (m *model) replacePendingTool(replacement string) {
@@ -991,8 +1141,10 @@ func (m model) handleCommand(raw string) (model, tea.Cmd) {
 		m = m.applyRootAgent(arg)
 	case "model_config":
 		return m.startModelConfigPicker()
-	case "compact", "btw":
-		m.setCommandOutput("/" + cmd + " is reserved in this MVP; context isolation/compaction is not implemented yet.")
+	case "compact":
+		return m.requestCompact(false)
+	case "btw":
+		m.setCommandOutput("/" + cmd + " is reserved in this MVP; side-channel questions are not implemented yet.")
 	case "exit":
 		m.shutdownActiveWork()
 		_ = m.cleanupEmptySession()
@@ -1054,6 +1206,11 @@ func (m model) startModelConfigPicker() (model, tea.Cmd) {
 		m.setCommandOutput("error: " + err.Error())
 		return m, nil
 	}
+	specials, err := config.ListAgentInfos(m.ctx.Paths, config.SpecialAgentKind)
+	if err != nil {
+		m.setCommandOutput("error: " + err.Error())
+		return m, nil
+	}
 
 	m.modelConfigAgents = append([]config.AgentInfo(nil), roots...)
 	m.modelConfigAgentKinds = make([]string, len(roots))
@@ -1063,6 +1220,10 @@ func (m model) startModelConfigPicker() (model, tea.Cmd) {
 	m.modelConfigAgents = append(m.modelConfigAgents, subs...)
 	for range subs {
 		m.modelConfigAgentKinds = append(m.modelConfigAgentKinds, "sub")
+	}
+	m.modelConfigAgents = append(m.modelConfigAgents, specials...)
+	for range specials {
+		m.modelConfigAgentKinds = append(m.modelConfigAgentKinds, "special")
 	}
 
 	skills, err := config.ListSkills(m.ctx.Paths)
@@ -1152,6 +1313,8 @@ func (m model) handleModelConfigAction() model {
 	configKind := config.RootAgentKind
 	if kind == "sub" {
 		configKind = config.SubAgentKind
+	} else if kind == "special" {
+		configKind = config.SpecialAgentKind
 	}
 
 	update := func(cfg *config.AgentConfig) {
@@ -1250,6 +1413,8 @@ func (m model) modelConfigPickerView() string {
 	configKind := config.RootAgentKind
 	if kind == "sub" {
 		configKind = config.SubAgentKind
+	} else if kind == "special" {
+		configKind = config.SpecialAgentKind
 	}
 
 	cfg, err := config.LoadAgent(m.ctx.Paths, configKind, agentInfo.Name)
@@ -1546,13 +1711,62 @@ func commandSuggestionsFor(raw string) []commandSpec {
 	if !strings.HasPrefix(value, "/") || strings.Contains(value, " ") || strings.Contains(value, "\t") {
 		return nil
 	}
-	out := []commandSpec{}
+	type scoredCommand struct {
+		item  commandSpec
+		score int
+	}
+	scored := []scoredCommand{}
 	for _, item := range commands {
-		if strings.HasPrefix(item.Name, value) {
-			out = append(out, item)
+		if score, ok := fuzzyCommandScore(item.Name, value); ok {
+			scored = append(scored, scoredCommand{item: item, score: score})
 		}
 	}
+	sort.SliceStable(scored, func(i, j int) bool {
+		return scored[i].score < scored[j].score
+	})
+	out := make([]commandSpec, 0, len(scored))
+	for _, item := range scored {
+		out = append(out, item.item)
+	}
 	return out
+}
+
+func fuzzyCommandScore(name, raw string) (int, bool) {
+	query := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(raw), "/"))
+	target := strings.ToLower(strings.TrimPrefix(name, "/"))
+	if query == "" {
+		return 0, true
+	}
+	pos := 0
+	prev := -1
+	score := len(target) - len(query)
+	for _, q := range query {
+		found := -1
+		for i, r := range target[pos:] {
+			if r == q {
+				found = pos + i
+				break
+			}
+		}
+		if found < 0 {
+			return 0, false
+		}
+		if prev < 0 {
+			score += found * 10
+		} else {
+			gap := found - prev - 1
+			score += gap * 5
+			if gap == 0 {
+				score -= 3
+			}
+		}
+		if found == 0 || target[found-1] == '_' {
+			score -= 2
+		}
+		prev = found
+		pos = found + 1
+	}
+	return score, true
 }
 
 func (m *model) clampCommandSelection() {
@@ -1917,8 +2131,10 @@ func renderSessionContent(ctx *app.Context, sess *session.Session, renderer *gla
 			b.WriteString("\n")
 		case "assistant":
 			if msg.ReasoningContent != "" && !isNoiseThinking(msg.ReasoningContent) {
-				b.WriteString(minorBlock("Thinking", msg.ReasoningContent, 8))
-				b.WriteString("\n")
+				if thinking := sanitizeThinkingText(msg.ReasoningContent); thinking != "" {
+					b.WriteString(minorBlock("Thinking", thinking, 8))
+					b.WriteString("\n")
+				}
 			}
 			if msg.Content != "" {
 				b.WriteString("\n")
@@ -1967,6 +2183,44 @@ func renderSessionContent(ctx *app.Context, sess *session.Session, renderer *gla
 func isNoiseThinking(text string) bool {
 	text = strings.TrimSpace(text)
 	return strings.HasPrefix(text, "requesting model response")
+}
+
+func sanitizeThinkingDelta(existing, delta string) string {
+	if strings.TrimSpace(delta) == "" {
+		return ""
+	}
+	var out strings.Builder
+	lastSpace := endsWithSpace(existing)
+	for _, r := range delta {
+		if unicode.IsSpace(r) {
+			if !lastSpace {
+				out.WriteByte(' ')
+				lastSpace = true
+			}
+			continue
+		}
+		out.WriteRune(r)
+		lastSpace = false
+	}
+	return out.String()
+}
+
+func sanitizeThinkingText(text string) string {
+	return strings.TrimSpace(sanitizeThinkingDelta("", text))
+}
+
+func endsWithSpace(text string) bool {
+	for i := len(text); i > 0; {
+		r, size := utf8.DecodeLastRuneInString(text[:i])
+		if r == utf8.RuneError && size == 0 {
+			return false
+		}
+		if unicode.IsSpace(r) {
+			return true
+		}
+		return false
+	}
+	return false
 }
 
 func spinnerFrame(n int) string {
@@ -2250,7 +2504,7 @@ Commands:
 /skills               pick per-agent visible skills with left/right + space
 /shell_config         pick root-agent shell tool mode with left/right + space
 /think_config         pick per-agent thinking mode/effort with left/right + space
-/compact [text]       reserved for future context compression
+/compact              compress prior context with compact_agent
 /btw <question>       reserved for future side-channel question
 /exit                 exit CLI
 

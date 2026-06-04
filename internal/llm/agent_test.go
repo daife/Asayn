@@ -10,9 +10,10 @@ import (
 	"github.com/asayn/asayn/internal/session"
 )
 
-func TestMessagesForAPIHidesNoLongerVisibleReadSkillContent(t *testing.T) {
+func TestMessagesForAPIHidesPreviousTurnReadSkillContent(t *testing.T) {
 	messages := []types.ChatMessage{
 		{Role: "system", Content: "system"},
+		{Role: "user", Content: "first"},
 		{Role: "assistant", ToolCalls: []types.ToolCall{{
 			ID:   "call-1",
 			Type: "function",
@@ -22,19 +23,22 @@ func TestMessagesForAPIHidesNoLongerVisibleReadSkillContent(t *testing.T) {
 			},
 		}}},
 		{Role: "tool", ToolCallID: "call-1", Content: "secret skill body"},
+		{Role: "assistant", Content: "done"},
+		{Role: "user", Content: "next"},
 	}
 
-	out := messagesForAPI(messages, map[string]bool{"hidden-skill": false}, true)
-	if out[2].Content == "secret skill body" {
-		t.Fatal("hidden skill content was still sent to API")
+	out := prepareMessagesForAPI(messages, true)
+	if out[3].Content == "secret skill body" {
+		t.Fatal("previous-turn skill content was still sent to API")
 	}
-	if out[2].Content == "" {
-		t.Fatal("hidden skill content should be replaced with an explanatory placeholder")
+	if !strings.Contains(out[3].Content, "Use the read_skill tool again") {
+		t.Fatalf("hidden skill content should be replaced with an explanatory placeholder, got %q", out[3].Content)
 	}
 }
 
-func TestMessagesForAPIKeepsVisibleReadSkillContent(t *testing.T) {
+func TestMessagesForAPIKeepsCurrentTurnReadSkillContent(t *testing.T) {
 	messages := []types.ChatMessage{
+		{Role: "user", Content: "current"},
 		{Role: "assistant", ToolCalls: []types.ToolCall{{
 			ID:   "call-1",
 			Type: "function",
@@ -46,9 +50,9 @@ func TestMessagesForAPIKeepsVisibleReadSkillContent(t *testing.T) {
 		{Role: "tool", ToolCallID: "call-1", Content: "visible skill body"},
 	}
 
-	out := messagesForAPI(messages, map[string]bool{"visible-skill": true}, true)
-	if out[1].Content != "visible skill body" {
-		t.Fatalf("visible skill content changed: %q", out[1].Content)
+	out := prepareMessagesForAPI(messages, true)
+	if out[2].Content != "visible skill body" {
+		t.Fatalf("current-turn skill content changed: %q", out[2].Content)
 	}
 }
 
@@ -65,7 +69,7 @@ func TestMessagesForAPIDropsReasoningWhenThinkingDisabled(t *testing.T) {
 		{Role: "tool", ToolCallID: "call-1", Content: "result"},
 	}
 
-	out := messagesForAPI(messages, nil, false)
+	out := prepareMessagesForAPI(messages, false)
 	if out[0].ReasoningContent != "" {
 		t.Fatalf("disabled thinking should not send reasoning_content, got %q", out[0].ReasoningContent)
 	}
@@ -84,9 +88,65 @@ func TestMessagesForAPIKeepsToolReasoningWhenThinkingEnabled(t *testing.T) {
 		{Role: "tool", ToolCallID: "call-1", Content: "result"},
 	}
 
-	out := messagesForAPI(messages, nil, true)
+	out := prepareMessagesForAPI(messages, true)
 	if out[0].ReasoningContent != "tool thinking" {
 		t.Fatalf("enabled thinking should keep tool reasoning, got %q", out[0].ReasoningContent)
+	}
+}
+
+func TestMessagesForAPIUsesCompactedBoundary(t *testing.T) {
+	sess := &session.Session{
+		Messages: []types.ChatMessage{
+			{Role: "system", Content: "system"},
+			{Role: "user", Content: "old request"},
+			{Role: "assistant", Content: "old answer"},
+			{Role: "user", Content: "Recall what we worked on before."},
+			{Role: "assistant", Content: "compressed summary"},
+		},
+		CompactedBefore: 3,
+	}
+
+	out := messagesForAPI(sess, true)
+	if len(out) != 3 {
+		t.Fatalf("expected system plus compact round, got %d messages", len(out))
+	}
+	if out[1].Content != "Recall what we worked on before." || out[2].Content != "compressed summary" {
+		t.Fatalf("unexpected compacted messages: %#v", out)
+	}
+	for _, msg := range out {
+		if strings.Contains(msg.Content, "old") {
+			t.Fatalf("old pre-compaction content leaked into API messages: %#v", out)
+		}
+	}
+}
+
+func TestMessagesForAPIRepeatedCompressionDoesNotExposeOlderHistory(t *testing.T) {
+	sess := &session.Session{
+		Messages: []types.ChatMessage{
+			{Role: "system", Content: "system"},
+			{Role: "user", Content: "original request"},
+			{Role: "assistant", Content: "original work"},
+			{Role: "user", Content: "Recall what we worked on before."},
+			{Role: "assistant", Content: "first compact summary"},
+			{Role: "user", Content: "new request after compact"},
+			{Role: "assistant", Content: "new work after compact"},
+		},
+		CompactedBefore: 3,
+	}
+
+	out := messagesForAPI(sess, true)
+	got := []string{}
+	for _, msg := range out {
+		got = append(got, msg.Content)
+	}
+	joined := strings.Join(got, "\n")
+	if strings.Contains(joined, "original request") || strings.Contains(joined, "original work") {
+		t.Fatalf("pre-first-compact history leaked into repeated compact context: %#v", got)
+	}
+	for _, want := range []string{"system", "first compact summary", "new request after compact", "new work after compact"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("repeated compact context missing %q: %#v", want, got)
+		}
 	}
 }
 

@@ -20,7 +20,7 @@ func TestBootstrapCopiesEmbeddedDefaultsToHome(t *testing.T) {
 		filepath.Join(paths.HomeDir, "api_config.toml"),
 		filepath.Join(paths.HomeDir, RootAgentKind, "default.toml"),
 		filepath.Join(paths.HomeDir, SubAgentKind, "default.toml"),
-		filepath.Join(paths.HomeDir, SpecialAgentKind, "default.toml"),
+		filepath.Join(paths.HomeDir, SpecialAgentKind, "compact_agent.toml"),
 		filepath.Join(paths.HomeDir, "skills", "skill-creator", "SKILL.md"),
 	}
 	for _, path := range checks {
@@ -110,6 +110,62 @@ model = "custom-model"
 	}
 	if custom.Model != "custom-model" {
 		t.Errorf("expected custom model custom-model, got %s", custom.Model)
+	}
+}
+
+func TestCompactAgentDefaultPromptStaysSmall(t *testing.T) {
+	home := t.TempDir()
+	work := t.TempDir()
+	t.Setenv("HOME", home)
+
+	paths, err := Bootstrap(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadAgent(paths, SpecialAgentKind, "compact_agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(cfg.SystemPrompt, "## Conversation Ledger") {
+		t.Fatalf("compact_agent system prompt should stay small; detailed instructions belong in the compact user message:\n%s", cfg.SystemPrompt)
+	}
+	if !strings.Contains(cfg.SystemPrompt, "context compression agent") {
+		t.Fatalf("compact_agent system prompt missing role:\n%s", cfg.SystemPrompt)
+	}
+}
+
+func TestLoadAPIConfigModelLimitsWithSlashModelName(t *testing.T) {
+	home := t.TempDir()
+	work := t.TempDir()
+	t.Setenv("HOME", home)
+
+	paths, err := Bootstrap(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	api, err := LoadAPIConfig(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	limits := ModelLimitsFor(api, "SiliconFlow", "nex-agi/Nex-N2-Pro")
+	if limits.ContextWindow != 384000 || limits.MaxOutputTokens != 32768 {
+		t.Fatalf("unexpected model limits: context=%d output=%d", limits.ContextWindow, limits.MaxOutputTokens)
+	}
+}
+
+func TestModelLimitsForFillsMissingFields(t *testing.T) {
+	api := APIConfig{Providers: map[string]ProviderConfig{
+		"p": {
+			ModelLimits: map[string]ModelLimits{
+				"nex-agi/Nex-N2-Pro": {MaxOutputTokens: 12000},
+			},
+		},
+	}}
+
+	limits := ModelLimitsFor(api, "p", "nex-agi/Nex-N2-Pro")
+	if limits.ContextWindow != 384000 || limits.MaxOutputTokens != 12000 {
+		t.Fatalf("unexpected filled limits: context=%d output=%d", limits.ContextWindow, limits.MaxOutputTokens)
 	}
 }
 

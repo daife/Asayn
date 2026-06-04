@@ -1,9 +1,11 @@
 package tools
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -12,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/asayn/asayn/internal/config"
 	"github.com/asayn/asayn/internal/llm/types"
@@ -317,14 +320,19 @@ func (e *Executor) Shutdown() {
 }
 
 var riskyExtensions = map[string]bool{
-	".7z": true, ".avi": true, ".bin": true, ".bmp": true, ".bz2": true,
-	".class": true, ".dat": true, ".dll": true, ".exe": true, ".flac": true,
-	".gif": true, ".gz": true, ".ico": true, ".jpg": true, ".jpeg": true,
-	".mkv": true, ".mov": true, ".mp3": true, ".mp4": true, ".o": true,
-	".otf": true, ".pdf": true, ".png": true, ".pyc": true, ".so": true,
-	".tar": true, ".ttf": true, ".wasm": true, ".wav": true, ".woff": true,
-	".woff2": true, ".xz": true, ".zip": true,
+	".7z": true, ".a": true, ".apk": true, ".app": true, ".ar": true, ".avi": true,
+	".bin": true, ".bmp": true, ".br": true, ".bz2": true, ".class": true, ".dat": true,
+	".db": true, ".dmg": true, ".dll": true, ".dylib": true, ".eot": true, ".exe": true,
+	".flac": true, ".gif": true, ".gz": true, ".heic": true, ".heif": true, ".icns": true,
+	".ico": true, ".iso": true, ".jar": true, ".jpg": true, ".jpeg": true, ".m4a": true,
+	".m4v": true, ".mkv": true, ".mov": true, ".mp3": true, ".mp4": true, ".o": true,
+	".obj": true, ".ogg": true, ".otf": true, ".pdf": true, ".png": true, ".pyc": true,
+	".rar": true, ".rlib": true, ".so": true, ".sqlite": true, ".sqlite3": true,
+	".tar": true, ".tgz": true, ".ttf": true, ".wasm": true, ".wav": true, ".webm": true,
+	".webp": true, ".woff": true, ".woff2": true, ".xz": true, ".zip": true, ".zst": true,
 }
+
+const binaryProbeSize = 8192
 
 func isRiskyFile(name string) bool {
 	ext := strings.ToLower(filepath.Ext(name))
@@ -339,18 +347,15 @@ func (e *Executor) readFile(args map[string]any) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	name := filepath.Base(path)
 	forceBinary := boolArg(args, "force_binary", false)
-	if isRiskyFile(name) && !forceBinary {
-		data, err := os.ReadFile(path)
+	if !forceBinary {
+		preview, risky, err := riskyFilePreview(path)
 		if err != nil {
 			return "", err
 		}
-		preview := string(data)
-		if len(preview) > 200 {
-			preview = preview[:200]
+		if risky {
+			return fmt.Sprintf("This file is likely a useless binary file. Preview (first %d chars):\n%s\n\nIf you are sure this is a text file, use force_binary=true.", len(preview), preview), nil
 		}
-		return fmt.Sprintf("This file is likely a useless binary file. Preview (first %d chars):\n%s\n\nIf you are sure this is a text file, use force_binary=true.", len(preview), preview), nil
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -426,20 +431,16 @@ func (e *Executor) searchGrep(args map[string]any) (string, error) {
 			}
 			return nil
 		}
-		data, readErr := os.ReadFile(path)
+		if isKnownBinaryFile(rel) {
+			return nil
+		}
+		fileMatches, readErr := grepTextFile(path, rel, re, 200-len(matches))
 		if readErr != nil {
 			return nil
 		}
-		if isBinary(data) {
-			return nil
-		}
-		for i, line := range strings.Split(string(data), "\n") {
-			if re.MatchString(line) {
-				matches = append(matches, fmt.Sprintf("%s:%d: %s", rel, i+1, line))
-			}
-			if len(matches) >= 200 {
-				return filepath.SkipAll
-			}
+		matches = append(matches, fileMatches...)
+		if len(matches) >= 200 {
+			return filepath.SkipAll
 		}
 		return nil
 	})
@@ -466,6 +467,74 @@ func compileSearchPattern(query string, caseSensitive bool) (*regexp.Regexp, err
 		quoted = "(?i)" + quoted
 	}
 	return regexp.Compile(quoted)
+}
+
+func isKnownBinaryFile(name string) bool {
+	ext := strings.ToLower(filepath.Ext(name))
+	return ext != "" && riskyExtensions[ext]
+}
+
+func riskyFilePreview(path string) (string, bool, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", false, err
+	}
+	defer file.Close()
+
+	buf := make([]byte, binaryProbeSize)
+	n, err := file.Read(buf)
+	if err != nil && err != io.EOF {
+		return "", false, err
+	}
+	probe := buf[:n]
+	risky := isRiskyFile(filepath.Base(path)) || isBinary(probe)
+	if !risky {
+		return "", false, nil
+	}
+	preview := safePreview(probe, 200)
+	return preview, true, nil
+}
+
+func grepTextFile(path, rel string, re *regexp.Regexp, remaining int) ([]string, error) {
+	if remaining <= 0 {
+		return nil, nil
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	probe := make([]byte, binaryProbeSize)
+	n, err := file.Read(probe)
+	if err != nil && err != io.EOF {
+		return nil, err
+	}
+	if isBinary(probe[:n]) {
+		return nil, nil
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	matches := []string{}
+	lineNo := 0
+	for scanner.Scan() {
+		lineNo++
+		line := scanner.Text()
+		if re.MatchString(line) {
+			matches = append(matches, fmt.Sprintf("%s:%d: %s", rel, lineNo, line))
+			if len(matches) >= remaining {
+				return matches, nil
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return matches, nil
+	}
+	return matches, nil
 }
 
 func (e *Executor) diffFile(sess *session.Session, args map[string]any) (string, error) {
@@ -1061,16 +1130,54 @@ func cleanDiffPath(path string) string {
 }
 
 func isBinary(data []byte) bool {
-	limit := 1024
+	limit := binaryProbeSize
 	if len(data) < limit {
 		limit = len(data)
 	}
+	if limit == 0 {
+		return false
+	}
+	control := 0
+	high := 0
 	for i := 0; i < limit; i++ {
-		if data[i] == 0 {
+		b := data[i]
+		if b == 0 {
 			return true
 		}
+		if b >= 0x80 {
+			high++
+		}
+		if b < 0x20 && b != '\n' && b != '\r' && b != '\t' && b != '\f' && b != '\b' {
+			control++
+		}
+	}
+	probe := data[:limit]
+	if control > limit/20 {
+		return true
+	}
+	if high > limit/4 && !utf8.Valid(probe) {
+		return true
 	}
 	return false
+}
+
+func safePreview(data []byte, limit int) string {
+	if len(data) > limit {
+		data = data[:limit]
+	}
+	text := strings.ToValidUTF8(string(data), "?")
+	var b strings.Builder
+	for _, r := range text {
+		switch {
+		case r == '\n' || r == '\r' || r == '\t':
+			b.WriteRune(r)
+		case r < 0x20 || r == 0x7f:
+			b.WriteByte('?')
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 func applyParsedPatch(before string, plan diffApplyPlan) (string, error) {

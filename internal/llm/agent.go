@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -95,7 +96,7 @@ func (a *Agent) AskWithEvents(ctx context.Context, sess *session.Session, prompt
 			emit(AgentEvent{Kind: "thinking_start"})
 		}
 		contentStreamed := false
-		msg, usage, err := a.client.ChatStream(ctx, a.root.Model, messagesForAPI(sess.Messages, a.visibleSkillSet(sess), a.root.ThinkingEnabled), toolSchemas, a.root.ThinkingEnabled, a.root.ReasoningEffort, func(delta StreamDelta) {
+		msg, usage, err := a.client.ChatStream(ctx, a.root.Model, messagesForAPI(sess, a.root.ThinkingEnabled), toolSchemas, a.root.ThinkingEnabled, a.root.ReasoningEffort, func(delta StreamDelta) {
 			if emit == nil {
 				return
 			}
@@ -108,7 +109,7 @@ func (a *Agent) AskWithEvents(ctx context.Context, sess *session.Session, prompt
 			}
 		})
 		if err != nil {
-			if len(sess.Messages) > baseLen {
+			if !isContextCanceled(err) && len(sess.Messages) > baseLen {
 				sess.Messages = sess.Messages[:baseLen]
 			}
 			return "", totalUsage, err
@@ -118,12 +119,12 @@ func (a *Agent) AskWithEvents(ctx context.Context, sess *session.Session, prompt
 		totalUsage.TotalTokens = usage.TotalTokens // Represents the context window size of the latest call.
 		totalUsage.PromptCacheHitTokens += usage.PromptCacheHitTokens
 		totalUsage.PromptCacheMissTokens += usage.PromptCacheMissTokens
+		sess.Messages = append(sess.Messages, msg)
 		if emit != nil {
 			snapshot := totalUsage
 			emit(AgentEvent{Kind: "usage", Usage: &snapshot})
 		}
 
-		sess.Messages = append(sess.Messages, msg)
 		if emit != nil && msg.ReasoningContent != "" {
 			emit(AgentEvent{Kind: "thinking", Text: msg.ReasoningContent})
 		}
@@ -134,7 +135,7 @@ func (a *Agent) AskWithEvents(ctx context.Context, sess *session.Session, prompt
 			return msg.Content, totalUsage, nil
 		}
 		for _, call := range msg.ToolCalls {
-			result := a.runToolCall(sess, call, emit)
+			result := a.runToolCall(ctx, sess, call, emit)
 			sess.Messages = append(sess.Messages, types.ChatMessage{
 				Role:       "tool",
 				ToolCallID: call.ID,
@@ -144,9 +145,37 @@ func (a *Agent) AskWithEvents(ctx context.Context, sess *session.Session, prompt
 	}
 }
 
-func messagesForAPI(messages []types.ChatMessage, visibleSkills map[string]bool, thinkingEnabled bool) []types.ChatMessage {
+func isContextCanceled(err error) bool {
+	return err != nil && (errors.Is(err, context.Canceled) || strings.Contains(err.Error(), "context canceled"))
+}
+
+func messagesForAPI(sess *session.Session, thinkingEnabled bool) []types.ChatMessage {
+	if sess == nil {
+		return nil
+	}
+	return prepareMessagesForAPI(activeMessagesForAPI(sess), thinkingEnabled)
+}
+
+func activeMessagesForAPI(sess *session.Session) []types.ChatMessage {
+	if sess == nil {
+		return nil
+	}
+	messages := sess.Messages
+	if sess.CompactedBefore <= 0 || sess.CompactedBefore >= len(messages) {
+		return messages
+	}
+	out := []types.ChatMessage{}
+	if len(messages) > 0 && messages[0].Role == "system" {
+		out = append(out, messages[0])
+	}
+	out = append(out, messages[sess.CompactedBefore:]...)
+	return out
+}
+
+func prepareMessagesForAPI(messages []types.ChatMessage, thinkingEnabled bool) []types.ChatMessage {
 	out := make([]types.ChatMessage, len(messages))
 	readSkillCalls := map[string]string{}
+	latestUser := latestUserMessageIndex(messages)
 	for i, msg := range messages {
 		out[i] = msg
 		if msg.Role == "assistant" {
@@ -161,8 +190,8 @@ func messagesForAPI(messages []types.ChatMessage, visibleSkills map[string]bool,
 			}
 		}
 		if msg.Role == "tool" {
-			if name := readSkillCalls[msg.ToolCallID]; name != "" && !visibleSkills[name] {
-				out[i].Content = fmt.Sprintf("skill %q is no longer visible in the active session; previous read_skill content is hidden", name)
+			if name := readSkillCalls[msg.ToolCallID]; name != "" && i < latestUser {
+				out[i].Content = fmt.Sprintf("Skill %q content from a previous read_skill call is hidden. Use the read_skill tool again if you need to view it.", name)
 			}
 		}
 		if msg.Role != "assistant" || msg.ReasoningContent == "" {
@@ -181,6 +210,15 @@ func messagesForAPI(messages []types.ChatMessage, visibleSkills map[string]bool,
 		}
 	}
 	return out
+}
+
+func latestUserMessageIndex(messages []types.ChatMessage) int {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "user" {
+			return i
+		}
+	}
+	return len(messages)
 }
 
 func skillNameFromArgs(raw string) string {
@@ -261,7 +299,7 @@ Tool rules:
 - Avoid modifying .Asayn/ unless explicitly asked to change Asayn configurations.`, workplace)
 }
 
-func (a *Agent) runToolCall(sess *session.Session, call types.ToolCall, emit func(AgentEvent)) string {
+func (a *Agent) runToolCall(parent context.Context, sess *session.Session, call types.ToolCall, emit func(AgentEvent)) string {
 	var args map[string]any
 	if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {
 		return fmt.Sprintf("tool argument JSON error: %v", err)
@@ -275,7 +313,7 @@ func (a *Agent) runToolCall(sess *session.Session, call types.ToolCall, emit fun
 			Text: fmt.Sprintf("%s(%s)", call.Function.Name, call.Function.Arguments),
 		})
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), toolCallTimeout(call.Function.Name, args))
+	ctx, cancel := context.WithTimeout(parent, toolCallTimeout(call.Function.Name, args))
 	defer cancel()
 	out, err := a.tools.Run(ctx, sess, call.Function.Name, args)
 	if err != nil {

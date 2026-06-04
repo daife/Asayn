@@ -26,10 +26,10 @@ type Paths struct {
 }
 
 type ProviderConfig struct {
-	BaseURL        string              `toml:"url" json:"url"`
-	APIKey         string              `toml:"api_key" json:"api_key"`
-	TimeoutSeconds int                 `toml:"timeout_seconds" json:"timeout_seconds"`
-	AllowedModels  []string            `toml:"allowed_models" json:"allowed_models"`
+	BaseURL        string                 `toml:"url" json:"url"`
+	APIKey         string                 `toml:"api_key" json:"api_key"`
+	TimeoutSeconds int                    `toml:"timeout_seconds" json:"timeout_seconds"`
+	AllowedModels  []string               `toml:"allowed_models" json:"allowed_models"`
 	ModelLimits    map[string]ModelLimits `toml:"model_limits" json:"model_limits"`
 }
 
@@ -145,13 +145,22 @@ func LoadAPIConfig(paths Paths) (APIConfig, error) {
 // DeepSeek models default to 1M context / 384k output,
 // Nex-N2-Pro defaults to 384K context / 32k output.
 func ModelLimitsFor(api APIConfig, provider, model string) ModelLimits {
+	defaults := defaultModelLimits(model)
 	if prov, ok := api.Providers[provider]; ok {
 		if limits, ok := prov.ModelLimits[model]; ok {
-			if limits.ContextWindow > 0 {
-				return limits
+			if limits.ContextWindow <= 0 {
+				limits.ContextWindow = defaults.ContextWindow
 			}
+			if limits.MaxOutputTokens <= 0 {
+				limits.MaxOutputTokens = defaults.MaxOutputTokens
+			}
+			return limits
 		}
 	}
+	return defaults
+}
+
+func defaultModelLimits(model string) ModelLimits {
 	l := strings.ToLower(model)
 	if strings.Contains(l, "nex-n2") {
 		return ModelLimits{ContextWindow: 384000, MaxOutputTokens: 32768}
@@ -185,7 +194,7 @@ func LoadAgent(paths Paths, kind, name string) (AgentConfig, error) {
 		cfg.Provider = "DeepSeek"
 	}
 	if cfg.Model == "" {
-		if kind == SubAgentKind {
+		if kind == SubAgentKind || kind == SpecialAgentKind {
 			cfg.Model = "deepseek-v4-flash"
 		} else {
 			cfg.Model = "deepseek-v4-pro"
@@ -566,6 +575,11 @@ func defaultAPIConfig() APIConfig {
 					"deepseek-ai/DeepSeek-V4-Pro",
 					"nex-agi/Nex-N2-Pro",
 				},
+				ModelLimits: map[string]ModelLimits{
+					"deepseek-ai/DeepSeek-V4-Flash": {ContextWindow: 1024000, MaxOutputTokens: 384000},
+					"deepseek-ai/DeepSeek-V4-Pro":   {ContextWindow: 1024000, MaxOutputTokens: 384000},
+					"nex-agi/Nex-N2-Pro":            {ContextWindow: 384000, MaxOutputTokens: 32768},
+				},
 			},
 			"DeepSeek": {
 				BaseURL:        "https://api.deepseek.com",
@@ -574,6 +588,10 @@ func defaultAPIConfig() APIConfig {
 				AllowedModels: []string{
 					"deepseek-v4-pro",
 					"deepseek-v4-flash",
+				},
+				ModelLimits: map[string]ModelLimits{
+					"deepseek-v4-pro":   {ContextWindow: 1024000, MaxOutputTokens: 384000},
+					"deepseek-v4-flash": {ContextWindow: 1024000, MaxOutputTokens: 384000},
 				},
 			},
 		},
@@ -584,6 +602,9 @@ func defaultAgentConfig(kind, name string) AgentConfig {
 	model := "deepseek-v4-pro"
 	provider := "DeepSeek"
 	if kind == SubAgentKind {
+		model = "deepseek-v4-flash"
+	}
+	if kind == SpecialAgentKind {
 		model = "deepseek-v4-flash"
 	}
 	return AgentConfig{
@@ -604,6 +625,12 @@ func defaultAgentConfig(kind, name string) AgentConfig {
 func defaultAgentDescription(kind, name string) string {
 	if kind == SubAgentKind {
 		return "General-purpose sub-agent."
+	}
+	if kind == SpecialAgentKind && name == "compact_agent" {
+		return "Summarizes prior context into a compact continuation state."
+	}
+	if kind == SpecialAgentKind {
+		return "Special-purpose agent."
 	}
 	if name == "default" {
 		return "General-purpose agent."

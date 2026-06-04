@@ -8,9 +8,17 @@ allowed_models = [
   "nex-agi/Nex-N2-Pro"
 ]
 
-[providers.SiliconFlow.model_limits.nex-agi/Nex-N2-Pro]
+[providers.SiliconFlow.model_limits."nex-agi/Nex-N2-Pro"]
 context_window = 384000
 max_output_tokens = 32768
+
+[providers.SiliconFlow.model_limits."deepseek-ai/DeepSeek-V4-Flash"]
+context_window = 1024000
+max_output_tokens = 384000
+
+[providers.SiliconFlow.model_limits."deepseek-ai/DeepSeek-V4-Pro"]
+context_window = 1024000
+max_output_tokens = 384000
 
 [providers.DeepSeek]
 url = "https://api.deepseek.com"
@@ -20,3 +28,11 @@ allowed_models = [
   "deepseek-v4-pro",
   "deepseek-v4-flash"
 ]
+
+[providers.DeepSeek.model_limits.deepseek-v4-pro]
+context_window = 1024000
+max_output_tokens = 384000
+
+[providers.DeepSeek.model_limits.deepseek-v4-flash]
+context_window = 1024000
+max_output_tokens = 384000

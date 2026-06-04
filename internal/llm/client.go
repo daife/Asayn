@@ -21,6 +21,8 @@ type Client struct {
 	apiURL string
 }
 
+const rateLimitMaxRetries = 10
+
 type chatRequest struct {
 	Model           string              `json:"model"`
 	Messages        []types.ChatMessage `json:"messages"`
@@ -100,7 +102,7 @@ func (c *Client) Chat(ctx context.Context, model string, messages []types.ChatMe
 		return types.ChatMessage{}, types.Usage{}, err
 	}
 
-	maxRetries := 5
+	maxRetries := rateLimitMaxRetries
 	baseWait := 1 * time.Second
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
@@ -120,7 +122,7 @@ func (c *Client) Chat(ctx context.Context, model string, messages []types.ChatMe
 			}
 			return types.ChatMessage{}, types.Usage{}, err
 		}
-		
+
 		body, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if err != nil {
@@ -166,7 +168,7 @@ func (c *Client) ChatStream(ctx context.Context, model string, messages []types.
 		return types.ChatMessage{}, types.Usage{}, err
 	}
 
-	maxRetries := 5
+	maxRetries := rateLimitMaxRetries
 	baseWait := 1 * time.Second
 
 	var resp *http.Response

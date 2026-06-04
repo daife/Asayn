@@ -569,6 +569,72 @@ func TestSearchGrepDefaultsToCaseSensitive(t *testing.T) {
 	}
 }
 
+func TestReadFileDetectsBinaryByContent(t *testing.T) {
+	work := t.TempDir()
+	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
+	sess, err := store.New("test", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
+	if err := os.WriteFile(filepath.Join(work, "binary.txt"), []byte{'o', 'k', 0, 'h', 'i'}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := exec.Run(context.Background(), sess, "read_file", map[string]any{
+		"relative_path": "binary.txt",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "likely a useless binary file") || !strings.Contains(out, "force_binary=true") {
+		t.Fatalf("expected binary preview, got %s", out)
+	}
+
+	out, err = exec.Run(context.Background(), sess, "read_file", map[string]any{
+		"relative_path": "binary.txt",
+		"force_binary":  true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "likely a useless binary file") {
+		t.Fatalf("force_binary should read content, got %s", out)
+	}
+}
+
+func TestSearchGrepSkipsBinaryFiles(t *testing.T) {
+	work := t.TempDir()
+	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
+	sess, err := store.New("test", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
+	if err := os.WriteFile(filepath.Join(work, "text.txt"), []byte("needle\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "image.png"), []byte("needle\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "payload.dat"), []byte{'n', 'e', 'e', 'd', 'l', 'e', 0}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := exec.Run(context.Background(), sess, "search_grep", map[string]any{
+		"query": "needle",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "text.txt") {
+		t.Fatalf("expected text match, got %s", out)
+	}
+	if strings.Contains(out, "image.png") || strings.Contains(out, "payload.dat") {
+		t.Fatalf("search should skip binary files, got %s", out)
+	}
+}
+
 func TestSubAgentWaitCheckSchemaIsRootOnly(t *testing.T) {
 	exec := NewExecutor(config.Paths{}, nil, 20000, false, false)
 	if !hasToolSchema(exec.Schemas(false), "sub_agent_wait_check") {
