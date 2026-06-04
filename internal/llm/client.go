@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/asayn/asayn/internal/config"
@@ -90,16 +91,13 @@ func NewClient(cfg config.ProviderConfig) *Client {
 	}
 	return &Client{
 		cfg:     cfg,
-		http:    &http.Client{},
+		http:    newHTTPClient(timeout),
 		apiURL:  completionsURL(cfg.BaseURL),
 		timeout: timeout,
 	}
 }
 
 func (c *Client) Chat(ctx context.Context, model string, messages []types.ChatMessage, tools []types.ToolSchema, thinkingEnabled bool, reasoningEffort string) (types.ChatMessage, types.Usage, error) {
-	ctx, cancel := contextWithTimeoutIfSooner(ctx, c.timeout)
-	defer cancel()
-
 	reqBody := buildChatRequest(model, messages, tools, thinkingEnabled, reasoningEffort, false)
 
 	data, err := json.Marshal(reqBody)
@@ -228,7 +226,10 @@ func (c *Client) ChatStream(ctx context.Context, model string, messages []types.
 	maxToolIndex := -1
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	idleTimer := newStreamIdleTimer(resp.Body, c.timeout)
+	defer idleTimer.Stop()
 	for scanner.Scan() {
+		idleTimer.Reset()
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, ":") {
 			continue
@@ -290,6 +291,9 @@ func (c *Client) ChatStream(ctx context.Context, model string, messages []types.
 		}
 	}
 	if err := scanner.Err(); err != nil {
+		if idleTimer.TimedOut() {
+			return types.ChatMessage{}, types.Usage{}, fmt.Errorf("API stream idle timeout after %s", c.timeout)
+		}
 		return types.ChatMessage{}, types.Usage{}, err
 	}
 	if maxToolIndex >= 0 {
@@ -308,14 +312,51 @@ func (c *Client) ChatStream(ctx context.Context, model string, messages []types.
 	return msg, finalUsage, nil
 }
 
-func contextWithTimeoutIfSooner(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
-	if timeout <= 0 {
-		return ctx, func() {}
+func newHTTPClient(timeout time.Duration) *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	if timeout > 0 {
+		transport.ResponseHeaderTimeout = timeout
 	}
-	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) <= timeout {
-		return ctx, func() {}
+	return &http.Client{Transport: transport}
+}
+
+type streamIdleTimer struct {
+	body    io.Closer
+	timeout time.Duration
+	timer   *time.Timer
+	timed   atomic.Bool
+}
+
+func newStreamIdleTimer(body io.Closer, timeout time.Duration) *streamIdleTimer {
+	t := &streamIdleTimer{body: body, timeout: timeout}
+	t.Reset()
+	return t
+}
+
+func (t *streamIdleTimer) Reset() {
+	if t.timeout <= 0 {
+		return
 	}
-	return context.WithTimeout(ctx, timeout)
+	if t.timer != nil {
+		t.timer.Stop()
+	}
+	t.timer = time.AfterFunc(t.timeout, func() {
+		t.timed.Store(true)
+		_ = t.body.Close()
+	})
+}
+
+func (t *streamIdleTimer) Stop() {
+	if t.timer != nil {
+		t.timer.Stop()
+	}
+}
+
+func (t *streamIdleTimer) TimedOut() bool {
+	if t == nil {
+		return false
+	}
+	return t.timed.Load()
 }
 
 func buildChatRequest(model string, messages []types.ChatMessage, tools []types.ToolSchema, thinkingEnabled bool, reasoningEffort string, stream bool) chatRequest {

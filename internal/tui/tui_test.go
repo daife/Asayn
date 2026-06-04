@@ -3,9 +3,12 @@ package tui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/asayn/asayn/internal/app"
 	"github.com/asayn/asayn/internal/config"
+	"github.com/asayn/asayn/internal/session"
+	"github.com/charmbracelet/bubbles/viewport"
 )
 
 func TestCommandSuggestionsForFuzzyMatch(t *testing.T) {
@@ -55,6 +58,35 @@ func TestReplacePendingToolUsesStableStartIndex(t *testing.T) {
 	if m.pendingToolStart != -1 || m.pendingToolLine != "" || m.pendingToolName != "" {
 		t.Fatalf("pending tool state not cleared: start=%d line=%q name=%q", m.pendingToolStart, m.pendingToolLine, m.pendingToolName)
 	}
+}
+
+func TestRunningAssistViewShowsWorkingDuration(t *testing.T) {
+	m := model{
+		log:                 testViewport(80),
+		width:               100,
+		activeTurnStartedAt: time.Now().Add(-65 * time.Second),
+	}
+	out := m.runningAssistView()
+	if !strings.Contains(out, "Working(1m 5s)") {
+		t.Fatalf("running assist view missing working duration: %q", out)
+	}
+}
+
+func TestIdleAssistViewShowsLastWorkedDuration(t *testing.T) {
+	m := model{
+		log:              testViewport(80),
+		width:            100,
+		session:          &session.Session{Name: "test", ID: "sess"},
+		lastTurnDuration: 65 * time.Second,
+	}
+	out := m.idleAssistView()
+	if !strings.Contains(out, "Worked for 1m 5s") {
+		t.Fatalf("idle assist view missing worked duration: %q", out)
+	}
+}
+
+func testViewport(width int) viewport.Model {
+	return viewport.New(width, 20)
 }
 
 func TestCompactPromptsSeparateInstructionFromRetainedContext(t *testing.T) {

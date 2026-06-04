@@ -77,6 +77,8 @@ type model struct {
 	usageStats                usage.Stats
 	latestTotalTokens         int
 	activeTurnUsage           types.Usage
+	activeTurnStartedAt       time.Time
+	lastTurnDuration          time.Duration
 }
 
 type agentMsg struct {
@@ -352,6 +354,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.agentEvents = nil
 		m.activeCancel = nil
 		m.thinking = false
+		turnDuration := time.Duration(0)
+		if !m.activeTurnStartedAt.IsZero() {
+			turnDuration = time.Since(m.activeTurnStartedAt)
+		}
+		m.activeTurnStartedAt = time.Time{}
 		runKind := msg.kind
 		m.activeRunKind = ""
 		thinkingAlreadyRendered := m.finalizePendingThinking()
@@ -390,6 +397,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.appendDivider()
 		} else {
 			m.status = "ready"
+			m.lastTurnDuration = turnDuration
 			if runKind == "compact" {
 				m.session.Messages = append(m.session.Messages,
 					types.ChatMessage{Role: "user", Content: compactRetainedPrompt},
@@ -558,6 +566,8 @@ func (m model) startAgentTurn(value string, recordHistory bool) (model, tea.Cmd)
 	m.log.GotoBottom()
 	m.thinking = true
 	m.activeRunKind = "agent"
+	m.activeTurnStartedAt = time.Now()
+	m.lastTurnDuration = 0
 	m.status = m.agentRunningStatus()
 	cmd, cancel, events := m.ask(prompt, m.ctx.Agent, m.session, "agent", m.ctx.Root.Model)
 	m.activeCancel = cancel
@@ -612,6 +622,8 @@ func (m model) startCompactTurn() (model, tea.Cmd) {
 	m.log.GotoBottom()
 	m.thinking = true
 	m.activeRunKind = "compact"
+	m.activeTurnStartedAt = time.Now()
+	m.lastTurnDuration = 0
 	m.status = "compressing context"
 	cmd, cancel, events := m.ask(compactInstructionPrompt, agent, &temp, "compact", cfg.Model)
 	m.activeCancel = cancel
@@ -1617,6 +1629,9 @@ func (m model) idleAssistView() string {
 			"root_agent: "+m.session.RootAgent,
 		)
 	}
+	if m.lastTurnDuration > 0 {
+		rows = append(rows, "Worked for "+formatTurnDuration(m.lastTurnDuration))
+	}
 	return "\n" + lipgloss.NewStyle().
 		Width(m.log.Width).
 		Foreground(lipgloss.Color("8")).
@@ -1632,10 +1647,21 @@ func (m model) runningAssistView() string {
 	if len(m.queuedMessages) > 0 {
 		rows[0] = fmt.Sprintf("running: enter queues message, esc cancels last queued message; queued=%d", len(m.queuedMessages))
 	}
+	if !m.activeTurnStartedAt.IsZero() {
+		rows = append(rows, "Working("+formatTurnDuration(time.Since(m.activeTurnStartedAt))+")")
+	}
 	return "\n" + lipgloss.NewStyle().
 		Width(m.log.Width).
 		Foreground(lipgloss.Color("8")).
 		Render(wrapANSI(panelBlock("status", rows), m.log.Width))
+}
+
+func formatTurnDuration(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	totalSeconds := int(d.Round(time.Second).Seconds())
+	return fmt.Sprintf("%dm %ds", totalSeconds/60, totalSeconds%60)
 }
 
 func (m model) rootAgentPickerView() string {

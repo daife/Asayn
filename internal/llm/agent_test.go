@@ -188,7 +188,7 @@ func TestChatRequestUsesPerAgentThinkingConfig(t *testing.T) {
 	}
 }
 
-func TestChatStreamIgnoresProviderRequestTimeoutWhileStreaming(t *testing.T) {
+func TestChatStreamResetsProviderTimeoutOnKeepAlive(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		flusher, ok := w.(http.Flusher)
@@ -197,7 +197,10 @@ func TestChatStreamIgnoresProviderRequestTimeoutWhileStreaming(t *testing.T) {
 		}
 		fmt.Fprintln(w, `data: {"choices":[{"delta":{"role":"assistant","content":"first"}}]}`)
 		flusher.Flush()
-		time.Sleep(1100 * time.Millisecond)
+		time.Sleep(600 * time.Millisecond)
+		fmt.Fprintln(w, ": keep-alive")
+		flusher.Flush()
+		time.Sleep(600 * time.Millisecond)
 		fmt.Fprintln(w, `data: {"choices":[{"delta":{"content":" second"}}],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}`)
 		fmt.Fprintln(w, "data: [DONE]")
 	}))
@@ -210,13 +213,38 @@ func TestChatStreamIgnoresProviderRequestTimeoutWhileStreaming(t *testing.T) {
 
 	msg, usage, err := client.ChatStream(context.Background(), "model", []types.ChatMessage{{Role: "user", Content: "hi"}}, nil, false, "", nil)
 	if err != nil {
-		t.Fatalf("stream should not fail on provider request timeout: %v", err)
+		t.Fatalf("stream should not fail when keep-alive arrives before provider timeout: %v", err)
 	}
 	if msg.Content != "first second" {
 		t.Fatalf("unexpected streamed content: %q", msg.Content)
 	}
 	if usage.TotalTokens != 3 {
 		t.Fatalf("unexpected usage: %#v", usage)
+	}
+}
+
+func TestChatStreamFailsAfterProviderIdleTimeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("test server does not support flushing")
+		}
+		fmt.Fprintln(w, `data: {"choices":[{"delta":{"role":"assistant","content":"first"}}]}`)
+		flusher.Flush()
+		time.Sleep(1100 * time.Millisecond)
+		fmt.Fprintln(w, `data: {"choices":[{"delta":{"content":" second"}}]}`)
+	}))
+	defer server.Close()
+
+	client := NewClient(config.ProviderConfig{
+		BaseURL:        server.URL,
+		TimeoutSeconds: 1,
+	})
+
+	_, _, err := client.ChatStream(context.Background(), "model", []types.ChatMessage{{Role: "user", Content: "hi"}}, nil, false, "", nil)
+	if err == nil || !strings.Contains(err.Error(), "idle timeout") {
+		t.Fatalf("expected stream idle timeout, got %v", err)
 	}
 }
 
