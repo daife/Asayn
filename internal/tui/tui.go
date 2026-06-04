@@ -4,6 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -24,49 +28,49 @@ import (
 )
 
 type model struct {
-	ctx                 *app.Context
-	session             *session.Session
-	input               textinput.Model
-	log                 viewport.Model
-	renderer            *glamour.TermRenderer
-	content             string
-	commandOutput       string
-	width               int
-	height              int
-	status              string
-	thinking            bool
-	activeCancel        context.CancelFunc
-	queuedMessages      []string
-	agentEvents         chan agentRunEvent
-	commandSelected     int
-	inputHistory        []string
-	historyIndex        int
-	historyDraft        string
-	resumePicker        bool
-	resumeItems         []session.Session
-	resumeSelected      int
-	rootAgentPicker     bool
-	rootAgentItems      []config.AgentInfo
-	rootAgentSelected   int
-	modelConfigPicker   bool
-	modelConfigAgentSelected int
-	modelConfigAgents   []config.AgentInfo
-	modelConfigAgentKinds []string
+	ctx                       *app.Context
+	session                   *session.Session
+	input                     textinput.Model
+	log                       viewport.Model
+	renderer                  *glamour.TermRenderer
+	content                   string
+	commandOutput             string
+	width                     int
+	height                    int
+	status                    string
+	thinking                  bool
+	activeCancel              context.CancelFunc
+	queuedMessages            []string
+	agentEvents               chan agentRunEvent
+	commandSelected           int
+	inputHistory              []string
+	historyIndex              int
+	historyDraft              string
+	resumePicker              bool
+	resumeItems               []session.Session
+	resumeSelected            int
+	rootAgentPicker           bool
+	rootAgentItems            []config.AgentInfo
+	rootAgentSelected         int
+	modelConfigPicker         bool
+	modelConfigAgentSelected  int
+	modelConfigAgents         []config.AgentInfo
+	modelConfigAgentKinds     []string
 	modelConfigOptionSelected int
-	modelConfigModels   []string
-	skillItems          []config.Skill
-	subViewID           string
-	spinner             int
-	pendingToolLine     string
-	pendingToolName     string
-	pendingThinkLine    string
-	pendingThinkSpin    bool
-	streamThinkText     string
-	pendingThinkStart   int
-	pendingAnswerStart  int
-	streamAnswerText    string
-	usageStats          usage.Stats
-	latestTotalTokens   int
+	modelConfigModels         []string
+	skillItems                []config.Skill
+	subViewID                 string
+	spinner                   int
+	pendingToolLine           string
+	pendingToolName           string
+	pendingThinkLine          string
+	pendingThinkSpin          bool
+	streamThinkText           string
+	pendingThinkStart         int
+	pendingAnswerStart        int
+	streamAnswerText          string
+	usageStats                usage.Stats
+	latestTotalTokens         int
 }
 
 type agentMsg struct {
@@ -103,6 +107,7 @@ var commands = []commandSpec{
 	{Name: "/resume", Description: "resume a saved session"},
 	{Name: "/rename", Description: "rename current session"},
 	{Name: "/fork", Description: "fork from the current point"},
+	{Name: "/copy_answer", Description: "export and copy latest answer"},
 	{Name: "/root_agent", Description: "select root agent"},
 	{Name: "/model", Description: "select root agent (alias for /root_agent)"},
 	{Name: "/model_config", Description: "configure agent settings"},
@@ -942,6 +947,13 @@ func (m model) handleCommand(raw string) (model, tea.Cmd) {
 		m.session = sess
 		m.ctx.Tools.RestoreSubAgents(sess, sess.SubAgents, m.ctx.SubSessions)
 		m.setCommandOutput("forked current session: " + sess.ID)
+	case "copy_answer":
+		out, err := m.exportLatestAnswer()
+		if err != nil {
+			m.setCommandOutput("error: " + err.Error())
+		} else {
+			m.setCommandOutput(out)
+		}
 	case "root_agent", "model":
 		if arg == "" {
 			return m.startRootAgentPicker()
@@ -1742,14 +1754,14 @@ func renderProgressBar(current, max, reserve, width int) string {
 		filled = 0
 	}
 	empty := barWidth - filled
-	
+
 	isWarning := current >= (max - reserve)
-	
+
 	barStyle := successStyle
 	if isWarning {
 		barStyle = errorStyle
 	}
-	
+
 	bar := barStyle.Render(strings.Repeat("█", filled)) + mutedStyle.Render(strings.Repeat("░", empty))
 	return "[" + bar + "]"
 }
@@ -2195,6 +2207,7 @@ Commands:
 /resume [session]     pick or resume saved sessions
 /rename [name]        rename current session
 /fork [name]          fork from the current point
+/copy_answer          copy latest Asayn answer and write preview files
 /root_agent [name]    pick or set root agent
 /skills               pick per-agent visible skills with left/right + space
 /shell_config         pick root-agent shell tool mode with left/right + space
@@ -2210,5 +2223,99 @@ with no command suggestions, up/down recalls previous inputs
 /skills uses left/right to switch targets such as default(root) and default(sub)
 while Asayn is working, enter queues the typed message
 while Asayn is working, esc cancels the last queued message, or interrupts the current turn if the queue is empty
+`
+}
+
+func (m model) exportLatestAnswer() (string, error) {
+	answer := latestAssistantAnswer(m.session)
+	if strings.TrimSpace(answer) == "" {
+		return "", fmt.Errorf("no assistant answer to copy")
+	}
+	dir := filepath.Join(m.ctx.Paths.Workplace, ".Asayn")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	mdPath := filepath.Join(dir, "latest_answer.md")
+	htmlPath := filepath.Join(dir, "latest_answer.html")
+	if err := os.WriteFile(mdPath, []byte(answer), 0o644); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(htmlPath, []byte(answerPreviewHTML(answer)), 0o644); err != nil {
+		return "", err
+	}
+	clipboard := "clipboard: unavailable"
+	if err := copyToClipboard(answer); err == nil {
+		clipboard = "clipboard: copied"
+	}
+	return fmt.Sprintf("%s\nmarkdown: %s\npreview: %s", clipboard, mdPath, htmlPath), nil
+}
+
+func latestAssistantAnswer(sess *session.Session) string {
+	if sess == nil {
+		return ""
+	}
+	for i := len(sess.Messages) - 1; i >= 0; i-- {
+		msg := sess.Messages[i]
+		if msg.Role == "assistant" && strings.TrimSpace(msg.Content) != "" {
+			return msg.Content
+		}
+	}
+	return ""
+}
+
+func copyToClipboard(text string) error {
+	candidates := [][]string{
+		{"wl-copy"},
+		{"xclip", "-selection", "clipboard"},
+		{"xsel", "--clipboard", "--input"},
+		{"pbcopy"},
+	}
+	var lastErr error
+	for _, candidate := range candidates {
+		if _, err := exec.LookPath(candidate[0]); err != nil {
+			lastErr = err
+			continue
+		}
+		cmd := exec.Command(candidate[0], candidate[1:]...)
+		cmd.Stdin = strings.NewReader(text)
+		if err := cmd.Run(); err != nil {
+			lastErr = err
+			continue
+		}
+		return nil
+	}
+	if lastErr != nil {
+		return lastErr
+	}
+	return fmt.Errorf("no clipboard command found")
+}
+
+func answerPreviewHTML(markdown string) string {
+	escaped := html.EscapeString(markdown)
+	return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Asayn Latest Answer</title>
+<style>
+body{margin:0;font:15px/1.55 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#1f2933;background:#f7f8fa}
+header{position:sticky;top:0;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 20px;border-bottom:1px solid #d9dee7;background:#fff}
+main{max-width:920px;margin:0 auto;padding:24px 20px 56px}
+button{border:1px solid #1f2933;background:#1f2933;color:#fff;border-radius:6px;padding:8px 12px;font:inherit;cursor:pointer}
+pre{white-space:pre-wrap;word-break:break-word;background:#fff;border:1px solid #d9dee7;border-radius:8px;padding:18px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+</style>
+</head>
+<body>
+<header><strong>Asayn latest answer</strong><button id="copy">Copy answer</button></header>
+<main><pre id="answer">` + escaped + `</pre></main>
+<script>
+document.getElementById('copy').addEventListener('click', async () => {
+  await navigator.clipboard.writeText(document.getElementById('answer').textContent);
+  document.getElementById('copy').textContent = 'Copied';
+});
+</script>
+</body>
+</html>
 `
 }

@@ -56,7 +56,7 @@ func TestDiffFileApplyHistoryShowRevertMany(t *testing.T) {
 
 	id := sess.Changes[len(sess.Changes)-1].ID
 	shown, err := exec.Run(context.Background(), sess, "diff_file", map[string]any{
-		"mode":       "show",
+		"mode":       "history",
 		"change_ids": []any{id},
 	})
 	if err != nil {
@@ -79,6 +79,161 @@ func TestDiffFileApplyHistoryShowRevertMany(t *testing.T) {
 	}
 	if string(data) != "alpha\nomega\n" {
 		t.Fatalf("unexpected reverted content: %q", string(data))
+	}
+}
+
+func TestDiffFileApplyDryRunDoesNotWrite(t *testing.T) {
+	work := t.TempDir()
+	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
+	sess, err := store.New("test", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
+	if err := os.WriteFile(filepath.Join(work, "hello.txt"), []byte("alpha\nomega\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := exec.Run(context.Background(), sess, "diff_file", map[string]any{
+		"mode":         "apply",
+		"dry_run":      true,
+		"unified_diff": "--- a/hello.txt\n+++ b/hello.txt\n@@ -1,2 +1,3 @@\n alpha\n+beta\n omega\n",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "change_id=") || !strings.Contains(out, "+beta") {
+		t.Fatalf("dry run should return only diff, got %s", out)
+	}
+	data, err := os.ReadFile(filepath.Join(work, "hello.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "alpha\nomega\n" {
+		t.Fatalf("dry run wrote file: %q", data)
+	}
+}
+
+func TestDiffFilePatchWithoutHeaderUsesPath(t *testing.T) {
+	work := t.TempDir()
+	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
+	sess, err := store.New("test", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
+	if err := os.WriteFile(filepath.Join(work, "hello.txt"), []byte("alpha\nomega\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = exec.Run(context.Background(), sess, "diff_file", map[string]any{
+		"mode":    "apply",
+		"path":    "hello.txt",
+		"patches": []any{"@@ -1,2 +1,3 @@\n alpha\n+beta\n omega\n"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(work, "hello.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "alpha\nbeta\nomega\n" {
+		t.Fatalf("unexpected patch result: %q", data)
+	}
+}
+
+func TestDiffFilePatchHeaderPathConflictErrors(t *testing.T) {
+	work := t.TempDir()
+	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
+	sess, err := store.New("test", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
+	if err := os.WriteFile(filepath.Join(work, "actual.txt"), []byte("alpha\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = exec.Run(context.Background(), sess, "diff_file", map[string]any{
+		"mode":         "apply",
+		"path":         "expected.txt",
+		"unified_diff": "--- a/actual.txt\n+++ b/actual.txt\n@@ -1 +1 @@\n-alpha\n+beta\n",
+	})
+	if err == nil || !strings.Contains(err.Error(), "conflicts with path") {
+		t.Fatalf("expected path conflict error, got %v", err)
+	}
+}
+
+func TestDiffFileDevNullCreateExistingFileErrors(t *testing.T) {
+	work := t.TempDir()
+	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
+	sess, err := store.New("test", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
+	if err := os.WriteFile(filepath.Join(work, "hello.txt"), []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = exec.Run(context.Background(), sess, "diff_file", map[string]any{
+		"mode":         "apply",
+		"unified_diff": "--- /dev/null\n+++ b/hello.txt\n@@ -0,0 +1 @@\n+new\n",
+	})
+	if err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("expected existing create error, got %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(work, "hello.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "old\n" {
+		t.Fatalf("file changed unexpectedly: %q", data)
+	}
+}
+
+func TestDiffFileRevertManyDefaultsToReverseOrder(t *testing.T) {
+	work := t.TempDir()
+	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
+	sess, err := store.New("test", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
+	if err := os.WriteFile(filepath.Join(work, "hello.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, item := range []struct {
+		old string
+		new string
+	}{
+		{"one", "two"},
+		{"two", "three"},
+	} {
+		if _, err := exec.Run(context.Background(), sess, "diff_file", map[string]any{
+			"mode":     "replace",
+			"path":     "hello.txt",
+			"old_text": item.old,
+			"new_text": item.new,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ids := []any{sess.Changes[0].ID, sess.Changes[1].ID}
+	if _, err := exec.Run(context.Background(), sess, "diff_file", map[string]any{
+		"mode":       "revert_many",
+		"change_ids": ids,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(work, "hello.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "one\n" {
+		t.Fatalf("unexpected reverted content: %q", data)
 	}
 }
 

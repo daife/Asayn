@@ -109,24 +109,26 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 			},
 			"required": []string{"name"},
 		}),
-		schema("diff_file", "Modify or view files (modes: replace, write, delete, apply, preview, history, show, revert). Returns unified diff.", map[string]any{
+		schema("diff_file", "Edit files and manage recorded changes. Prefer apply with dry_run=true for previews. Returns unified diffs.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"mode":             prop("string", "replace, preview, apply, write, delete, history, show, revert, revert_many."),
+				"mode":             prop("string", "apply, replace, write, delete, history, revert, or revert_many."),
+				"dry_run":          prop("boolean", "Preview the change without writing. Use with apply or replace/write/delete."),
 				"path":             prop("string", "Relative file path."),
-				"content":          prop("string", "Complete file content (write/preview)."),
-				"unified_diff":     prop("string", "Unified diff (apply)."),
-				"patches":          prop("array", "List of unified diff strings (apply)."),
+				"content":          prop("string", "Complete file content for write."),
+				"unified_diff":     prop("string", "Unified diff. Uses path only when the diff has no file header."),
+				"patches":          prop("array", "Unified diff strings. Each diff may use its own header path or fallback to path."),
 				"old_text":         prop("string", "Exact text block to replace (replace)."),
 				"new_text":         prop("string", "Replacement text block (replace)."),
 				"replace_all":      prop("boolean", "Replace all occurrences of old_text. Default requires exactly 1 match."),
 				"find":             prop("string", "[Alias] Same as old_text."),
 				"replace":          prop("string", "[Alias] Same as new_text."),
-				"change_id":        prop("string", "Change ID (revert/show)."),
-				"change_ids":       prop("array", "Change IDs (show/revert_many)."),
+				"change_id":        prop("string", "Change ID for history, revert, or revert_many."),
+				"change_ids":       prop("array", "Change IDs for history or revert_many."),
 				"limit":            prop("integer", "Max history entries (history)."),
 				"allow_create":     prop("boolean", "Allow creating new files (apply/write)."),
 				"expected_current": prop("string", "Guard clause: assert current file content."),
+				"reverse":          prop("boolean", "Reverse change_ids before revert_many. Default true."),
 			},
 			"required": []string{"mode"},
 		}),
@@ -446,18 +448,22 @@ func (e *Executor) diffFile(sess *session.Session, args map[string]any) (string,
 	changeID := stringArg(args, "change_id")
 	switch mode {
 	case "history":
+		if changeID != "" || len(stringSliceArg(args, "change_ids")) > 0 {
+			return e.showChanges(sess, changeID, stringSliceArg(args, "change_ids"))
+		}
 		return e.changeHistory(sess, stringArg(args, "path"), intArg(args, "limit", 20))
 	case "show":
 		return e.showChanges(sess, changeID, stringSliceArg(args, "change_ids"))
 	case "revert_many":
-		return e.revertChanges(sess, appendChangeIDs(changeID, stringSliceArg(args, "change_ids")))
+		return e.revertChanges(sess, appendChangeIDs(changeID, stringSliceArg(args, "change_ids")), boolArg(args, "reverse", true))
 	}
 	if mode == "revert" {
 		return e.revertChange(sess, changeID)
 	}
 
+	dryRun := boolArg(args, "dry_run", false)
 	if mode == "apply" || (mode == "preview" && (stringArg(args, "unified_diff") != "" || len(stringSliceArg(args, "patches")) > 0)) {
-		return e.applyDiffs(sess, args, mode == "preview")
+		return e.applyDiffs(sess, args, dryRun || mode == "preview")
 	}
 
 	path, err := e.resolveWorkplacePath(stringArg(args, "path"))
@@ -509,7 +515,7 @@ func (e *Executor) diffFile(sess *session.Session, args map[string]any) (string,
 		return "", fmt.Errorf("unsupported diff_file mode %q", mode)
 	}
 	diff := unifiedDiff(filepath.ToSlash(stringArg(args, "path")), before, after)
-	if mode == "preview" {
+	if dryRun || mode == "preview" {
 		return truncate(diff, e.maxOutputLines), nil
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -572,7 +578,7 @@ func (e *Executor) applyDiffs(sess *session.Session, args map[string]any, previe
 	}
 	plans := []diffApplyPlan{}
 	for _, raw := range diffs {
-		parsed, err := parseUnifiedDiff(raw)
+		parsed, err := parseUnifiedDiff(raw, filepath.ToSlash(stringArg(args, "path")))
 		if err != nil {
 			return "", err
 		}
@@ -593,6 +599,9 @@ func (e *Executor) applyDiffs(sess *session.Session, args map[string]any, previe
 		existed := readErr == nil
 		if existed {
 			before = string(beforeBytes)
+			if plan.Creates {
+				return "", fmt.Errorf("%s already exists; /dev/null create patches require a missing file", plan.Path)
+			}
 		} else if !plan.Creates && !boolArg(args, "allow_create", false) {
 			return "", fmt.Errorf("%s does not exist; set allow_create=true for creating files", plan.Path)
 		}
@@ -688,9 +697,14 @@ func (e *Executor) revertChange(sess *session.Session, changeID string) (string,
 	return "", fmt.Errorf("change_id not found")
 }
 
-func (e *Executor) revertChanges(sess *session.Session, changeIDs []string) (string, error) {
+func (e *Executor) revertChanges(sess *session.Session, changeIDs []string, reverse bool) (string, error) {
 	if len(changeIDs) == 0 {
 		return "", fmt.Errorf("change_ids is required")
+	}
+	if reverse {
+		for i, j := 0, len(changeIDs)-1; i < j; i, j = i+1, j-1 {
+			changeIDs[i], changeIDs[j] = changeIDs[j], changeIDs[i]
+		}
 	}
 	out := []string{}
 	for _, id := range changeIDs {
@@ -945,7 +959,8 @@ type diffHunk struct {
 	Lines    []string
 }
 
-func parseUnifiedDiff(raw string) ([]diffApplyPlan, error) {
+func parseUnifiedDiff(raw, fallbackPath string) ([]diffApplyPlan, error) {
+	fallbackPath = filepath.ToSlash(strings.TrimSpace(fallbackPath))
 	lines := strings.Split(raw, "\n")
 	plans := []diffApplyPlan{}
 	var current *diffApplyPlan
@@ -964,6 +979,9 @@ func parseUnifiedDiff(raw string) ([]diffApplyPlan, error) {
 			if path == "" || path == "/dev/null" {
 				return nil, fmt.Errorf("diff file path missing")
 			}
+			if fallbackPath != "" && fallbackPath != path {
+				return nil, fmt.Errorf("diff path %q conflicts with path %q", path, fallbackPath)
+			}
 			plans = append(plans, diffApplyPlan{
 				Path:    path,
 				Creates: oldPath == "/dev/null",
@@ -973,9 +991,13 @@ func parseUnifiedDiff(raw string) ([]diffApplyPlan, error) {
 			i++
 			continue
 		}
-		if strings.HasPrefix(line, "@@ ") {
+		if strings.HasPrefix(line, "@@ ") || strings.HasPrefix(line, "@@\t") {
 			if current == nil {
-				return nil, fmt.Errorf("hunk before file header")
+				if fallbackPath == "" {
+					return nil, fmt.Errorf("hunk before file header; path is required")
+				}
+				plans = append(plans, diffApplyPlan{Path: fallbackPath})
+				current = &plans[len(plans)-1]
 			}
 			hunk, err := parseHunkHeader(line)
 			if err != nil {
