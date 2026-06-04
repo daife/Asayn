@@ -107,9 +107,9 @@ func (m *ShellManager) StartAsync(command string, interactive bool) (string, err
 	m.mu.Lock()
 	m.runs[run.id] = run
 	m.mu.Unlock()
-	mode := "parallel command"
+	mode := "background command"
 	if interactive {
-		mode = "interactive command"
+		mode = "background terminal accepting stdin"
 	}
 	return fmt.Sprintf("shell_id=%s\nstarted %s", run.id, mode), nil
 }

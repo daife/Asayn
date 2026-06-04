@@ -44,8 +44,8 @@ func TestDiffFileApplyHistoryShowRevertMany(t *testing.T) {
 	}
 
 	history, err := exec.Run(context.Background(), sess, "diff_file", map[string]any{
-		"mode": "history",
-		"path": "hello.txt",
+		"mode":          "history",
+		"relative_path": "hello.txt",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -127,9 +127,9 @@ func TestDiffFilePatchWithoutHeaderUsesPath(t *testing.T) {
 	}
 
 	_, err = exec.Run(context.Background(), sess, "diff_file", map[string]any{
-		"mode":    "apply",
-		"path":    "hello.txt",
-		"patches": []any{"@@ -1,2 +1,3 @@\n alpha\n+beta\n omega\n"},
+		"mode":          "apply",
+		"relative_path": "hello.txt",
+		"patches":       []any{"@@ -1,2 +1,3 @@\n alpha\n+beta\n omega\n"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -140,6 +140,38 @@ func TestDiffFilePatchWithoutHeaderUsesPath(t *testing.T) {
 	}
 	if string(data) != "alpha\nbeta\nomega\n" {
 		t.Fatalf("unexpected patch result: %q", data)
+	}
+}
+
+func TestDiffFilePatchesAppliesMultipleHeaderDiffs(t *testing.T) {
+	work := t.TempDir()
+	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
+	sess, err := store.New("test", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
+	if err := os.WriteFile(filepath.Join(work, "one.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "two.txt"), []byte("two\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = exec.Run(context.Background(), sess, "diff_file", map[string]any{
+		"mode": "apply",
+		"patches": []any{
+			"--- a/one.txt\n+++ b/one.txt\n@@ -1 +1 @@\n-one\n+ONE\n",
+			"--- a/two.txt\n+++ b/two.txt\n@@ -1 +1 @@\n-two\n+TWO\n",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	one, _ := os.ReadFile(filepath.Join(work, "one.txt"))
+	two, _ := os.ReadFile(filepath.Join(work, "two.txt"))
+	if string(one) != "ONE\n" || string(two) != "TWO\n" {
+		t.Fatalf("patches did not apply both files: one=%q two=%q", one, two)
 	}
 }
 
@@ -156,9 +188,9 @@ func TestDiffFilePatchHeaderPathConflictErrors(t *testing.T) {
 	}
 
 	_, err = exec.Run(context.Background(), sess, "diff_file", map[string]any{
-		"mode":         "apply",
-		"path":         "expected.txt",
-		"unified_diff": "--- a/actual.txt\n+++ b/actual.txt\n@@ -1 +1 @@\n-alpha\n+beta\n",
+		"mode":          "apply",
+		"relative_path": "expected.txt",
+		"unified_diff":  "--- a/actual.txt\n+++ b/actual.txt\n@@ -1 +1 @@\n-alpha\n+beta\n",
 	})
 	if err == nil || !strings.Contains(err.Error(), "conflicts with path") {
 		t.Fatalf("expected path conflict error, got %v", err)
@@ -193,6 +225,44 @@ func TestDiffFileDevNullCreateExistingFileErrors(t *testing.T) {
 	}
 }
 
+func TestDiffFileDeleteRevertRestoresFile(t *testing.T) {
+	work := t.TempDir()
+	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
+	sess, err := store.New("test", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
+	target := filepath.Join(work, "gone.txt")
+	if err := os.WriteFile(target, []byte("original\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Run(context.Background(), sess, "diff_file", map[string]any{
+		"mode":          "delete",
+		"relative_path": "gone.txt",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatalf("delete should remove file, stat err=%v output=%s", err, out)
+	}
+	id := sess.Changes[len(sess.Changes)-1].ID
+	if _, err := exec.Run(context.Background(), sess, "diff_file", map[string]any{
+		"mode":      "revert",
+		"change_id": id,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "original\n" {
+		t.Fatalf("reverted delete should restore original content, got %q", data)
+	}
+}
+
 func TestDiffFileRevertManyUsesProvidedOrderByDefault(t *testing.T) {
 	work := t.TempDir()
 	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
@@ -213,10 +283,10 @@ func TestDiffFileRevertManyUsesProvidedOrderByDefault(t *testing.T) {
 		{"two", "three"},
 	} {
 		if _, err := exec.Run(context.Background(), sess, "diff_file", map[string]any{
-			"mode":     "replace",
-			"path":     "hello.txt",
-			"old_text": item.old,
-			"new_text": item.new,
+			"mode":          "find_replace",
+			"relative_path": "hello.txt",
+			"old_text":      item.old,
+			"new_text":      item.new,
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -257,10 +327,10 @@ func TestDiffFileRevertManyAutoSortRevertsNewestFirst(t *testing.T) {
 		{"two", "three"},
 	} {
 		if _, err := exec.Run(context.Background(), sess, "diff_file", map[string]any{
-			"mode":     "replace",
-			"path":     "hello.txt",
-			"old_text": item.old,
-			"new_text": item.new,
+			"mode":          "find_replace",
+			"relative_path": "hello.txt",
+			"old_text":      item.old,
+			"new_text":      item.new,
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -296,8 +366,8 @@ func TestDiffFileReplaceMultiLineBlockReturnsDiff(t *testing.T) {
 	}
 
 	out, err := exec.Run(context.Background(), sess, "diff_file", map[string]any{
-		"mode": "replace",
-		"path": "data.json",
+		"mode":          "find_replace",
+		"relative_path": "data.json",
 		"old_text": "    {\n" +
 			"      \"name\": \"one\"\n" +
 			"    }\n" +
@@ -339,13 +409,55 @@ func TestDiffFileReplaceRequiresUniqueMatchByDefault(t *testing.T) {
 	}
 
 	_, err = exec.Run(context.Background(), sess, "diff_file", map[string]any{
-		"mode":     "replace",
-		"path":     "dup.txt",
-		"old_text": "same",
-		"new_text": "other",
+		"mode":          "find_replace",
+		"relative_path": "dup.txt",
+		"old_text":      "same",
+		"new_text":      "other",
 	})
 	if err == nil || !strings.Contains(err.Error(), "matched 2 times") {
 		t.Fatalf("expected duplicate match error, got %v", err)
+	}
+}
+
+func TestDiffFileFindReplaceExpectedContentGuard(t *testing.T) {
+	work := t.TempDir()
+	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
+	sess, err := store.New("test", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
+	if err := os.WriteFile(filepath.Join(work, "guard.txt"), []byte("alpha\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = exec.Run(context.Background(), sess, "diff_file", map[string]any{
+		"mode":             "find_replace",
+		"relative_path":    "guard.txt",
+		"old_text":         "alpha",
+		"new_text":         "beta",
+		"expected_content": "other\n",
+	})
+	if err == nil || !strings.Contains(err.Error(), "expected_content did not match") {
+		t.Fatalf("expected guard mismatch, got %v", err)
+	}
+
+	_, err = exec.Run(context.Background(), sess, "diff_file", map[string]any{
+		"mode":             "find_replace",
+		"relative_path":    "guard.txt",
+		"old_text":         "alpha",
+		"new_text":         "beta",
+		"expected_content": "alpha\n",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(work, "guard.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "beta\n" {
+		t.Fatalf("unexpected guarded replace result: %q", data)
 	}
 }
 
@@ -528,12 +640,12 @@ func TestShellSchemasFollowShellConfig(t *testing.T) {
 func TestDiffFileSchemaUsesCanonicalParameters(t *testing.T) {
 	exec := NewExecutor(config.Paths{}, nil, 20000, false, false)
 	props := toolProperties(t, exec.Schemas(false), "diff_file")
-	for _, name := range []string{"find", "replace", "reverse", "reverse_order"} {
+	for _, name := range []string{"find", "replace", "reverse", "reverse_order", "path", "expected_current", "allow_create"} {
 		if _, ok := props[name]; ok {
 			t.Fatalf("diff_file schema should not expose legacy parameter %q", name)
 		}
 	}
-	for _, name := range []string{"old_text", "new_text", "auto_sort", "dry_run", "patches"} {
+	for _, name := range []string{"relative_path", "old_text", "new_text", "expected_content", "auto_sort", "dry_run", "patches"} {
 		if _, ok := props[name]; !ok {
 			t.Fatalf("diff_file schema should expose %q", name)
 		}
@@ -553,14 +665,32 @@ func TestDiffFileRejectsLegacyAliasesAndModes(t *testing.T) {
 	}
 
 	for _, args := range []map[string]any{
-		{"mode": "replace", "path": "hello.txt", "find": "alpha", "replace": "beta"},
-		{"mode": "preview", "path": "hello.txt", "old_text": "alpha", "new_text": "beta"},
-		{"mode": "patch", "path": "hello.txt", "old_text": "alpha", "new_text": "beta"},
+		{"mode": "find_replace", "path": "hello.txt", "old_text": "alpha", "new_text": "beta"},
+		{"mode": "find_replace", "relative_path": "hello.txt", "find": "alpha", "replace": "beta"},
+		{"mode": "replace", "relative_path": "hello.txt", "old_text": "alpha", "new_text": "beta"},
+		{"mode": "preview", "relative_path": "hello.txt", "old_text": "alpha", "new_text": "beta"},
+		{"mode": "patch", "relative_path": "hello.txt", "old_text": "alpha", "new_text": "beta"},
 		{"mode": "show", "change_id": "missing"},
 	} {
 		if _, err := exec.Run(context.Background(), sess, "diff_file", args); err == nil {
 			t.Fatalf("expected legacy args/mode to fail: %#v", args)
 		}
+	}
+}
+
+func TestRelativePathRejectsAbsolutePath(t *testing.T) {
+	work := t.TempDir()
+	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
+	sess, err := store.New("test", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
+	_, err = exec.Run(context.Background(), sess, "read_file", map[string]any{
+		"relative_path": filepath.Join(work, "hello.txt"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "only relative paths are supported") {
+		t.Fatalf("expected relative path error, got %v", err)
 	}
 }
 

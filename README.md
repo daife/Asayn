@@ -185,10 +185,10 @@ Skills are directory-based packages. Asayn discovers only directories that conta
 
 `diff_file` records reversible file changes and returns a verification diff:
 
-- `mode="replace"` edits a localized exact `old_text` block into `new_text`, records a change ID, and returns the resulting diff. This is preferred for multi-line edits because it does not rely on line numbers.
-- Add `dry_run=true` to `replace`, `write`, `delete`, or `apply` to preview without writing.
-- `mode="apply"` with `unified_diff` or `patches` applies one or more unified diff file patches and records change IDs. Patch paths come from diff headers; headerless patches use `path` as the fallback. If both are provided and disagree, the tool errors.
-- `mode="history"` lists recorded changes, optionally filtered by `path`. With `change_id` or `change_ids`, it shows the recorded diff for those changes.
+- `mode="find_replace"` edits a localized exact `old_text` block into `new_text`, records a change ID, and returns the resulting diff. This is preferred for multi-line edits because it does not rely on line numbers.
+- Add `dry_run=true` to `find_replace`, `write`, `delete`, or `apply` to preview without writing.
+- `mode="apply"` with `unified_diff` or `patches` applies one or more unified diff file patches and records change IDs. Patch paths come from diff headers; headerless patches use `relative_path` as the fallback. If both are provided and disagree, the tool errors.
+- `mode="history"` lists recorded changes, optionally filtered by `relative_path`. With `change_id` or `change_ids`, it shows the recorded diff for those changes.
 - `mode="revert"` reverts one recorded change.
 - `mode="revert_many"` reverts change IDs in the provided order; set `auto_sort=true` to revert newest changes first.
 

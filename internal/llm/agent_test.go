@@ -59,7 +59,7 @@ func TestMessagesForAPIDropsReasoningWhenThinkingDisabled(t *testing.T) {
 			Type: "function",
 			Function: types.ToolFunction{
 				Name:      "read_file",
-				Arguments: `{"path":"x"}`,
+				Arguments: `{"relative_path":"x"}`,
 			},
 		}}},
 		{Role: "tool", ToolCallID: "call-1", Content: "result"},
@@ -78,7 +78,7 @@ func TestMessagesForAPIKeepsToolReasoningWhenThinkingEnabled(t *testing.T) {
 			Type: "function",
 			Function: types.ToolFunction{
 				Name:      "read_file",
-				Arguments: `{"path":"x"}`,
+				Arguments: `{"relative_path":"x"}`,
 			},
 		}}},
 		{Role: "tool", ToolCallID: "call-1", Content: "result"},
@@ -98,6 +98,7 @@ func TestSystemPromptIncludesConcreteWorkplaceRules(t *testing.T) {
 	prompt := agent.systemPrompt(&session.Session{})
 	for _, want := range []string{
 		`Workplace: "/tmp/asayn-workplace"`,
+		"mode=find_replace",
 		"Use mode=write only for new/small files",
 		"Run in workplace root",
 	} {
@@ -130,7 +131,7 @@ func TestChatRequestKeepsEmptyContentField(t *testing.T) {
 			Type: "function",
 			Function: types.ToolFunction{
 				Name:      "view_dir",
-				Arguments: `{"path":"."}`,
+				Arguments: `{"relative_path":"."}`,
 			},
 		}},
 	}}, nil, false, "", false)

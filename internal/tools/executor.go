@@ -81,16 +81,16 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 		schema("read_file", "Read a file.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path":       prop("string", "Workspace-relative path."),
-				"start_line": prop("integer", "First line, 1-based."),
-				"end_line":   prop("integer", "Last line, 1-based."),
+				"relative_path": prop("string", "File path relative to the workspace."),
+				"start_line":    prop("integer", "First line, 1-based."),
+				"end_line":      prop("integer", "Last line, 1-based."),
 			},
-			"required": []string{"path"},
+			"required": []string{"relative_path"},
 		}),
 		schema("view_dir", "List a directory.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path": prop("string", "Workspace-relative path."),
+				"relative_path": prop("string", "Directory path relative to the workspace."),
 			},
 		}),
 		schema("search_grep", "Search files with a regex.", map[string]any{
@@ -112,20 +112,19 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 		schema("diff_file", "Edit files and manage recorded changes.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"mode":             prop("string", "apply, replace, write, delete, history, revert, or revert_many."),
+				"mode":             prop("string", "apply, find_replace, write, delete, history, revert, or revert_many."),
 				"dry_run":          prop("boolean", "Preview any write mode."),
-				"path":             prop("string", "Workspace-relative path."),
-				"content":          prop("string", "Full file content."),
+				"relative_path":    prop("string", "File path relative to the workspace."),
+				"content":          prop("string", "Full file content for write."),
 				"unified_diff":     prop("string", "Strict unified diff with exact headers, line numbers, and context."),
 				"patches":          prop("array", "Array of strict unified diffs."),
-				"old_text":         prop("string", "Exact file substring to replace, including whitespace and newlines."),
+				"old_text":         prop("string", "Exact file substring to find, including whitespace and newlines."),
 				"new_text":         prop("string", "Replacement text."),
 				"replace_all":      prop("boolean", "Replace every match."),
 				"change_id":        prop("string", "Recorded change ID."),
 				"change_ids":       prop("array", "Recorded change IDs."),
 				"limit":            prop("integer", "History entry limit."),
-				"allow_create":     prop("boolean", "Allow file creation."),
-				"expected_current": prop("string", "Expected current content."),
+				"expected_content": prop("string", "Abort unless current file content exactly matches this value."),
 				"auto_sort":        prop("boolean", "For revert_many, revert newest changes first."),
 			},
 			"required": []string{"mode"},
@@ -204,7 +203,7 @@ func subAgentSchemas() []types.ToolSchema {
 			},
 			"required": []string{"sub_agent_id"},
 		}),
-		schema("sub_agent_wait_check", "Wait, then check a sub-agent.", map[string]any{
+		schema("sub_agent_wait_check", "Wait, then check a sub-agent only when no useful parallel work remains.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"sub_agent_id": prop("string", "Sub-agent ID."),
@@ -318,7 +317,7 @@ func (e *Executor) Shutdown() {
 }
 
 func (e *Executor) readFile(args map[string]any) (string, error) {
-	path, err := e.resolveWorkplacePath(stringArg(args, "path"))
+	path, err := e.resolveWorkplacePath(stringArg(args, "relative_path"))
 	if err != nil {
 		return "", err
 	}
@@ -343,7 +342,7 @@ func (e *Executor) readFile(args map[string]any) (string, error) {
 }
 
 func (e *Executor) viewDir(args map[string]any) (string, error) {
-	rel := stringArg(args, "path")
+	rel := stringArg(args, "relative_path")
 	if rel == "" {
 		rel = "."
 	}
@@ -449,7 +448,7 @@ func (e *Executor) diffFile(sess *session.Session, args map[string]any) (string,
 		if changeID != "" || len(stringSliceArg(args, "change_ids")) > 0 {
 			return e.showChanges(sess, changeID, stringSliceArg(args, "change_ids"))
 		}
-		return e.changeHistory(sess, stringArg(args, "path"), intArg(args, "limit", 20))
+		return e.changeHistory(sess, stringArg(args, "relative_path"), intArg(args, "limit", 20))
 	case "revert_many":
 		return e.revertChanges(sess, appendChangeIDs(changeID, stringSliceArg(args, "change_ids")), boolArg(args, "auto_sort", false))
 	}
@@ -462,7 +461,7 @@ func (e *Executor) diffFile(sess *session.Session, args map[string]any) (string,
 		return e.applyDiffs(sess, args, dryRun)
 	}
 
-	path, err := e.resolveWorkplacePath(stringArg(args, "path"))
+	path, err := e.resolveWorkplacePath(stringArg(args, "relative_path"))
 	if err != nil {
 		return "", err
 	}
@@ -472,8 +471,8 @@ func (e *Executor) diffFile(sess *session.Session, args map[string]any) (string,
 	if existed {
 		before = string(beforeBytes)
 	}
-	if guard := stringArg(args, "expected_current"); guard != "" && guard != before {
-		return "", fmt.Errorf("expected_current guard did not match")
+	if guard := stringArg(args, "expected_content"); guard != "" && guard != before {
+		return "", fmt.Errorf("expected_content did not match")
 	}
 
 	after := before
@@ -484,7 +483,7 @@ func (e *Executor) diffFile(sess *session.Session, args map[string]any) (string,
 		if !existed {
 			action = "create"
 		}
-	case "replace":
+	case "find_replace":
 		if !existed {
 			return "", fmt.Errorf("file does not exist; use write to create files")
 		}
@@ -502,7 +501,7 @@ func (e *Executor) diffFile(sess *session.Session, args map[string]any) (string,
 	default:
 		return "", fmt.Errorf("unsupported diff_file mode %q", mode)
 	}
-	diff := unifiedDiff(filepath.ToSlash(stringArg(args, "path")), before, after)
+	diff := unifiedDiff(filepath.ToSlash(stringArg(args, "relative_path")), before, after)
 	if dryRun {
 		return truncate(diff, e.maxOutputLines), nil
 	}
@@ -519,7 +518,7 @@ func (e *Executor) diffFile(sess *session.Session, args map[string]any) (string,
 	change := session.FileChange{
 		ID:            uuid.NewString(),
 		At:            time.Now(),
-		Path:          filepath.ToSlash(stringArg(args, "path")),
+		Path:          filepath.ToSlash(stringArg(args, "relative_path")),
 		Action:        action,
 		BeforeContent: before,
 		AfterContent:  after,
@@ -534,7 +533,7 @@ func (e *Executor) diffFile(sess *session.Session, args map[string]any) (string,
 func replaceTextBlock(before string, args map[string]any) (string, error) {
 	oldText := stringArg(args, "old_text")
 	if oldText == "" {
-		return "", fmt.Errorf("old_text is required for replace mode")
+		return "", fmt.Errorf("old_text is required for find_replace mode")
 	}
 	newText := stringArg(args, "new_text")
 	count := strings.Count(before, oldText)
@@ -560,7 +559,7 @@ func (e *Executor) applyDiffs(sess *session.Session, args map[string]any, previe
 	}
 	plans := []diffApplyPlan{}
 	for _, raw := range diffs {
-		parsed, err := parseUnifiedDiff(raw, filepath.ToSlash(stringArg(args, "path")))
+		parsed, err := parseUnifiedDiff(raw, filepath.ToSlash(stringArg(args, "relative_path")))
 		if err != nil {
 			return "", err
 		}
@@ -584,11 +583,11 @@ func (e *Executor) applyDiffs(sess *session.Session, args map[string]any, previe
 			if plan.Creates {
 				return "", fmt.Errorf("%s already exists; /dev/null create patches require a missing file", plan.Path)
 			}
-		} else if !plan.Creates && !boolArg(args, "allow_create", false) {
-			return "", fmt.Errorf("%s does not exist; set allow_create=true for creating files", plan.Path)
+		} else if !plan.Creates {
+			return "", fmt.Errorf("%s does not exist; create files with write or a /dev/null diff", plan.Path)
 		}
-		if guard := stringArg(args, "expected_current"); guard != "" && guard != before {
-			return "", fmt.Errorf("expected_current guard did not match for %s", plan.Path)
+		if guard := stringArg(args, "expected_content"); guard != "" && guard != before {
+			return "", fmt.Errorf("expected_content did not match for %s", plan.Path)
 		}
 		after, err := applyParsedPatch(before, plan)
 		if err != nil {
@@ -757,7 +756,7 @@ func (e *Executor) resolveWorkplacePath(rel string) (string, error) {
 	}
 	clean := filepath.Clean(rel)
 	if filepath.IsAbs(clean) {
-		return "", fmt.Errorf("absolute paths are not allowed")
+		return "", fmt.Errorf("only relative paths are supported")
 	}
 	abs := filepath.Join(e.paths.Workplace, clean)
 	resolved, err := filepath.Abs(abs)

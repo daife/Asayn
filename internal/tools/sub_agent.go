@@ -344,7 +344,7 @@ func (m *SubAgentManager) describeForRoot(task *SubAgentTask) string {
 		lines = append(lines, conversation...)
 	}
 	if task.Status == "running" {
-		lines = append(lines, "", "This sub-agent is still running. Continue useful work; use sub_agent_wait_check only for one deliberate wait when there is truly no useful work to do.")
+		lines = append(lines, "", "This sub-agent is still running and may take a while. Continue other useful work first; call sub_agent_wait_check only when no useful parallel work remains.")
 	}
 	return strings.Join(lines, "\n")
 }
