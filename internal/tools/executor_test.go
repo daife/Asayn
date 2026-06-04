@@ -540,6 +540,37 @@ func TestDiffFileSchemaUsesCanonicalParameters(t *testing.T) {
 	}
 }
 
+func TestDiffFileRejectsLegacyAliasesAndModes(t *testing.T) {
+	work := t.TempDir()
+	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
+	sess, err := store.New("test", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
+	if err := os.WriteFile(filepath.Join(work, "hello.txt"), []byte("alpha\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, args := range []map[string]any{
+		{"mode": "replace", "path": "hello.txt", "find": "alpha", "replace": "beta"},
+		{"mode": "preview", "path": "hello.txt", "old_text": "alpha", "new_text": "beta"},
+		{"mode": "patch", "path": "hello.txt", "old_text": "alpha", "new_text": "beta"},
+		{"mode": "show", "change_id": "missing"},
+	} {
+		if _, err := exec.Run(context.Background(), sess, "diff_file", args); err == nil {
+			t.Fatalf("expected legacy args/mode to fail: %#v", args)
+		}
+	}
+}
+
+func TestShellAsyncWaitCheckIsNotExposed(t *testing.T) {
+	exec := NewExecutor(config.Paths{}, nil, 20000, true, true)
+	if hasToolSchema(exec.Schemas(false), "shell_async_wait_check") {
+		t.Fatal("shell_async_wait_check should not be exposed")
+	}
+}
+
 func TestShellRunModes(t *testing.T) {
 	work := t.TempDir()
 	syncExec := NewExecutor(config.Paths{Workplace: work}, nil, 20000, false, false)

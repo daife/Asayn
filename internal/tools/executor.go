@@ -450,18 +450,16 @@ func (e *Executor) diffFile(sess *session.Session, args map[string]any) (string,
 			return e.showChanges(sess, changeID, stringSliceArg(args, "change_ids"))
 		}
 		return e.changeHistory(sess, stringArg(args, "path"), intArg(args, "limit", 20))
-	case "show":
-		return e.showChanges(sess, changeID, stringSliceArg(args, "change_ids"))
 	case "revert_many":
-		return e.revertChanges(sess, appendChangeIDs(changeID, stringSliceArg(args, "change_ids")), revertManyReverseOrder(args))
+		return e.revertChanges(sess, appendChangeIDs(changeID, stringSliceArg(args, "change_ids")), boolArg(args, "reverse_order", true))
 	}
 	if mode == "revert" {
 		return e.revertChange(sess, changeID)
 	}
 
 	dryRun := boolArg(args, "dry_run", false)
-	if mode == "apply" || (mode == "preview" && (stringArg(args, "unified_diff") != "" || len(stringSliceArg(args, "patches")) > 0)) {
-		return e.applyDiffs(sess, args, dryRun || mode == "preview")
+	if mode == "apply" {
+		return e.applyDiffs(sess, args, dryRun)
 	}
 
 	path, err := e.resolveWorkplacePath(stringArg(args, "path"))
@@ -481,20 +479,12 @@ func (e *Executor) diffFile(sess *session.Session, args map[string]any) (string,
 	after := before
 	action := "modify"
 	switch mode {
-	case "preview", "write":
-		if mode == "preview" && (stringArg(args, "old_text") != "" || stringArg(args, "find") != "") {
-			next, err := replaceTextBlock(before, args)
-			if err != nil {
-				return "", err
-			}
-			after = next
-			break
-		}
+	case "write":
 		after = stringArg(args, "content")
 		if !existed {
 			action = "create"
 		}
-	case "replace", "patch":
+	case "replace":
 		if !existed {
 			return "", fmt.Errorf("file does not exist; use write to create files")
 		}
@@ -513,7 +503,7 @@ func (e *Executor) diffFile(sess *session.Session, args map[string]any) (string,
 		return "", fmt.Errorf("unsupported diff_file mode %q", mode)
 	}
 	diff := unifiedDiff(filepath.ToSlash(stringArg(args, "path")), before, after)
-	if dryRun || mode == "preview" {
+	if dryRun {
 		return truncate(diff, e.maxOutputLines), nil
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -544,15 +534,9 @@ func (e *Executor) diffFile(sess *session.Session, args map[string]any) (string,
 func replaceTextBlock(before string, args map[string]any) (string, error) {
 	oldText := stringArg(args, "old_text")
 	if oldText == "" {
-		oldText = stringArg(args, "find")
-	}
-	if oldText == "" {
 		return "", fmt.Errorf("old_text is required for replace mode")
 	}
 	newText := stringArg(args, "new_text")
-	if _, ok := args["new_text"]; !ok {
-		newText = stringArg(args, "replace")
-	}
 	count := strings.Count(before, oldText)
 	if count == 0 {
 		return "", fmt.Errorf("old_text not found")
@@ -765,13 +749,6 @@ func appendChangeIDs(first string, rest []string) []string {
 	}
 	out = append(out, rest...)
 	return out
-}
-
-func revertManyReverseOrder(args map[string]any) bool {
-	if _, ok := args["reverse_order"]; ok {
-		return boolArg(args, "reverse_order", true)
-	}
-	return boolArg(args, "reverse", true)
 }
 
 func (e *Executor) resolveWorkplacePath(rel string) (string, error) {
