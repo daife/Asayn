@@ -71,6 +71,7 @@ type model struct {
 	streamAnswerText          string
 	usageStats                usage.Stats
 	latestTotalTokens         int
+	activeTurnUsage           types.Usage
 }
 
 type agentMsg struct {
@@ -465,6 +466,7 @@ func (m *model) appendDivider() {
 
 func (m model) startAgentTurn(value string, recordHistory bool) (model, tea.Cmd) {
 	m.commandOutput = ""
+	m.activeTurnUsage = types.Usage{}
 	if recordHistory {
 		m.addInputHistory(value)
 	}
@@ -640,6 +642,8 @@ func (m *model) appendAgentEvent(event llm.AgentEvent) {
 		m.streamAnswerText = ""
 	case "assistant_delta":
 		m.appendAnswerDelta(event.Text)
+	case "usage":
+		m.applyUsageEvent(event.Usage)
 	case "tool_start":
 		m.finalizePendingThinking()
 		m.finalizeStreamAnswer("")
@@ -655,6 +659,32 @@ func (m *model) appendAgentEvent(event llm.AgentEvent) {
 	default:
 		m.appendLog("\n" + event.Display() + "\n")
 	}
+}
+
+func (m *model) applyUsageEvent(next *types.Usage) {
+	if next == nil {
+		return
+	}
+	deltaPrompt := next.PromptTokens - m.activeTurnUsage.PromptTokens
+	deltaCompletion := next.CompletionTokens - m.activeTurnUsage.CompletionTokens
+	deltaCacheHit := next.PromptCacheHitTokens - m.activeTurnUsage.PromptCacheHitTokens
+	if deltaPrompt < 0 {
+		deltaPrompt = next.PromptTokens
+	}
+	if deltaCompletion < 0 {
+		deltaCompletion = next.CompletionTokens
+	}
+	if deltaCacheHit < 0 {
+		deltaCacheHit = next.PromptCacheHitTokens
+	}
+	m.usageStats.TotalInput += int64(deltaPrompt)
+	m.usageStats.TotalOutput += int64(deltaCompletion)
+	m.usageStats.TotalCacheHit += int64(deltaCacheHit)
+	m.usageStats.SessionInput += int64(deltaPrompt)
+	m.usageStats.SessionOutput += int64(deltaCompletion)
+	m.usageStats.SessionCacheHit += int64(deltaCacheHit)
+	m.latestTotalTokens = next.TotalTokens
+	m.activeTurnUsage = *next
 }
 
 func (m *model) replacePendingTool(replacement string) {

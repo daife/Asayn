@@ -23,8 +23,9 @@ type Agent struct {
 }
 
 type AgentEvent struct {
-	Kind string
-	Text string
+	Kind  string
+	Text  string
+	Usage *types.Usage
 }
 
 func (e AgentEvent) Display() string {
@@ -117,6 +118,10 @@ func (a *Agent) AskWithEvents(ctx context.Context, sess *session.Session, prompt
 		totalUsage.TotalTokens = usage.TotalTokens // Represents the context window size of the latest call.
 		totalUsage.PromptCacheHitTokens += usage.PromptCacheHitTokens
 		totalUsage.PromptCacheMissTokens += usage.PromptCacheMissTokens
+		if emit != nil {
+			snapshot := totalUsage
+			emit(AgentEvent{Kind: "usage", Usage: &snapshot})
+		}
 
 		sess.Messages = append(sess.Messages, msg)
 		if emit != nil && msg.ReasoningContent != "" {
