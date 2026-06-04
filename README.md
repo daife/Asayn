@@ -188,8 +188,7 @@ Skills are directory-based packages. Asayn discovers only directories that conta
 - `mode="find_replace"` edits a localized exact `old_text` block into `new_text`, records a change ID, and returns the resulting diff. This is preferred for multi-line edits because it does not rely on line numbers.
 - Add `dry_run=true` to `find_replace`, `write`, `delete`, or `apply` to preview without writing.
 - `mode="apply"` with `unified_diff` or `patches` applies one or more unified diff file patches and records change IDs. Patch paths come from diff headers; headerless patches use `relative_path` as the fallback. If both are provided and disagree, the tool errors.
-- `mode="history"` lists recorded changes, optionally filtered by `relative_path`. With `change_id` or `change_ids`, it shows the recorded diff for those changes.
-- `mode="revert"` reverts one recorded change.
-- `mode="revert_many"` reverts change IDs in the provided order; set `auto_sort=true` to revert newest changes first.
+- `mode="history"` lists recent change summaries, optionally filtered by `relative_path`. Default output is limited; with `change_id` or `change_ids`, it shows the recorded diff for those changes.
+- `mode="rollback"` restores one or more recorded changes and removes those change records from history.
 
-Full-file `write` is still available for new or small files. Unified diffs remain useful when context is certain; `replace` is safer when editing JSON tails, comma-sensitive blocks, or other multi-line regions where line numbers are easy to get wrong.
+Full-file `write` is still available for new or small files. Unified diffs remain useful when context is certain; `find_replace` is safer when editing JSON tails, comma-sensitive blocks, or other multi-line regions where line numbers are easy to get wrong.

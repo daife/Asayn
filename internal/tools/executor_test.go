@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,7 +13,7 @@ import (
 	"github.com/asayn/asayn/internal/session"
 )
 
-func TestDiffFileApplyHistoryShowRevertMany(t *testing.T) {
+func TestDiffFileApplyHistoryShowRollback(t *testing.T) {
 	work := t.TempDir()
 	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
 	sess, err := store.New("test", "default")
@@ -67,7 +68,7 @@ func TestDiffFileApplyHistoryShowRevertMany(t *testing.T) {
 	}
 
 	_, err = exec.Run(context.Background(), sess, "diff_file", map[string]any{
-		"mode":       "revert_many",
+		"mode":       "rollback",
 		"change_ids": []any{id},
 	})
 	if err != nil {
@@ -78,7 +79,10 @@ func TestDiffFileApplyHistoryShowRevertMany(t *testing.T) {
 		t.Fatal(err)
 	}
 	if string(data) != "alpha\nomega\n" {
-		t.Fatalf("unexpected reverted content: %q", string(data))
+		t.Fatalf("unexpected rolled back content: %q", string(data))
+	}
+	if len(sess.Changes) != 0 {
+		t.Fatalf("rollback should remove change records, got %d", len(sess.Changes))
 	}
 }
 
@@ -225,7 +229,7 @@ func TestDiffFileDevNullCreateExistingFileErrors(t *testing.T) {
 	}
 }
 
-func TestDiffFileDeleteRevertRestoresFile(t *testing.T) {
+func TestDiffFileDeleteRollbackRestoresFile(t *testing.T) {
 	work := t.TempDir()
 	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
 	sess, err := store.New("test", "default")
@@ -249,7 +253,7 @@ func TestDiffFileDeleteRevertRestoresFile(t *testing.T) {
 	}
 	id := sess.Changes[len(sess.Changes)-1].ID
 	if _, err := exec.Run(context.Background(), sess, "diff_file", map[string]any{
-		"mode":      "revert",
+		"mode":      "rollback",
 		"change_id": id,
 	}); err != nil {
 		t.Fatal(err)
@@ -259,11 +263,52 @@ func TestDiffFileDeleteRevertRestoresFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	if string(data) != "original\n" {
-		t.Fatalf("reverted delete should restore original content, got %q", data)
+		t.Fatalf("rolled back delete should restore original content, got %q", data)
+	}
+	if len(sess.Changes) != 0 {
+		t.Fatalf("rollback should remove delete change, got %d records", len(sess.Changes))
 	}
 }
 
-func TestDiffFileRevertManyUsesProvidedOrderByDefault(t *testing.T) {
+func TestDiffFileRollbackRequiresLaterSameFileChangesFirst(t *testing.T) {
+	work := t.TempDir()
+	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
+	sess, err := store.New("test", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
+	if err := os.WriteFile(filepath.Join(work, "hello.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, item := range []struct {
+		old string
+		new string
+	}{
+		{"one", "two"},
+		{"two", "three"},
+	} {
+		if _, err := exec.Run(context.Background(), sess, "diff_file", map[string]any{
+			"mode":          "find_replace",
+			"relative_path": "hello.txt",
+			"old_text":      item.old,
+			"new_text":      item.new,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ids := []any{sess.Changes[0].ID, sess.Changes[1].ID}
+	_, err = exec.Run(context.Background(), sess, "diff_file", map[string]any{
+		"mode":      "rollback",
+		"change_id": ids[0],
+	})
+	if err == nil || !strings.Contains(err.Error(), "later change") {
+		t.Fatalf("expected later change rollback error, got %v", err)
+	}
+}
+
+func TestDiffFileRollbackManyRollsBackNewestFirst(t *testing.T) {
 	work := t.TempDir()
 	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
 	sess, err := store.New("test", "default")
@@ -293,53 +338,8 @@ func TestDiffFileRevertManyUsesProvidedOrderByDefault(t *testing.T) {
 	}
 	ids := []any{sess.Changes[0].ID, sess.Changes[1].ID}
 	if _, err := exec.Run(context.Background(), sess, "diff_file", map[string]any{
-		"mode":       "revert_many",
+		"mode":       "rollback",
 		"change_ids": ids,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(filepath.Join(work, "hello.txt"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(data) != "two\n" {
-		t.Fatalf("unexpected provided-order revert content: %q", data)
-	}
-}
-
-func TestDiffFileRevertManyAutoSortRevertsNewestFirst(t *testing.T) {
-	work := t.TempDir()
-	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
-	sess, err := store.New("test", "default")
-	if err != nil {
-		t.Fatal(err)
-	}
-	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
-	if err := os.WriteFile(filepath.Join(work, "hello.txt"), []byte("one\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	for _, item := range []struct {
-		old string
-		new string
-	}{
-		{"one", "two"},
-		{"two", "three"},
-	} {
-		if _, err := exec.Run(context.Background(), sess, "diff_file", map[string]any{
-			"mode":          "find_replace",
-			"relative_path": "hello.txt",
-			"old_text":      item.old,
-			"new_text":      item.new,
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	ids := []any{sess.Changes[0].ID, sess.Changes[1].ID}
-	if _, err := exec.Run(context.Background(), sess, "diff_file", map[string]any{
-		"mode":       "revert_many",
-		"change_ids": ids,
-		"auto_sort":  true,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -348,7 +348,42 @@ func TestDiffFileRevertManyAutoSortRevertsNewestFirst(t *testing.T) {
 		t.Fatal(err)
 	}
 	if string(data) != "one\n" {
-		t.Fatalf("unexpected auto-sorted revert content: %q", data)
+		t.Fatalf("unexpected rollback content: %q", data)
+	}
+	if len(sess.Changes) != 0 {
+		t.Fatalf("rollback should remove both changes, got %d", len(sess.Changes))
+	}
+}
+
+func TestDiffFileHistoryDefaultsToTenSummaries(t *testing.T) {
+	work := t.TempDir()
+	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
+	sess, err := store.New("test", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
+	for i := 0; i < 12; i++ {
+		if _, err := exec.Run(context.Background(), sess, "diff_file", map[string]any{
+			"mode":          "write",
+			"relative_path": filepath.ToSlash(filepath.Join("files", fmt.Sprintf("%02d.txt", i))),
+			"content":       fmt.Sprintf("%d\n", i),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, err := exec.Run(context.Background(), sess, "diff_file", map[string]any{
+		"mode": "history",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 10 {
+		t.Fatalf("history should default to 10 summaries, got %d:\n%s", len(lines), out)
+	}
+	if strings.Contains(out, "00.txt") || !strings.Contains(out, "11.txt") {
+		t.Fatalf("history should show recent summaries only:\n%s", out)
 	}
 }
 
@@ -640,12 +675,12 @@ func TestShellSchemasFollowShellConfig(t *testing.T) {
 func TestDiffFileSchemaUsesCanonicalParameters(t *testing.T) {
 	exec := NewExecutor(config.Paths{}, nil, 20000, false, false)
 	props := toolProperties(t, exec.Schemas(false), "diff_file")
-	for _, name := range []string{"find", "replace", "reverse", "reverse_order", "path", "expected_current", "allow_create"} {
+	for _, name := range []string{"find", "replace", "reverse", "reverse_order", "auto_sort", "path", "expected_current", "allow_create"} {
 		if _, ok := props[name]; ok {
 			t.Fatalf("diff_file schema should not expose legacy parameter %q", name)
 		}
 	}
-	for _, name := range []string{"relative_path", "old_text", "new_text", "expected_content", "auto_sort", "dry_run", "patches"} {
+	for _, name := range []string{"relative_path", "old_text", "new_text", "expected_content", "dry_run", "patches", "change_id", "change_ids"} {
 		if _, ok := props[name]; !ok {
 			t.Fatalf("diff_file schema should expose %q", name)
 		}
@@ -668,6 +703,8 @@ func TestDiffFileRejectsLegacyAliasesAndModes(t *testing.T) {
 		{"mode": "find_replace", "path": "hello.txt", "old_text": "alpha", "new_text": "beta"},
 		{"mode": "find_replace", "relative_path": "hello.txt", "find": "alpha", "replace": "beta"},
 		{"mode": "replace", "relative_path": "hello.txt", "old_text": "alpha", "new_text": "beta"},
+		{"mode": "revert", "change_id": "missing"},
+		{"mode": "revert_many", "change_ids": []any{"missing"}},
 		{"mode": "preview", "relative_path": "hello.txt", "old_text": "alpha", "new_text": "beta"},
 		{"mode": "patch", "relative_path": "hello.txt", "old_text": "alpha", "new_text": "beta"},
 		{"mode": "show", "change_id": "missing"},

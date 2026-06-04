@@ -112,20 +112,19 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 		schema("diff_file", "Edit files and manage recorded changes.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"mode":             prop("string", "apply, find_replace, write, delete, history, revert, or revert_many."),
+				"mode":             prop("string", "apply, find_replace, write, delete, history, or rollback."),
 				"dry_run":          prop("boolean", "Preview any write mode."),
 				"relative_path":    prop("string", "File path relative to the workspace."),
 				"content":          prop("string", "Full file content for write."),
 				"unified_diff":     prop("string", "Strict unified diff with exact headers, line numbers, and context."),
 				"patches":          prop("array", "Array of strict unified diffs."),
-				"old_text":         prop("string", "Exact file substring to find, including whitespace and newlines."),
+				"old_text":         prop("string", "Exact file substring from read_file output, including whitespace and newlines."),
 				"new_text":         prop("string", "Replacement text."),
 				"replace_all":      prop("boolean", "Replace every match."),
-				"change_id":        prop("string", "Recorded change ID."),
-				"change_ids":       prop("array", "Recorded change IDs."),
-				"limit":            prop("integer", "History entry limit."),
+				"change_id":        prop("string", "Recorded change ID for history or rollback."),
+				"change_ids":       prop("array", "Recorded change IDs for rollback."),
+				"limit":            prop("integer", "History summary limit. Default 10, max 25."),
 				"expected_content": prop("string", "Abort unless current file content exactly matches this value."),
-				"auto_sort":        prop("boolean", "For revert_many, revert newest changes first."),
 			},
 			"required": []string{"mode"},
 		}),
@@ -448,12 +447,9 @@ func (e *Executor) diffFile(sess *session.Session, args map[string]any) (string,
 		if changeID != "" || len(stringSliceArg(args, "change_ids")) > 0 {
 			return e.showChanges(sess, changeID, stringSliceArg(args, "change_ids"))
 		}
-		return e.changeHistory(sess, stringArg(args, "relative_path"), intArg(args, "limit", 20))
-	case "revert_many":
-		return e.revertChanges(sess, appendChangeIDs(changeID, stringSliceArg(args, "change_ids")), boolArg(args, "auto_sort", false))
-	}
-	if mode == "revert" {
-		return e.revertChange(sess, changeID)
+		return e.changeHistory(sess, stringArg(args, "relative_path"), intArg(args, "limit", 0))
+	case "rollback":
+		return e.rollbackChanges(sess, appendChangeIDs(changeID, stringSliceArg(args, "change_ids")))
 	}
 
 	dryRun := boolArg(args, "dry_run", false)
@@ -634,73 +630,72 @@ func (e *Executor) applyDiffs(sess *session.Session, args map[string]any, previe
 	return truncate(strings.Join(outputs, "\n"), e.maxOutputLines), nil
 }
 
-func (e *Executor) revertChange(sess *session.Session, changeID string) (string, error) {
-	if changeID == "" {
-		return "", fmt.Errorf("change_id is required")
+func (e *Executor) rollbackChanges(sess *session.Session, changeIDs []string) (string, error) {
+	if len(changeIDs) == 0 {
+		return "", fmt.Errorf("change_ids is required")
 	}
-	for i := len(sess.Changes) - 1; i >= 0; i-- {
-		ch := sess.Changes[i]
-		if ch.ID != changeID {
-			continue
+	selected := map[string]bool{}
+	for _, id := range changeIDs {
+		selected[id] = true
+	}
+	indexes := []int{}
+	for i, ch := range sess.Changes {
+		if selected[ch.ID] {
+			indexes = append(indexes, i)
 		}
+	}
+	if len(indexes) != len(selected) {
+		return "", fmt.Errorf("change_id not found")
+	}
+	for _, idx := range indexes {
+		ch := sess.Changes[idx]
+		for later := idx + 1; later < len(sess.Changes); later++ {
+			laterChange := sess.Changes[later]
+			if laterChange.Path == ch.Path && !selected[laterChange.ID] {
+				return "", fmt.Errorf("cannot rollback %s; later change %s also modified %s", ch.ID, laterChange.ID, ch.Path)
+			}
+		}
+	}
+	sort.Slice(indexes, func(i, j int) bool { return indexes[i] > indexes[j] })
+
+	out := []string{}
+	for _, idx := range indexes {
+		ch := sess.Changes[idx]
 		path, err := e.resolveWorkplacePath(ch.Path)
 		if err != nil {
-			return "", err
+			return strings.Join(out, "\n"), err
 		}
 		current, _ := os.ReadFile(path)
 		diff := unifiedDiff(ch.Path, string(current), ch.BeforeContent)
 		if ch.Action == "create" {
 			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-				return "", err
+				return strings.Join(out, "\n"), err
 			}
 		} else {
 			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-				return "", err
+				return strings.Join(out, "\n"), err
 			}
 			if err := os.WriteFile(path, []byte(ch.BeforeContent), 0o644); err != nil {
-				return "", err
+				return strings.Join(out, "\n"), err
 			}
 		}
-		revert := session.FileChange{
-			ID:            uuid.NewString(),
-			At:            time.Now(),
-			Path:          ch.Path,
-			Action:        "revert:" + changeID,
-			BeforeContent: string(current),
-			AfterContent:  ch.BeforeContent,
-			UnifiedDiff:   diff,
-		}
-		if err := e.store.AddChange(sess, revert); err != nil {
-			return "", err
-		}
-		return truncate(fmt.Sprintf("reverted=%s\nchange_id=%s\n%s", changeID, revert.ID, diff), e.maxOutputLines), nil
+		sess.Changes = append(sess.Changes[:idx], sess.Changes[idx+1:]...)
+		out = append(out, fmt.Sprintf("rolled_back=%s\n%s", ch.ID, diff))
 	}
-	return "", fmt.Errorf("change_id not found")
-}
-
-func (e *Executor) revertChanges(sess *session.Session, changeIDs []string, autoSort bool) (string, error) {
-	if len(changeIDs) == 0 {
-		return "", fmt.Errorf("change_ids is required")
-	}
-	if autoSort {
-		for i, j := 0, len(changeIDs)-1; i < j; i, j = i+1, j-1 {
-			changeIDs[i], changeIDs[j] = changeIDs[j], changeIDs[i]
-		}
-	}
-	out := []string{}
-	for _, id := range changeIDs {
-		result, err := e.revertChange(sess, id)
-		if err != nil {
+	if e.store != nil {
+		if err := e.store.Save(sess); err != nil {
 			return strings.Join(out, "\n"), err
 		}
-		out = append(out, result)
 	}
 	return truncate(strings.Join(out, "\n"), e.maxOutputLines), nil
 }
 
 func (e *Executor) changeHistory(sess *session.Session, path string, limit int) (string, error) {
 	if limit <= 0 {
-		limit = 20
+		limit = 10
+	}
+	if limit > 25 {
+		limit = 25
 	}
 	rows := []string{}
 	for i := len(sess.Changes) - 1; i >= 0; i-- {

@@ -249,7 +249,7 @@ func toolUsePrompt(workplace string) string {
 
 Tool rules:
 - Workplace: %q. Tool paths must be workspace-relative.
-- File tools: Prefer diff_file mode=find_replace with exact old_text/new_text for edits. Use mode=write only for new/small files.
+- File tools: Prefer diff_file mode=find_replace with exact old_text from read_file output. Use mode=write only for new/small files.
 - Shell tools: Run in workplace root. shell_run_sync is blocking. shell_run_async runs in background; check it with shell_async_status.
 - Sub-agents: Run in background. Delegate isolated tasks. Check them when ready_for_check. Do not delegate shell coordination.
 - Avoid modifying .Asayn/ unless explicitly asked to change Asayn configurations.`, workplace)

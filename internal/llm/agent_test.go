@@ -99,7 +99,7 @@ func TestSystemPromptIncludesConcreteWorkplaceRules(t *testing.T) {
 	for _, want := range []string{
 		`Workplace: "/tmp/asayn-workplace"`,
 		"mode=find_replace",
-		"Use mode=write only for new/small files",
+		"old_text from read_file output",
 		"Run in workplace root",
 	} {
 		if !strings.Contains(prompt, want) {
