@@ -39,6 +39,10 @@ func Bootstrap(cwd string) (*Context, error) {
 	if err != nil {
 		return nil, err
 	}
+	// resolve context window / max output from api config
+	limits := config.ModelLimitsFor(api, root.Provider, root.Model)
+	root.ContextWindow = limits.ContextWindow
+	root.MaxOutputTokens = limits.MaxOutputTokens
 
 	store := session.NewStore(paths.RootAgentSessionsDir())
 	subStore := session.NewStore(paths.SubAgentSessionsDir())

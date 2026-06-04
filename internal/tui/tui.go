@@ -1028,6 +1028,11 @@ func (m model) applyRootAgent(name string) model {
 		m.setCommandOutput("error: " + err.Error())
 		return m
 	}
+	// resolve context window / max output from api config
+	limits := config.ModelLimitsFor(m.ctx.API, root.Provider, root.Model)
+	root.ContextWindow = limits.ContextWindow
+	root.MaxOutputTokens = limits.MaxOutputTokens
+
 	m.ctx.Root = root
 	m.ctx.Tools.SetAgentLimits(root.MaxOutputLines, root.AllowParallelShell, root.AllowInteractiveShell)
 	m.ctx.Agent = llm.NewAgent(m.ctx.API, root, m.ctx.Paths, m.ctx.Tools)
@@ -1222,6 +1227,9 @@ func (m model) handleModelConfigAction() model {
 	}
 
 	if configKind == config.RootAgentKind && newCfg.Name == m.session.RootAgent {
+		limits := config.ModelLimitsFor(m.ctx.API, newCfg.Provider, newCfg.Model)
+		newCfg.ContextWindow = limits.ContextWindow
+		newCfg.MaxOutputTokens = limits.MaxOutputTokens
 		m.ctx.Root = newCfg
 		m.ctx.Tools.SetAgentLimits(newCfg.MaxOutputLines, newCfg.AllowParallelShell, newCfg.AllowInteractiveShell)
 		m.ctx.Agent = llm.NewAgent(m.ctx.API, newCfg, m.ctx.Paths, m.ctx.Tools)

@@ -26,10 +26,16 @@ type Paths struct {
 }
 
 type ProviderConfig struct {
-	BaseURL        string   `toml:"url" json:"url"`
-	APIKey         string   `toml:"api_key" json:"api_key"`
-	TimeoutSeconds int      `toml:"timeout_seconds" json:"timeout_seconds"`
-	AllowedModels  []string `toml:"allowed_models" json:"allowed_models"`
+	BaseURL        string              `toml:"url" json:"url"`
+	APIKey         string              `toml:"api_key" json:"api_key"`
+	TimeoutSeconds int                 `toml:"timeout_seconds" json:"timeout_seconds"`
+	AllowedModels  []string            `toml:"allowed_models" json:"allowed_models"`
+	ModelLimits    map[string]ModelLimits `toml:"model_limits" json:"model_limits"`
+}
+
+type ModelLimits struct {
+	ContextWindow   int `toml:"context_window" json:"context_window"`
+	MaxOutputTokens int `toml:"max_output_tokens" json:"max_output_tokens"`
 }
 
 type APIConfig struct {
@@ -132,6 +138,26 @@ func LoadAPIConfig(paths Paths) (APIConfig, error) {
 		cfg.Providers[k] = p
 	}
 	return cfg, nil
+}
+
+// ModelLimitsFor returns the context window and max output tokens for a given
+// model/provider combination. Falls back to sensible defaults when not configured:
+// DeepSeek models default to 1M context / 384k output,
+// Nex-N2-Pro defaults to 384K context / 32k output.
+func ModelLimitsFor(api APIConfig, provider, model string) ModelLimits {
+	if prov, ok := api.Providers[provider]; ok {
+		if limits, ok := prov.ModelLimits[model]; ok {
+			if limits.ContextWindow > 0 {
+				return limits
+			}
+		}
+	}
+	l := strings.ToLower(model)
+	if strings.Contains(l, "nex-n2") {
+		return ModelLimits{ContextWindow: 384000, MaxOutputTokens: 32768}
+	}
+	// deepseek-class defaults
+	return ModelLimits{ContextWindow: 1024000, MaxOutputTokens: 384000}
 }
 
 func LoadAgent(paths Paths, kind, name string) (AgentConfig, error) {

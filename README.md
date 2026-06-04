@@ -123,6 +123,10 @@ allowed_models = [
   "nex-agi/Nex-N2-Pro"
 ]
 
+[providers.SiliconFlow.model_limits.nex-agi/Nex-N2-Pro]
+context_window = 384000
+max_output_tokens = 32768
+
 [providers.DeepSeek]
 url = "https://api.deepseek.com"
 api_key = "your_api_key"
@@ -132,6 +136,8 @@ allowed_models = [
   "deepseek-v4-flash"
 ]
 ```
+
+The optional `model_limits` table sets per-model context window and max output tokens. DeepSeek-class models default to 1 M context / 384 k output when not configured. The sidebar context-window bar reads these limits from the current provider/model combination in real time.
 
 ## Agent Config
 
@@ -145,8 +151,6 @@ description = "General-purpose agent."
 system_prompt = "You are a highly competent agent."
 visible_skills = []
 max_output_lines = 2000
-context_window = 1024000
-max_output_tokens = 384000
 thinking_enabled = false
 reasoning_effort = "max"
 allow_parallel_shell = false

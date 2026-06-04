@@ -8,6 +8,10 @@ allowed_models = [
   "nex-agi/Nex-N2-Pro"
 ]
 
+[providers.SiliconFlow.model_limits.nex-agi/Nex-N2-Pro]
+context_window = 384000
+max_output_tokens = 32768
+
 [providers.DeepSeek]
 url = "https://api.deepseek.com"
 api_key = "your_api_key"
