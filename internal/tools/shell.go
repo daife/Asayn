@@ -20,6 +20,7 @@ type ShellManager struct {
 	limit   int
 	mu      sync.Mutex
 	runs    map[string]*shellRun
+	ended   map[string]string
 }
 
 type shellRun struct {
@@ -54,6 +55,7 @@ func NewShellManager(workdir string, limit int) *ShellManager {
 		workdir: workdir,
 		limit:   limit,
 		runs:    map[string]*shellRun{},
+		ended:   map[string]string{},
 	}
 }
 
@@ -85,7 +87,12 @@ func (m *ShellManager) RunBlocking(ctx context.Context, command string, timeoutS
 		return truncate(out, m.limit), nil
 	case <-waitCtx.Done():
 		m.killRun(run)
-		return truncate(run.output.String(), m.limit), nil
+		out := run.output.String()
+		if out != "" && !strings.HasSuffix(out, "\n") {
+			out += "\n"
+		}
+		out += fmt.Sprintf("<TIMEOUT after %d seconds>", timeoutSec)
+		return truncate(out, m.limit), nil
 	}
 }
 
@@ -113,7 +120,10 @@ func (m *ShellManager) Status(id string) string {
 	if id != "" {
 		run := m.runs[id]
 		if run == nil {
-			return "shell not found"
+			if status := m.ended[id]; status != "" {
+				return status
+			}
+			return "shell not found or terminated"
 		}
 		return truncate(m.describeWithOutput(run), m.limit)
 	}
@@ -145,8 +155,10 @@ func (m *ShellManager) Kill(id string) (string, error) {
 		return "", fmt.Errorf("shell not found")
 	}
 	m.killRun(run)
+	status := m.describe(run)
 	m.mu.Lock()
 	delete(m.runs, id)
+	m.ended[id] = status + "\nterminated"
 	m.mu.Unlock()
 	return "killed", nil
 }
@@ -187,6 +199,7 @@ func (m *ShellManager) KillAll() {
 		runs = append(runs, run)
 	}
 	m.runs = map[string]*shellRun{}
+	m.ended = map[string]string{}
 	m.mu.Unlock()
 
 	for _, run := range runs {

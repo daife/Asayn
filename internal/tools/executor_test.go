@@ -193,7 +193,7 @@ func TestDiffFileDevNullCreateExistingFileErrors(t *testing.T) {
 	}
 }
 
-func TestDiffFileRevertManyDefaultsToReverseOrder(t *testing.T) {
+func TestDiffFileRevertManyUsesProvidedOrderByDefault(t *testing.T) {
 	work := t.TempDir()
 	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
 	sess, err := store.New("test", "default")
@@ -232,12 +232,12 @@ func TestDiffFileRevertManyDefaultsToReverseOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(data) != "one\n" {
-		t.Fatalf("unexpected reverted content: %q", data)
+	if string(data) != "two\n" {
+		t.Fatalf("unexpected provided-order revert content: %q", data)
 	}
 }
 
-func TestDiffFileRevertManyReverseOrderFalseUsesProvidedOrder(t *testing.T) {
+func TestDiffFileRevertManyAutoSortRevertsNewestFirst(t *testing.T) {
 	work := t.TempDir()
 	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
 	sess, err := store.New("test", "default")
@@ -267,9 +267,9 @@ func TestDiffFileRevertManyReverseOrderFalseUsesProvidedOrder(t *testing.T) {
 	}
 	ids := []any{sess.Changes[0].ID, sess.Changes[1].ID}
 	if _, err := exec.Run(context.Background(), sess, "diff_file", map[string]any{
-		"mode":          "revert_many",
-		"change_ids":    ids,
-		"reverse_order": false,
+		"mode":       "revert_many",
+		"change_ids": ids,
+		"auto_sort":  true,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -277,8 +277,8 @@ func TestDiffFileRevertManyReverseOrderFalseUsesProvidedOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(data) != "two\n" {
-		t.Fatalf("expected provided-order revert to leave second before-content, got %q", data)
+	if string(data) != "one\n" {
+		t.Fatalf("unexpected auto-sorted revert content: %q", data)
 	}
 }
 
@@ -507,7 +507,7 @@ func TestShellSchemasFollowShellConfig(t *testing.T) {
 	if !hasToolSchema(syncExec.Schemas(false), "shell_run_sync") {
 		t.Fatal("sync mode should expose shell_run_sync")
 	}
-	if hasToolSchema(syncExec.Schemas(false), "shell_run_async") || hasToolSchema(syncExec.Schemas(false), "shell_async_status") || hasToolSchema(syncExec.Schemas(false), "shell_async_kill") || hasToolSchema(syncExec.Schemas(false), "shell_async_write") {
+	if hasToolSchema(syncExec.Schemas(false), "shell_run_async") || hasToolSchema(syncExec.Schemas(false), "shell_async_status") || hasToolSchema(syncExec.Schemas(false), "shell_async_kill") || hasToolSchema(syncExec.Schemas(false), "shell_async_stdin") {
 		t.Fatal("sync mode should expose only shell_run_sync")
 	}
 
@@ -515,25 +515,25 @@ func TestShellSchemasFollowShellConfig(t *testing.T) {
 	if !hasToolSchema(parallelExec.Schemas(false), "shell_run_sync") || !hasToolSchema(parallelExec.Schemas(false), "shell_run_async") || !hasToolSchema(parallelExec.Schemas(false), "shell_async_status") || !hasToolSchema(parallelExec.Schemas(false), "shell_async_kill") {
 		t.Fatal("parallel mode should expose sync and async shell tools")
 	}
-	if hasToolSchema(parallelExec.Schemas(false), "shell_async_write") {
-		t.Fatal("parallel non-interactive mode should not expose shell async write")
+	if hasToolSchema(parallelExec.Schemas(false), "shell_async_stdin") {
+		t.Fatal("parallel non-interactive mode should not expose shell async stdin")
 	}
 
 	interactiveExec := NewExecutor(config.Paths{}, nil, 20000, true, true)
-	if !hasToolSchema(interactiveExec.Schemas(false), "shell_async_write") {
-		t.Fatal("interactive mode should expose shell_async_write")
+	if !hasToolSchema(interactiveExec.Schemas(false), "shell_async_stdin") {
+		t.Fatal("interactive mode should expose shell_async_stdin")
 	}
 }
 
 func TestDiffFileSchemaUsesCanonicalParameters(t *testing.T) {
 	exec := NewExecutor(config.Paths{}, nil, 20000, false, false)
 	props := toolProperties(t, exec.Schemas(false), "diff_file")
-	for _, name := range []string{"find", "replace", "reverse"} {
+	for _, name := range []string{"find", "replace", "reverse", "reverse_order"} {
 		if _, ok := props[name]; ok {
 			t.Fatalf("diff_file schema should not expose legacy parameter %q", name)
 		}
 	}
-	for _, name := range []string{"old_text", "new_text", "reverse_order", "dry_run", "patches"} {
+	for _, name := range []string{"old_text", "new_text", "auto_sort", "dry_run", "patches"} {
 		if _, ok := props[name]; !ok {
 			t.Fatalf("diff_file schema should expose %q", name)
 		}
@@ -604,6 +604,47 @@ func TestShellRunModes(t *testing.T) {
 	}
 	if !strings.Contains(status, "parallel-ok") {
 		t.Fatalf("shell_status should include output, got %q", status)
+	}
+}
+
+func TestShellRunSyncReportsTimeout(t *testing.T) {
+	work := t.TempDir()
+	exec := NewExecutor(config.Paths{Workplace: work}, nil, 20000, false, false)
+	out, err := exec.Run(context.Background(), nil, "shell_run_sync", map[string]any{
+		"command":     "sleep 2",
+		"timeout_sec": 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "<TIMEOUT after 1 seconds>") {
+		t.Fatalf("timeout marker missing, got %q", out)
+	}
+}
+
+func TestShellAsyncStatusAfterKillReportsTerminated(t *testing.T) {
+	work := t.TempDir()
+	exec := NewExecutor(config.Paths{Workplace: work}, nil, 20000, true, false)
+	started, err := exec.Run(context.Background(), nil, "shell_run_async", map[string]any{
+		"command": "sleep 10",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := strings.TrimPrefix(strings.SplitN(started, "\n", 2)[0], "shell_id=")
+	if _, err := exec.Run(context.Background(), nil, "shell_async_kill", map[string]any{
+		"shell_id": id,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	status, err := exec.Run(context.Background(), nil, "shell_async_status", map[string]any{
+		"shell_id": id,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(status, "terminated") || strings.Contains(status, "shell not found") {
+		t.Fatalf("killed shell status should report termination, got %q", status)
 	}
 }
 

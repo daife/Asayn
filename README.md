@@ -190,6 +190,6 @@ Skills are directory-based packages. Asayn discovers only directories that conta
 - `mode="apply"` with `unified_diff` or `patches` applies one or more unified diff file patches and records change IDs. Patch paths come from diff headers; headerless patches use `path` as the fallback. If both are provided and disagree, the tool errors.
 - `mode="history"` lists recorded changes, optionally filtered by `path`. With `change_id` or `change_ids`, it shows the recorded diff for those changes.
 - `mode="revert"` reverts one recorded change.
-- `mode="revert_many"` reverts multiple changes in reverse order by default; set `reverse_order=false` to use the provided order.
+- `mode="revert_many"` reverts change IDs in the provided order; set `auto_sort=true` to revert newest changes first.
 
 Full-file `write` is still available for new or small files. Unified diffs remain useful when context is certain; `replace` is safer when editing JSON tails, comma-sensitive blocks, or other multi-line regions where line numbers are easy to get wrong.

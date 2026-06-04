@@ -116,9 +116,9 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 				"dry_run":          prop("boolean", "Preview any write mode."),
 				"path":             prop("string", "Workspace-relative path."),
 				"content":          prop("string", "Full file content."),
-				"unified_diff":     prop("string", "Unified diff."),
-				"patches":          prop("array", "Array of unified diffs."),
-				"old_text":         prop("string", "Text to replace."),
+				"unified_diff":     prop("string", "Strict unified diff with exact headers, line numbers, and context."),
+				"patches":          prop("array", "Array of strict unified diffs."),
+				"old_text":         prop("string", "Exact file substring to replace, including whitespace and newlines."),
 				"new_text":         prop("string", "Replacement text."),
 				"replace_all":      prop("boolean", "Replace every match."),
 				"change_id":        prop("string", "Recorded change ID."),
@@ -126,7 +126,7 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 				"limit":            prop("integer", "History entry limit."),
 				"allow_create":     prop("boolean", "Allow file creation."),
 				"expected_current": prop("string", "Expected current content."),
-				"reverse_order":    prop("boolean", "Reverse change_ids for revert_many."),
+				"auto_sort":        prop("boolean", "For revert_many, revert newest changes first."),
 			},
 			"required": []string{"mode"},
 		}),
@@ -173,11 +173,11 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 	)
 	if e.allowInteractiveShell {
 		schemas = append(schemas,
-			schema("shell_async_write", "Send input to an interactive shell.", map[string]any{
+			schema("shell_async_stdin", "Send stdin to an interactive shell.", map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"shell_id": prop("string", "Shell ID."),
-					"input":    prop("string", "Interactive input text."),
+					"input":    prop("string", "Raw stdin text; include \\n to press Enter."),
 				},
 				"required": []string{"shell_id", "input"},
 			}))
@@ -255,9 +255,9 @@ func (e *Executor) Run(ctx context.Context, sess *session.Session, name string, 
 			return "", fmt.Errorf("shell_async_kill is not available unless parallel shell is enabled")
 		}
 		return e.shells.Kill(stringArg(args, "shell_id"))
-	case "shell_async_write":
+	case "shell_async_stdin":
 		if !e.allowInteractiveShell {
-			return "", fmt.Errorf("shell_async_write is not available unless interactive shell is enabled")
+			return "", fmt.Errorf("shell_async_stdin is not available unless interactive shell is enabled")
 		}
 		return e.shells.Write(stringArg(args, "shell_id"), stringArg(args, "input"))
 	case "sub_agent_list":
@@ -451,7 +451,7 @@ func (e *Executor) diffFile(sess *session.Session, args map[string]any) (string,
 		}
 		return e.changeHistory(sess, stringArg(args, "path"), intArg(args, "limit", 20))
 	case "revert_many":
-		return e.revertChanges(sess, appendChangeIDs(changeID, stringSliceArg(args, "change_ids")), boolArg(args, "reverse_order", true))
+		return e.revertChanges(sess, appendChangeIDs(changeID, stringSliceArg(args, "change_ids")), boolArg(args, "auto_sort", false))
 	}
 	if mode == "revert" {
 		return e.revertChange(sess, changeID)
@@ -679,11 +679,11 @@ func (e *Executor) revertChange(sess *session.Session, changeID string) (string,
 	return "", fmt.Errorf("change_id not found")
 }
 
-func (e *Executor) revertChanges(sess *session.Session, changeIDs []string, reverse bool) (string, error) {
+func (e *Executor) revertChanges(sess *session.Session, changeIDs []string, autoSort bool) (string, error) {
 	if len(changeIDs) == 0 {
 		return "", fmt.Errorf("change_ids is required")
 	}
-	if reverse {
+	if autoSort {
 		for i, j := 0, len(changeIDs)-1; i < j; i, j = i+1, j-1 {
 			changeIDs[i], changeIDs[j] = changeIDs[j], changeIDs[i]
 		}
