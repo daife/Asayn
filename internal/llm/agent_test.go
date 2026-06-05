@@ -163,7 +163,7 @@ func TestSystemPromptIncludesConcreteWorkplaceRules(t *testing.T) {
 	prompt := agent.systemPrompt(&session.Session{})
 	for _, want := range []string{
 		`Workplace: "/tmp/asayn-workplace"`,
-		"mode=find_replace",
+		"mode=delete_lines",
 		"old_text from read_file output",
 		"Run in workplace root",
 	} {

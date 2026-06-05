@@ -13,13 +13,11 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 	"unicode/utf8"
 
 	"github.com/asayn/asayn/internal/config"
 	"github.com/asayn/asayn/internal/llm/types"
 	"github.com/asayn/asayn/internal/session"
-	"github.com/google/uuid"
 )
 
 type Executor struct {
@@ -113,24 +111,25 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 			},
 			"required": []string{"name"},
 		}),
-		schema("diff_file", "Edit files and manage recorded changes.", map[string]any{
+		schema("file_edit", "Edit files with line-based operations. All edits are recorded as reversible changes.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"mode":             prop("string", "apply, find_replace, write, delete, history, or rollback."),
-				"dry_run":          prop("boolean", "Preview any write mode."),
-				"relative_path":    prop("string", "File path relative to the workspace."),
-				"content":          prop("string", "Full file content for write."),
-				"unified_diff":     prop("string", "Strict unified diff with exact headers, line numbers, and context."),
-				"patches":          prop("array", "Array of strict unified diffs."),
-				"old_text":         prop("string", "Exact file substring from read_file output, including whitespace and newlines."),
-				"new_text":         prop("string", "Replacement text."),
-				"replace_all":      prop("boolean", "Replace every match."),
-				"change_id":        prop("string", "Recorded change ID for history or rollback."),
-				"change_ids":       prop("array", "Recorded change IDs for rollback."),
-				"limit":            prop("integer", "History summary limit. Default 10, max 25."),
-				"expected_content": prop("string", "Abort unless current file content exactly matches this value."),
+				"mode":              prop("string", "write, delete_lines, insert, replace_lines, find_replace, view, or rollback."),
+				"dry_run":           prop("boolean", "Preview changes without writing. Default false."),
+				"relative_path":     prop("string", "File path relative to the workspace."),
+				"content":           prop("string", "Full file content for write mode."),
+				"start_line":        prop("integer", "First line, 1-based. For delete_lines and replace_lines."),
+				"end_line":          prop("integer", "Last line, 1-based inclusive. For delete_lines and replace_lines."),
+				"insert_after_line": prop("integer", "Line number to insert after. 0 = prepend. For insert mode."),
+				"text":              prop("string", "New text for insert or replace_lines."),
+				"old_text":          prop("string", "Exact substring from read_file output. For find_replace mode."),
+				"new_text":          prop("string", "Replacement substring. For find_replace mode."),
+				"replace_all":       prop("boolean", "Replace all matches. Default false. For find_replace mode."),
+				"change_id":         prop("string", "Recorded change ID for view or rollback."),
+				"change_ids":        prop("array", "Recorded change IDs for rollback."),
+				"limit":             prop("integer", "History summary limit. Default 10, max 25."),
 			},
-			"required": []string{"mode"},
+			"required": []string{"mode", "relative_path"},
 		}),
 	}
 	if forSubAgent {
@@ -226,7 +225,7 @@ func subAgentSchemas() []types.ToolSchema {
 }
 
 func (e *Executor) Run(ctx context.Context, sess *session.Session, name string, args map[string]any) (string, error) {
-	if e.readOnly && name != "read_file" && name != "view_dir" && name != "search_grep" && name != "read_skill" && name != "diff_file" {
+	if e.readOnly && name != "read_file" && name != "view_dir" && name != "search_grep" && name != "read_skill" && name != "file_edit" {
 		return "", fmt.Errorf("tool %q is not available to read-only sub-agents", name)
 	}
 	switch name {
@@ -238,8 +237,8 @@ func (e *Executor) Run(ctx context.Context, sess *session.Session, name string, 
 		return e.searchGrep(args)
 	case "read_skill":
 		return e.readSkill(args)
-	case "diff_file":
-		return e.diffFile(sess, args)
+	case "file_edit":
+		return e.fileEdit(sess, args)
 	case "shell_run_sync":
 		return e.shells.RunBlocking(ctx, stringArg(args, "command"), intArg(args, "timeout_sec", 60))
 	case "shell_run_async":
@@ -537,315 +536,6 @@ func grepTextFile(path, rel string, re *regexp.Regexp, remaining int) ([]string,
 	return matches, nil
 }
 
-func (e *Executor) diffFile(sess *session.Session, args map[string]any) (string, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	mode := stringArg(args, "mode")
-	changeID := stringArg(args, "change_id")
-	switch mode {
-	case "history":
-		if changeID != "" || len(stringSliceArg(args, "change_ids")) > 0 {
-			return e.showChanges(sess, changeID, stringSliceArg(args, "change_ids"))
-		}
-		return e.changeHistory(sess, stringArg(args, "relative_path"), intArg(args, "limit", 0))
-	case "rollback":
-		return e.rollbackChanges(sess, appendChangeIDs(changeID, stringSliceArg(args, "change_ids")))
-	}
-
-	dryRun := boolArg(args, "dry_run", false)
-	if mode == "apply" {
-		return e.applyDiffs(sess, args, dryRun)
-	}
-
-	path, err := e.resolveWorkplacePath(stringArg(args, "relative_path"))
-	if err != nil {
-		return "", err
-	}
-	beforeBytes, readErr := os.ReadFile(path)
-	before := ""
-	existed := readErr == nil
-	if existed {
-		before = string(beforeBytes)
-	}
-	if guard := stringArg(args, "expected_content"); guard != "" && guard != before {
-		return "", fmt.Errorf("expected_content did not match")
-	}
-
-	after := before
-	action := "modify"
-	switch mode {
-	case "write":
-		after = stringArg(args, "content")
-		if !existed {
-			action = "create"
-		}
-	case "find_replace":
-		if !existed {
-			return "", fmt.Errorf("file does not exist; use write to create files")
-		}
-		next, err := replaceTextBlock(before, args)
-		if err != nil {
-			return "", err
-		}
-		after = next
-	case "delete":
-		after = ""
-		action = "delete"
-		if !existed {
-			return "", fmt.Errorf("file does not exist")
-		}
-	default:
-		return "", fmt.Errorf("unsupported diff_file mode %q", mode)
-	}
-	diff := unifiedDiff(filepath.ToSlash(stringArg(args, "relative_path")), before, after)
-	if dryRun {
-		return truncate(diff, e.maxOutputLines), nil
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return "", err
-	}
-	if mode == "delete" {
-		if err := os.Remove(path); err != nil {
-			return "", err
-		}
-	} else if err := os.WriteFile(path, []byte(after), 0o644); err != nil {
-		return "", err
-	}
-	change := session.FileChange{
-		ID:            uuid.NewString(),
-		At:            time.Now(),
-		Path:          filepath.ToSlash(stringArg(args, "relative_path")),
-		Action:        action,
-		BeforeContent: before,
-		AfterContent:  after,
-		UnifiedDiff:   diff,
-	}
-	if err := e.store.AddChange(sess, change); err != nil {
-		return "", err
-	}
-	return truncate(fmt.Sprintf("change_id=%s\n%s", change.ID, diff), e.maxOutputLines), nil
-}
-
-func replaceTextBlock(before string, args map[string]any) (string, error) {
-	oldText := stringArg(args, "old_text")
-	if oldText == "" {
-		return "", fmt.Errorf("old_text is required for find_replace mode")
-	}
-	newText := stringArg(args, "new_text")
-	count := strings.Count(before, oldText)
-	if count == 0 {
-		return "", fmt.Errorf("old_text not found")
-	}
-	if !boolArg(args, "replace_all", false) && count != 1 {
-		return "", fmt.Errorf("old_text matched %d times; include more surrounding lines or set replace_all=true", count)
-	}
-	if boolArg(args, "replace_all", false) {
-		return strings.ReplaceAll(before, oldText, newText), nil
-	}
-	return strings.Replace(before, oldText, newText, 1), nil
-}
-
-func (e *Executor) applyDiffs(sess *session.Session, args map[string]any, preview bool) (string, error) {
-	diffs := stringSliceArg(args, "patches")
-	if one := stringArg(args, "unified_diff"); one != "" {
-		diffs = append([]string{one}, diffs...)
-	}
-	if len(diffs) == 0 {
-		return "", fmt.Errorf("unified_diff or patches is required")
-	}
-	plans := []diffApplyPlan{}
-	for _, raw := range diffs {
-		parsed, err := parseUnifiedDiff(raw, filepath.ToSlash(stringArg(args, "relative_path")))
-		if err != nil {
-			return "", err
-		}
-		plans = append(plans, parsed...)
-	}
-	if len(plans) == 0 {
-		return "", fmt.Errorf("diff contained no file patches")
-	}
-
-	outputs := []string{}
-	for _, plan := range plans {
-		path, err := e.resolveWorkplacePath(plan.Path)
-		if err != nil {
-			return "", err
-		}
-		beforeBytes, readErr := os.ReadFile(path)
-		before := ""
-		existed := readErr == nil
-		if existed {
-			before = string(beforeBytes)
-			if plan.Creates {
-				return "", fmt.Errorf("%s already exists; /dev/null create patches require a missing file", plan.Path)
-			}
-		} else if !plan.Creates {
-			return "", fmt.Errorf("%s does not exist; create files with write or a /dev/null diff", plan.Path)
-		}
-		if guard := stringArg(args, "expected_content"); guard != "" && guard != before {
-			return "", fmt.Errorf("expected_content did not match for %s", plan.Path)
-		}
-		after, err := applyParsedPatch(before, plan)
-		if err != nil {
-			return "", fmt.Errorf("%s: %w", plan.Path, err)
-		}
-		action := "modify"
-		if !existed {
-			action = "create"
-		}
-		if plan.Deletes {
-			action = "delete"
-		}
-		diff := unifiedDiff(plan.Path, before, after)
-		if preview {
-			outputs = append(outputs, diff)
-			continue
-		}
-		if action == "delete" {
-			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-				return "", err
-			}
-		} else {
-			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-				return "", err
-			}
-			if err := os.WriteFile(path, []byte(after), 0o644); err != nil {
-				return "", err
-			}
-		}
-		change := session.FileChange{
-			ID:            uuid.NewString(),
-			At:            time.Now(),
-			Path:          plan.Path,
-			Action:        action,
-			BeforeContent: before,
-			AfterContent:  after,
-			UnifiedDiff:   diff,
-		}
-		if err := e.store.AddChange(sess, change); err != nil {
-			return "", err
-		}
-		outputs = append(outputs, fmt.Sprintf("change_id=%s\n%s", change.ID, diff))
-	}
-	return truncate(strings.Join(outputs, "\n"), e.maxOutputLines), nil
-}
-
-func (e *Executor) rollbackChanges(sess *session.Session, changeIDs []string) (string, error) {
-	if len(changeIDs) == 0 {
-		return "", fmt.Errorf("change_ids is required")
-	}
-	selected := map[string]bool{}
-	for _, id := range changeIDs {
-		selected[id] = true
-	}
-	indexes := []int{}
-	for i, ch := range sess.Changes {
-		if selected[ch.ID] {
-			indexes = append(indexes, i)
-		}
-	}
-	if len(indexes) != len(selected) {
-		return "", fmt.Errorf("change_id not found")
-	}
-	for _, idx := range indexes {
-		ch := sess.Changes[idx]
-		for later := idx + 1; later < len(sess.Changes); later++ {
-			laterChange := sess.Changes[later]
-			if laterChange.Path == ch.Path && !selected[laterChange.ID] {
-				return "", fmt.Errorf("cannot rollback %s; later change %s also modified %s", ch.ID, laterChange.ID, ch.Path)
-			}
-		}
-	}
-	sort.Slice(indexes, func(i, j int) bool { return indexes[i] > indexes[j] })
-
-	out := []string{}
-	for _, idx := range indexes {
-		ch := sess.Changes[idx]
-		path, err := e.resolveWorkplacePath(ch.Path)
-		if err != nil {
-			return strings.Join(out, "\n"), err
-		}
-		current, _ := os.ReadFile(path)
-		diff := unifiedDiff(ch.Path, string(current), ch.BeforeContent)
-		if ch.Action == "create" {
-			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-				return strings.Join(out, "\n"), err
-			}
-		} else {
-			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-				return strings.Join(out, "\n"), err
-			}
-			if err := os.WriteFile(path, []byte(ch.BeforeContent), 0o644); err != nil {
-				return strings.Join(out, "\n"), err
-			}
-		}
-		sess.Changes = append(sess.Changes[:idx], sess.Changes[idx+1:]...)
-		out = append(out, fmt.Sprintf("rolled_back=%s\n%s", ch.ID, diff))
-	}
-	if e.store != nil {
-		if err := e.store.Save(sess); err != nil {
-			return strings.Join(out, "\n"), err
-		}
-	}
-	return truncate(strings.Join(out, "\n"), e.maxOutputLines), nil
-}
-
-func (e *Executor) changeHistory(sess *session.Session, path string, limit int) (string, error) {
-	if limit <= 0 {
-		limit = 10
-	}
-	if limit > 25 {
-		limit = 25
-	}
-	rows := []string{}
-	for i := len(sess.Changes) - 1; i >= 0; i-- {
-		ch := sess.Changes[i]
-		if path != "" && filepath.ToSlash(path) != ch.Path {
-			continue
-		}
-		rows = append(rows, fmt.Sprintf("%s %s %s %s", ch.ID, ch.At.Format(time.RFC3339), ch.Action, ch.Path))
-		if len(rows) >= limit {
-			break
-		}
-	}
-	if len(rows) == 0 {
-		return "no changes", nil
-	}
-	return truncate(strings.Join(rows, "\n"), e.maxOutputLines), nil
-}
-
-func (e *Executor) showChanges(sess *session.Session, changeID string, changeIDs []string) (string, error) {
-	ids := appendChangeIDs(changeID, changeIDs)
-	if len(ids) == 0 {
-		return "", fmt.Errorf("change_id or change_ids is required")
-	}
-	wanted := map[string]bool{}
-	for _, id := range ids {
-		wanted[id] = true
-	}
-	out := []string{}
-	for _, ch := range sess.Changes {
-		if !wanted[ch.ID] {
-			continue
-		}
-		out = append(out, fmt.Sprintf("change_id=%s\nat=%s\naction=%s\npath=%s\n%s", ch.ID, ch.At.Format(time.RFC3339), ch.Action, ch.Path, ch.UnifiedDiff))
-	}
-	if len(out) == 0 {
-		return "change_id not found", nil
-	}
-	return truncate(strings.Join(out, "\n"), e.maxOutputLines), nil
-}
-
-func appendChangeIDs(first string, rest []string) []string {
-	out := []string{}
-	if first != "" {
-		out = append(out, first)
-	}
-	out = append(out, rest...)
-	return out
-}
-
 func (e *Executor) resolveWorkplacePath(rel string) (string, error) {
 	if rel == "" {
 		return "", fmt.Errorf("path is required")
@@ -987,148 +677,6 @@ func truncate(s string, limitLines int) string {
 	return out.String()
 }
 
-func unifiedDiff(path, before, after string) string {
-	beforeLines := strings.Split(before, "\n")
-	afterLines := strings.Split(after, "\n")
-	var b strings.Builder
-	b.WriteString("--- a/" + path + "\n")
-	b.WriteString("+++ b/" + path + "\n")
-	b.WriteString("@@\n")
-	max := len(beforeLines)
-	if len(afterLines) > max {
-		max = len(afterLines)
-	}
-	for i := 0; i < max; i++ {
-		var old, neu string
-		hasOld := i < len(beforeLines)
-		hasNew := i < len(afterLines)
-		if hasOld {
-			old = beforeLines[i]
-		}
-		if hasNew {
-			neu = afterLines[i]
-		}
-		switch {
-		case hasOld && hasNew && old == neu:
-			b.WriteString(" " + old + "\n")
-		default:
-			if hasOld {
-				b.WriteString("-" + old + "\n")
-			}
-			if hasNew {
-				b.WriteString("+" + neu + "\n")
-			}
-		}
-	}
-	return b.String()
-}
-
-type diffApplyPlan struct {
-	Path    string
-	Hunks   []diffHunk
-	Creates bool
-	Deletes bool
-}
-
-type diffHunk struct {
-	OldStart int
-	OldCount int
-	Lines    []string
-}
-
-func parseUnifiedDiff(raw, fallbackPath string) ([]diffApplyPlan, error) {
-	fallbackPath = filepath.ToSlash(strings.TrimSpace(fallbackPath))
-	lines := strings.Split(raw, "\n")
-	plans := []diffApplyPlan{}
-	var current *diffApplyPlan
-	for i := 0; i < len(lines); i++ {
-		line := lines[i]
-		if strings.HasPrefix(line, "--- ") {
-			if i+1 >= len(lines) || !strings.HasPrefix(lines[i+1], "+++ ") {
-				return nil, fmt.Errorf("diff header missing +++ line")
-			}
-			oldPath := cleanDiffPath(strings.TrimSpace(strings.TrimPrefix(line, "--- ")))
-			newPath := cleanDiffPath(strings.TrimSpace(strings.TrimPrefix(lines[i+1], "+++ ")))
-			path := newPath
-			if path == "/dev/null" || path == "" {
-				path = oldPath
-			}
-			if path == "" || path == "/dev/null" {
-				return nil, fmt.Errorf("diff file path missing")
-			}
-			if fallbackPath != "" && fallbackPath != path {
-				return nil, fmt.Errorf("diff path %q conflicts with path %q", path, fallbackPath)
-			}
-			plans = append(plans, diffApplyPlan{
-				Path:    path,
-				Creates: oldPath == "/dev/null",
-				Deletes: newPath == "/dev/null",
-			})
-			current = &plans[len(plans)-1]
-			i++
-			continue
-		}
-		if strings.HasPrefix(line, "@@ ") || strings.HasPrefix(line, "@@\t") {
-			if current == nil {
-				if fallbackPath == "" {
-					return nil, fmt.Errorf("hunk before file header; path is required")
-				}
-				plans = append(plans, diffApplyPlan{Path: fallbackPath})
-				current = &plans[len(plans)-1]
-			}
-			hunk, err := parseHunkHeader(line)
-			if err != nil {
-				return nil, err
-			}
-			i++
-			for ; i < len(lines); i++ {
-				if strings.HasPrefix(lines[i], "--- ") || strings.HasPrefix(lines[i], "@@ ") {
-					i--
-					break
-				}
-				if lines[i] == `\ No newline at end of file` {
-					continue
-				}
-				if lines[i] == "" {
-					continue
-				}
-				prefix := lines[i][0]
-				if prefix != ' ' && prefix != '+' && prefix != '-' {
-					return nil, fmt.Errorf("invalid hunk line %q", lines[i])
-				}
-				hunk.Lines = append(hunk.Lines, lines[i])
-			}
-			current.Hunks = append(current.Hunks, hunk)
-		}
-	}
-	return plans, nil
-}
-
-func parseHunkHeader(header string) (diffHunk, error) {
-	re := regexp.MustCompile(`^@@ -([0-9]+)(?:,([0-9]+))? \+([0-9]+)(?:,([0-9]+))? @@`)
-	m := re.FindStringSubmatch(header)
-	if m == nil {
-		return diffHunk{}, fmt.Errorf("invalid hunk header %q", header)
-	}
-	oldStart, _ := strconv.Atoi(m[1])
-	oldCount := 1
-	if m[2] != "" {
-		oldCount, _ = strconv.Atoi(m[2])
-	}
-	return diffHunk{OldStart: oldStart, OldCount: oldCount}, nil
-}
-
-func cleanDiffPath(path string) string {
-	path = strings.Trim(path, "\"")
-	if path == "/dev/null" {
-		return path
-	}
-	if strings.HasPrefix(path, "a/") || strings.HasPrefix(path, "b/") {
-		path = path[2:]
-	}
-	return filepath.ToSlash(path)
-}
-
 func isBinary(data []byte) bool {
 	limit := binaryProbeSize
 	if len(data) < limit {
@@ -1180,47 +728,3 @@ func safePreview(data []byte, limit int) string {
 	return b.String()
 }
 
-func applyParsedPatch(before string, plan diffApplyPlan) (string, error) {
-	if len(plan.Hunks) == 0 {
-		return before, nil
-	}
-	lines := strings.Split(before, "\n")
-	out := []string{}
-	cursor := 0
-	for _, hunk := range plan.Hunks {
-		start := hunk.OldStart - 1
-		if hunk.OldStart == 0 {
-			start = 0
-		}
-		if start < cursor || start > len(lines) {
-			return "", fmt.Errorf("hunk start is outside file")
-		}
-		out = append(out, lines[cursor:start]...)
-		pos := start
-		for _, hline := range hunk.Lines {
-			if hline == "" {
-				continue
-			}
-			prefix := hline[0]
-			text := hline[1:]
-			switch prefix {
-			case ' ':
-				if pos >= len(lines) || lines[pos] != text {
-					return "", fmt.Errorf("context mismatch near line %d", pos+1)
-				}
-				out = append(out, text)
-				pos++
-			case '-':
-				if pos >= len(lines) || lines[pos] != text {
-					return "", fmt.Errorf("delete mismatch near line %d", pos+1)
-				}
-				pos++
-			case '+':
-				out = append(out, text)
-			}
-		}
-		cursor = pos
-	}
-	out = append(out, lines[cursor:]...)
-	return strings.Join(out, "\n"), nil
-}

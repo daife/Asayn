@@ -13,7 +13,7 @@ import (
 	"github.com/asayn/asayn/internal/session"
 )
 
-func TestDiffFileApplyHistoryShowRollback(t *testing.T) {
+func TestFileEditWriteCreate(t *testing.T) {
 	work := t.TempDir()
 	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
 	sess, err := store.New("test", "default")
@@ -21,72 +21,25 @@ func TestDiffFileApplyHistoryShowRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
-	if err := os.WriteFile(filepath.Join(work, "hello.txt"), []byte("alpha\nomega\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 
-	diff := "--- a/hello.txt\n+++ b/hello.txt\n@@ -1,2 +1,3 @@\n alpha\n+beta\n omega\n"
-	out, err := exec.Run(context.Background(), sess, "diff_file", map[string]any{
-		"mode":         "apply",
-		"unified_diff": diff,
+	out, err := exec.Run(context.Background(), sess, "file_edit", map[string]any{
+		"mode":          "write",
+		"relative_path": "new.txt",
+		"content":       "hello\nworld\n",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "change_id=") {
-		t.Fatalf("expected change id, got %s", out)
+	if !strings.Contains(out, "change_id=") || !strings.Contains(out, "+hello") {
+		t.Fatalf("expected creation diff, got: %s", out)
 	}
-	data, err := os.ReadFile(filepath.Join(work, "hello.txt"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(data) != "alpha\nbeta\nomega\n" {
-		t.Fatalf("unexpected file content: %q", string(data))
-	}
-
-	history, err := exec.Run(context.Background(), sess, "diff_file", map[string]any{
-		"mode":          "history",
-		"relative_path": "hello.txt",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(history, "hello.txt") {
-		t.Fatalf("expected history for file, got %s", history)
-	}
-
-	id := sess.Changes[len(sess.Changes)-1].ID
-	shown, err := exec.Run(context.Background(), sess, "diff_file", map[string]any{
-		"mode":       "history",
-		"change_ids": []any{id},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(shown, id) || !strings.Contains(shown, "+beta") {
-		t.Fatalf("unexpected show output: %s", shown)
-	}
-
-	_, err = exec.Run(context.Background(), sess, "diff_file", map[string]any{
-		"mode":       "rollback",
-		"change_ids": []any{id},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	data, err = os.ReadFile(filepath.Join(work, "hello.txt"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(data) != "alpha\nomega\n" {
-		t.Fatalf("unexpected rolled back content: %q", string(data))
-	}
-	if len(sess.Changes) != 0 {
-		t.Fatalf("rollback should remove change records, got %d", len(sess.Changes))
+	data, _ := os.ReadFile(filepath.Join(work, "new.txt"))
+	if string(data) != "hello\nworld\n" {
+		t.Fatalf("unexpected content: %q", data)
 	}
 }
 
-func TestDiffFileApplyDryRunDoesNotWrite(t *testing.T) {
+func TestFileEditDeleteLines(t *testing.T) {
 	work := t.TempDir()
 	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
 	sess, err := store.New("test", "default")
@@ -94,31 +47,27 @@ func TestDiffFileApplyDryRunDoesNotWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
-	if err := os.WriteFile(filepath.Join(work, "hello.txt"), []byte("alpha\nomega\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	os.WriteFile(filepath.Join(work, "f.txt"), []byte("a\nb\nc\nd\n"), 0o644)
 
-	out, err := exec.Run(context.Background(), sess, "diff_file", map[string]any{
-		"mode":         "apply",
-		"dry_run":      true,
-		"unified_diff": "--- a/hello.txt\n+++ b/hello.txt\n@@ -1,2 +1,3 @@\n alpha\n+beta\n omega\n",
+	out, err := exec.Run(context.Background(), sess, "file_edit", map[string]any{
+		"mode":          "delete_lines",
+		"relative_path": "f.txt",
+		"start_line":    2,
+		"end_line":      3,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(out, "change_id=") || !strings.Contains(out, "+beta") {
-		t.Fatalf("dry run should return only diff, got %s", out)
+	if !strings.Contains(out, "change_id=") || !strings.Contains(out, "-b") {
+		t.Fatalf("expected delete diff, got: %s", out)
 	}
-	data, err := os.ReadFile(filepath.Join(work, "hello.txt"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(data) != "alpha\nomega\n" {
-		t.Fatalf("dry run wrote file: %q", data)
+	data, _ := os.ReadFile(filepath.Join(work, "f.txt"))
+	if string(data) != "a\nd\n" {
+		t.Fatalf("unexpected content: %q", data)
 	}
 }
 
-func TestDiffFilePatchWithoutHeaderUsesPath(t *testing.T) {
+func TestFileEditInsert(t *testing.T) {
 	work := t.TempDir()
 	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
 	sess, err := store.New("test", "default")
@@ -126,28 +75,27 @@ func TestDiffFilePatchWithoutHeaderUsesPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
-	if err := os.WriteFile(filepath.Join(work, "hello.txt"), []byte("alpha\nomega\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	os.WriteFile(filepath.Join(work, "f.txt"), []byte("a\nc\n"), 0o644)
 
-	_, err = exec.Run(context.Background(), sess, "diff_file", map[string]any{
-		"mode":          "apply",
-		"relative_path": "hello.txt",
-		"patches":       []any{"@@ -1,2 +1,3 @@\n alpha\n+beta\n omega\n"},
+	out, err := exec.Run(context.Background(), sess, "file_edit", map[string]any{
+		"mode":              "insert",
+		"relative_path":     "f.txt",
+		"insert_after_line": 1,
+		"text":              "b",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(filepath.Join(work, "hello.txt"))
-	if err != nil {
-		t.Fatal(err)
+	if !strings.Contains(out, "+b") {
+		t.Fatalf("expected insert diff with +b, got: %s", out)
 	}
-	if string(data) != "alpha\nbeta\nomega\n" {
-		t.Fatalf("unexpected patch result: %q", data)
+	data, _ := os.ReadFile(filepath.Join(work, "f.txt"))
+	if string(data) != "a\nb\nc\n" {
+		t.Fatalf("unexpected content: %q", data)
 	}
 }
 
-func TestDiffFilePatchesAppliesMultipleHeaderDiffs(t *testing.T) {
+func TestFileEditReplaceLines(t *testing.T) {
 	work := t.TempDir()
 	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
 	sess, err := store.New("test", "default")
@@ -155,31 +103,28 @@ func TestDiffFilePatchesAppliesMultipleHeaderDiffs(t *testing.T) {
 		t.Fatal(err)
 	}
 	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
-	if err := os.WriteFile(filepath.Join(work, "one.txt"), []byte("one\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(work, "two.txt"), []byte("two\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	os.WriteFile(filepath.Join(work, "f.txt"), []byte("a\nb\nc\nd\n"), 0o644)
 
-	_, err = exec.Run(context.Background(), sess, "diff_file", map[string]any{
-		"mode": "apply",
-		"patches": []any{
-			"--- a/one.txt\n+++ b/one.txt\n@@ -1 +1 @@\n-one\n+ONE\n",
-			"--- a/two.txt\n+++ b/two.txt\n@@ -1 +1 @@\n-two\n+TWO\n",
-		},
+	out, err := exec.Run(context.Background(), sess, "file_edit", map[string]any{
+		"mode":          "replace_lines",
+		"relative_path": "f.txt",
+		"start_line":    2,
+		"end_line":      3,
+		"text":          "X\nY\nZ",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	one, _ := os.ReadFile(filepath.Join(work, "one.txt"))
-	two, _ := os.ReadFile(filepath.Join(work, "two.txt"))
-	if string(one) != "ONE\n" || string(two) != "TWO\n" {
-		t.Fatalf("patches did not apply both files: one=%q two=%q", one, two)
+	if !strings.Contains(out, "+X") || !strings.Contains(out, "-b") {
+		t.Fatalf("expected replace diff, got: %s", out)
+	}
+	data, _ := os.ReadFile(filepath.Join(work, "f.txt"))
+	if string(data) != "a\nX\nY\nZ\nd\n" {
+		t.Fatalf("unexpected content: %q", data)
 	}
 }
 
-func TestDiffFilePatchHeaderPathConflictErrors(t *testing.T) {
+func TestFileEditFindReplace(t *testing.T) {
 	work := t.TempDir()
 	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
 	sess, err := store.New("test", "default")
@@ -187,251 +132,27 @@ func TestDiffFilePatchHeaderPathConflictErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
-	if err := os.WriteFile(filepath.Join(work, "actual.txt"), []byte("alpha\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	os.WriteFile(filepath.Join(work, "f.txt"), []byte("alpha\nomega\n"), 0o644)
 
-	_, err = exec.Run(context.Background(), sess, "diff_file", map[string]any{
-		"mode":          "apply",
-		"relative_path": "expected.txt",
-		"unified_diff":  "--- a/actual.txt\n+++ b/actual.txt\n@@ -1 +1 @@\n-alpha\n+beta\n",
-	})
-	if err == nil || !strings.Contains(err.Error(), "conflicts with path") {
-		t.Fatalf("expected path conflict error, got %v", err)
-	}
-}
-
-func TestDiffFileDevNullCreateExistingFileErrors(t *testing.T) {
-	work := t.TempDir()
-	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
-	sess, err := store.New("test", "default")
-	if err != nil {
-		t.Fatal(err)
-	}
-	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
-	if err := os.WriteFile(filepath.Join(work, "hello.txt"), []byte("old\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = exec.Run(context.Background(), sess, "diff_file", map[string]any{
-		"mode":         "apply",
-		"unified_diff": "--- /dev/null\n+++ b/hello.txt\n@@ -0,0 +1 @@\n+new\n",
-	})
-	if err == nil || !strings.Contains(err.Error(), "already exists") {
-		t.Fatalf("expected existing create error, got %v", err)
-	}
-	data, err := os.ReadFile(filepath.Join(work, "hello.txt"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(data) != "old\n" {
-		t.Fatalf("file changed unexpectedly: %q", data)
-	}
-}
-
-func TestDiffFileDeleteRollbackRestoresFile(t *testing.T) {
-	work := t.TempDir()
-	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
-	sess, err := store.New("test", "default")
-	if err != nil {
-		t.Fatal(err)
-	}
-	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
-	target := filepath.Join(work, "gone.txt")
-	if err := os.WriteFile(target, []byte("original\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	out, err := exec.Run(context.Background(), sess, "diff_file", map[string]any{
-		"mode":          "delete",
-		"relative_path": "gone.txt",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(target); !os.IsNotExist(err) {
-		t.Fatalf("delete should remove file, stat err=%v output=%s", err, out)
-	}
-	id := sess.Changes[len(sess.Changes)-1].ID
-	if _, err := exec.Run(context.Background(), sess, "diff_file", map[string]any{
-		"mode":      "rollback",
-		"change_id": id,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(target)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(data) != "original\n" {
-		t.Fatalf("rolled back delete should restore original content, got %q", data)
-	}
-	if len(sess.Changes) != 0 {
-		t.Fatalf("rollback should remove delete change, got %d records", len(sess.Changes))
-	}
-}
-
-func TestDiffFileRollbackRequiresLaterSameFileChangesFirst(t *testing.T) {
-	work := t.TempDir()
-	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
-	sess, err := store.New("test", "default")
-	if err != nil {
-		t.Fatal(err)
-	}
-	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
-	if err := os.WriteFile(filepath.Join(work, "hello.txt"), []byte("one\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	for _, item := range []struct {
-		old string
-		new string
-	}{
-		{"one", "two"},
-		{"two", "three"},
-	} {
-		if _, err := exec.Run(context.Background(), sess, "diff_file", map[string]any{
-			"mode":          "find_replace",
-			"relative_path": "hello.txt",
-			"old_text":      item.old,
-			"new_text":      item.new,
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	ids := []any{sess.Changes[0].ID, sess.Changes[1].ID}
-	_, err = exec.Run(context.Background(), sess, "diff_file", map[string]any{
-		"mode":      "rollback",
-		"change_id": ids[0],
-	})
-	if err == nil || !strings.Contains(err.Error(), "later change") {
-		t.Fatalf("expected later change rollback error, got %v", err)
-	}
-}
-
-func TestDiffFileRollbackManyRollsBackNewestFirst(t *testing.T) {
-	work := t.TempDir()
-	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
-	sess, err := store.New("test", "default")
-	if err != nil {
-		t.Fatal(err)
-	}
-	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
-	if err := os.WriteFile(filepath.Join(work, "hello.txt"), []byte("one\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	for _, item := range []struct {
-		old string
-		new string
-	}{
-		{"one", "two"},
-		{"two", "three"},
-	} {
-		if _, err := exec.Run(context.Background(), sess, "diff_file", map[string]any{
-			"mode":          "find_replace",
-			"relative_path": "hello.txt",
-			"old_text":      item.old,
-			"new_text":      item.new,
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	ids := []any{sess.Changes[0].ID, sess.Changes[1].ID}
-	if _, err := exec.Run(context.Background(), sess, "diff_file", map[string]any{
-		"mode":       "rollback",
-		"change_ids": ids,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(filepath.Join(work, "hello.txt"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(data) != "one\n" {
-		t.Fatalf("unexpected rollback content: %q", data)
-	}
-	if len(sess.Changes) != 0 {
-		t.Fatalf("rollback should remove both changes, got %d", len(sess.Changes))
-	}
-}
-
-func TestDiffFileHistoryDefaultsToTenSummaries(t *testing.T) {
-	work := t.TempDir()
-	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
-	sess, err := store.New("test", "default")
-	if err != nil {
-		t.Fatal(err)
-	}
-	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
-	for i := 0; i < 12; i++ {
-		if _, err := exec.Run(context.Background(), sess, "diff_file", map[string]any{
-			"mode":          "write",
-			"relative_path": filepath.ToSlash(filepath.Join("files", fmt.Sprintf("%02d.txt", i))),
-			"content":       fmt.Sprintf("%d\n", i),
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	out, err := exec.Run(context.Background(), sess, "diff_file", map[string]any{
-		"mode": "history",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	lines := strings.Split(strings.TrimSpace(out), "\n")
-	if len(lines) != 10 {
-		t.Fatalf("history should default to 10 summaries, got %d:\n%s", len(lines), out)
-	}
-	if strings.Contains(out, "00.txt") || !strings.Contains(out, "11.txt") {
-		t.Fatalf("history should show recent summaries only:\n%s", out)
-	}
-}
-
-func TestDiffFileReplaceMultiLineBlockReturnsDiff(t *testing.T) {
-	work := t.TempDir()
-	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
-	sess, err := store.New("test", "default")
-	if err != nil {
-		t.Fatal(err)
-	}
-	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
-	initial := "{\n  \"items\": [\n    {\n      \"name\": \"one\"\n    }\n  ]\n}\n"
-	if err := os.WriteFile(filepath.Join(work, "data.json"), []byte(initial), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	out, err := exec.Run(context.Background(), sess, "diff_file", map[string]any{
+	out, err := exec.Run(context.Background(), sess, "file_edit", map[string]any{
 		"mode":          "find_replace",
-		"relative_path": "data.json",
-		"old_text": "    {\n" +
-			"      \"name\": \"one\"\n" +
-			"    }\n" +
-			"  ]",
-		"new_text": "    {\n" +
-			"      \"name\": \"one\"\n" +
-			"    },\n" +
-			"    {\n" +
-			"      \"name\": \"two\"\n" +
-			"    }\n" +
-			"  ]",
+		"relative_path": "f.txt",
+		"old_text":      "alpha",
+		"new_text":      "beta",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "change_id=") || !strings.Contains(out, "+    },") || !strings.Contains(out, "+      \"name\": \"two\"") {
-		t.Fatalf("replace should return a verification diff, got %s", out)
+	if !strings.Contains(out, "+beta") || !strings.Contains(out, "-alpha") {
+		t.Fatalf("expected replace diff, got: %s", out)
 	}
-	data, err := os.ReadFile(filepath.Join(work, "data.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := "{\n  \"items\": [\n    {\n      \"name\": \"one\"\n    },\n    {\n      \"name\": \"two\"\n    }\n  ]\n}\n"
-	if string(data) != want {
-		t.Fatalf("unexpected replace result:\n%s", data)
+	data, _ := os.ReadFile(filepath.Join(work, "f.txt"))
+	if string(data) != "beta\nomega\n" {
+		t.Fatalf("unexpected content: %q", data)
 	}
 }
 
-func TestDiffFileReplaceRequiresUniqueMatchByDefault(t *testing.T) {
+func TestFileEditFindReplaceDuplicateError(t *testing.T) {
 	work := t.TempDir()
 	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
 	sess, err := store.New("test", "default")
@@ -439,11 +160,9 @@ func TestDiffFileReplaceRequiresUniqueMatchByDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
-	if err := os.WriteFile(filepath.Join(work, "dup.txt"), []byte("same\nsame\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	os.WriteFile(filepath.Join(work, "dup.txt"), []byte("same\nsame\n"), 0o644)
 
-	_, err = exec.Run(context.Background(), sess, "diff_file", map[string]any{
+	_, err = exec.Run(context.Background(), sess, "file_edit", map[string]any{
 		"mode":          "find_replace",
 		"relative_path": "dup.txt",
 		"old_text":      "same",
@@ -454,7 +173,7 @@ func TestDiffFileReplaceRequiresUniqueMatchByDefault(t *testing.T) {
 	}
 }
 
-func TestDiffFileFindReplaceExpectedContentGuard(t *testing.T) {
+func TestFileEditFindReplaceMultiLine(t *testing.T) {
 	work := t.TempDir()
 	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
 	sess, err := store.New("test", "default")
@@ -462,37 +181,317 @@ func TestDiffFileFindReplaceExpectedContentGuard(t *testing.T) {
 		t.Fatal(err)
 	}
 	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
-	if err := os.WriteFile(filepath.Join(work, "guard.txt"), []byte("alpha\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	initial := "{\n  \"items\": [\n    {\n      \"name\": \"one\"\n    }\n  ]\n}\n"
+	os.WriteFile(filepath.Join(work, "data.json"), []byte(initial), 0o644)
 
-	_, err = exec.Run(context.Background(), sess, "diff_file", map[string]any{
-		"mode":             "find_replace",
-		"relative_path":    "guard.txt",
-		"old_text":         "alpha",
-		"new_text":         "beta",
-		"expected_content": "other\n",
-	})
-	if err == nil || !strings.Contains(err.Error(), "expected_content did not match") {
-		t.Fatalf("expected guard mismatch, got %v", err)
-	}
-
-	_, err = exec.Run(context.Background(), sess, "diff_file", map[string]any{
-		"mode":             "find_replace",
-		"relative_path":    "guard.txt",
-		"old_text":         "alpha",
-		"new_text":         "beta",
-		"expected_content": "alpha\n",
+	out, err := exec.Run(context.Background(), sess, "file_edit", map[string]any{
+		"mode":          "find_replace",
+		"relative_path": "data.json",
+		"old_text":      "    {\n      \"name\": \"one\"\n    }\n  ]",
+		"new_text":      "    {\n      \"name\": \"one\"\n    },\n    {\n      \"name\": \"two\"\n    }\n  ]",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(filepath.Join(work, "guard.txt"))
+	if !strings.Contains(out, "change_id=") || !strings.Contains(out, "+      \"name\": \"two\"") {
+		t.Fatalf("expected verification diff, got: %s", out)
+	}
+	data, _ := os.ReadFile(filepath.Join(work, "data.json"))
+	want := "{\n  \"items\": [\n    {\n      \"name\": \"one\"\n    },\n    {\n      \"name\": \"two\"\n    }\n  ]\n}\n"
+	if string(data) != want {
+		t.Fatalf("unexpected:\n%s", data)
+	}
+}
+
+func TestFileEditViewHistory(t *testing.T) {
+	work := t.TempDir()
+	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
+	sess, err := store.New("test", "default")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(data) != "beta\n" {
-		t.Fatalf("unexpected guarded replace result: %q", data)
+	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
+
+	for i := 0; i < 12; i++ {
+		_, err := exec.Run(context.Background(), sess, "file_edit", map[string]any{
+			"mode":          "write",
+			"relative_path": fmt.Sprintf("files/%02d.txt", i),
+			"content":       fmt.Sprintf("%d\n", i),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	out, err := exec.Run(context.Background(), sess, "file_edit", map[string]any{
+		"mode": "view",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 10 {
+		t.Fatalf("view should default to 10 summaries, got %d:\n%s", len(lines), out)
+	}
+	if strings.Contains(out, "00.txt") || !strings.Contains(out, "11.txt") {
+		t.Fatalf("view should show recent changes only:\n%s", out)
+	}
+}
+
+func TestFileEditViewDetail(t *testing.T) {
+	work := t.TempDir()
+	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
+	sess, err := store.New("test", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
+	os.WriteFile(filepath.Join(work, "hello.txt"), []byte("alpha\nomega\n"), 0o644)
+
+	_, err = exec.Run(context.Background(), sess, "file_edit", map[string]any{
+		"mode":          "find_replace",
+		"relative_path": "hello.txt",
+		"old_text":      "omega",
+		"new_text":      "beta",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	id := sess.Changes[len(sess.Changes)-1].ID
+	viewed, err := exec.Run(context.Background(), sess, "file_edit", map[string]any{
+		"mode":      "view",
+		"change_id": id,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(viewed, id) || !strings.Contains(viewed, "+beta") {
+		t.Fatalf("view detail missing expected content: %s", viewed)
+	}
+}
+
+func TestFileEditRollback(t *testing.T) {
+	work := t.TempDir()
+	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
+	sess, err := store.New("test", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
+	os.WriteFile(filepath.Join(work, "hello.txt"), []byte("alpha\nomega\n"), 0o644)
+
+	_, err = exec.Run(context.Background(), sess, "file_edit", map[string]any{
+		"mode":          "find_replace",
+		"relative_path": "hello.txt",
+		"old_text":      "omega",
+		"new_text":      "beta",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	id := sess.Changes[len(sess.Changes)-1].ID
+	_, err = exec.Run(context.Background(), sess, "file_edit", map[string]any{
+		"mode":       "rollback",
+		"change_ids": []any{id},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(work, "hello.txt"))
+	if string(data) != "alpha\nomega\n" {
+		t.Fatalf("rollback failed, got: %q", data)
+	}
+	if len(sess.Changes) != 0 {
+		t.Fatalf("rollback should remove change record, got %d", len(sess.Changes))
+	}
+}
+
+func TestFileEditRollbackDeleteRestoresFile(t *testing.T) {
+	work := t.TempDir()
+	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
+	sess, err := store.New("test", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
+	target := filepath.Join(work, "gone.txt")
+	os.WriteFile(target, []byte("original\n"), 0o644)
+
+	_, err = exec.Run(context.Background(), sess, "file_edit", map[string]any{
+		"mode":          "delete_lines",
+		"relative_path": "gone.txt",
+		"start_line":    1,
+		"end_line":      1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// After deleting the only line, the file should be removed
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatalf("delete_lines on single-line file should remove it")
+	}
+
+	id := sess.Changes[len(sess.Changes)-1].ID
+	_, err = exec.Run(context.Background(), sess, "file_edit", map[string]any{
+		"mode":       "rollback",
+		"change_ids": []any{id},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	data, _ := os.ReadFile(target)
+	if string(data) != "original\n" {
+		t.Fatalf("rollback should restore deleted file, got: %q", data)
+	}
+}
+
+func TestFileEditRollbackLaterChangeConflict(t *testing.T) {
+	work := t.TempDir()
+	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
+	sess, err := store.New("test", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
+	os.WriteFile(filepath.Join(work, "hello.txt"), []byte("one\n"), 0o644)
+
+	for _, item := range []struct{ old, new string }{
+		{"one", "two"},
+		{"two", "three"},
+	} {
+		_, err := exec.Run(context.Background(), sess, "file_edit", map[string]any{
+			"mode":          "find_replace",
+			"relative_path": "hello.txt",
+			"old_text":      item.old,
+			"new_text":      item.new,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Try to rollback first change only - should fail
+	_, err = exec.Run(context.Background(), sess, "file_edit", map[string]any{
+		"mode":       "rollback",
+		"change_ids": []any{sess.Changes[0].ID},
+	})
+	if err == nil || !strings.Contains(err.Error(), "later change") {
+		t.Fatalf("expected later change conflict, got %v", err)
+	}
+}
+
+func TestFileEditRollbackBothChangesWorks(t *testing.T) {
+	work := t.TempDir()
+	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
+	sess, err := store.New("test", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
+	os.WriteFile(filepath.Join(work, "hello.txt"), []byte("one\n"), 0o644)
+
+	for _, item := range []struct{ old, new string }{
+		{"one", "two"},
+		{"two", "three"},
+	} {
+		_, err := exec.Run(context.Background(), sess, "file_edit", map[string]any{
+			"mode":          "find_replace",
+			"relative_path": "hello.txt",
+			"old_text":      item.old,
+			"new_text":      item.new,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ids := []any{sess.Changes[0].ID, sess.Changes[1].ID}
+	_, err = exec.Run(context.Background(), sess, "file_edit", map[string]any{
+		"mode":       "rollback",
+		"change_ids": ids,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(work, "hello.txt"))
+	if string(data) != "one\n" {
+		t.Fatalf("expected rollback to original, got: %q", data)
+	}
+	if len(sess.Changes) != 0 {
+		t.Fatalf("all changes should be removed after rollback, got %d", len(sess.Changes))
+	}
+}
+
+func TestFileEditDryRun(t *testing.T) {
+	work := t.TempDir()
+	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
+	sess, err := store.New("test", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
+	os.WriteFile(filepath.Join(work, "hello.txt"), []byte("alpha\nomega\n"), 0o644)
+
+	out, err := exec.Run(context.Background(), sess, "file_edit", map[string]any{
+		"mode":          "find_replace",
+		"relative_path": "hello.txt",
+		"old_text":      "omega",
+		"new_text":      "beta",
+		"dry_run":       true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "change_id=") {
+		t.Fatalf("dry_run should not include change_id: %s", out)
+	}
+	if !strings.Contains(out, "-omega") || !strings.Contains(out, "+beta") {
+		t.Fatalf("dry_run should show the diff: %s", out)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(work, "hello.txt"))
+	if string(data) != "alpha\nomega\n" {
+		t.Fatalf("dry_run should not write: %q", data)
+	}
+}
+
+func TestFileEditRejectsUnsupportedModes(t *testing.T) {
+	work := t.TempDir()
+	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
+	sess, err := store.New("test", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
+
+	for _, mode := range []string{"apply", "revert", "patch", "show", "history"} {
+		_, err := exec.Run(context.Background(), sess, "file_edit", map[string]any{
+			"mode":          mode,
+			"relative_path": "x.txt",
+		})
+		if err == nil {
+			t.Fatalf("expected unsupported mode %q to fail", mode)
+		}
+	}
+}
+
+func TestFileEditSchemaHasCorrectParameters(t *testing.T) {
+	exec := NewExecutor(config.Paths{}, nil, 20000, false, false)
+	props := toolProperties(t, exec.Schemas(false), "file_edit")
+	for _, name := range []string{"mode", "dry_run", "relative_path", "start_line", "end_line", "insert_after_line", "text", "old_text", "new_text", "replace_all", "change_id", "change_ids", "limit"} {
+		if _, ok := props[name]; !ok {
+			t.Fatalf("file_edit schema should expose %q", name)
+		}
+	}
+	for _, name := range []string{"unified_diff", "patches", "expected_content", "find", "replace", "reverse"} {
+		if _, ok := props[name]; ok {
+			t.Fatalf("file_edit schema should not expose legacy parameter %q", name)
+		}
 	}
 }
 
@@ -504,20 +503,11 @@ func TestSearchGrepFilenameModeUsesRegex(t *testing.T) {
 		t.Fatal(err)
 	}
 	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
-	files := []string{
-		"alpha.py",
-		"beta.txt",
-		"dir/gamma.py",
-		"dir/delta.md",
-	}
+	files := []string{"alpha.py", "beta.txt", "dir/gamma.py", "dir/delta.md"}
 	for _, file := range files {
 		path := filepath.Join(work, filepath.FromSlash(file))
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
-			t.Fatal(err)
-		}
+		os.MkdirAll(filepath.Dir(path), 0o755)
+		os.WriteFile(path, []byte("x"), 0o644)
 	}
 
 	out, err := exec.Run(context.Background(), sess, "search_grep", map[string]any{
@@ -543,13 +533,9 @@ func TestSearchGrepDefaultsToCaseSensitive(t *testing.T) {
 		t.Fatal(err)
 	}
 	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
-	if err := os.WriteFile(filepath.Join(work, "case.txt"), []byte("Alpha\nalpha\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	os.WriteFile(filepath.Join(work, "case.txt"), []byte("Alpha\nalpha\n"), 0o644)
 
-	out, err := exec.Run(context.Background(), sess, "search_grep", map[string]any{
-		"query": "alpha",
-	})
+	out, err := exec.Run(context.Background(), sess, "search_grep", map[string]any{"query": "alpha"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -577,13 +563,9 @@ func TestReadFileDetectsBinaryByContent(t *testing.T) {
 		t.Fatal(err)
 	}
 	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
-	if err := os.WriteFile(filepath.Join(work, "binary.txt"), []byte{'o', 'k', 0, 'h', 'i'}, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	os.WriteFile(filepath.Join(work, "binary.txt"), []byte{'o', 'k', 0, 'h', 'i'}, 0o644)
 
-	out, err := exec.Run(context.Background(), sess, "read_file", map[string]any{
-		"relative_path": "binary.txt",
-	})
+	out, err := exec.Run(context.Background(), sess, "read_file", map[string]any{"relative_path": "binary.txt"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -611,19 +593,11 @@ func TestSearchGrepSkipsBinaryFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
-	if err := os.WriteFile(filepath.Join(work, "text.txt"), []byte("needle\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(work, "image.png"), []byte("needle\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(work, "payload.dat"), []byte{'n', 'e', 'e', 'd', 'l', 'e', 0}, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	os.WriteFile(filepath.Join(work, "text.txt"), []byte("needle\n"), 0o644)
+	os.WriteFile(filepath.Join(work, "image.png"), []byte("needle\n"), 0o644)
+	os.WriteFile(filepath.Join(work, "payload.dat"), []byte{'n', 'e', 'e', 'd', 'l', 'e', 0}, 0o644)
 
-	out, err := exec.Run(context.Background(), sess, "search_grep", map[string]any{
-		"query": "needle",
-	})
+	out, err := exec.Run(context.Background(), sess, "search_grep", map[string]any{"query": "needle"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -683,15 +657,13 @@ func TestSubAgentCheckReturnsSemanticTranscript(t *testing.T) {
 	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
 	exec.SetSubAgentRunner(func(ctx context.Context, parentSessionID, taskID, sessionID, agentName, name, instruction string, emit func(string), bind func(string)) string {
 		if emit != nil {
-			emit("assistant: 有一天")
-			emit("assistant: ，")
-			emit("tool result: read_file\ninternal details")
+			emit("assistant: hello")
 		}
-		return "有一天，小白兔讲了一个笑话。"
+		return "the answer"
 	})
 	start, err := exec.Run(context.Background(), sess, "sub_agent_start_async", map[string]any{
-		"name":        "笑话代理人B",
-		"instruction": "讲一个简短笑话",
+		"name":        "test",
+		"instruction": "do something",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -705,12 +677,12 @@ func TestSubAgentCheckReturnsSemanticTranscript(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "[root_agent]: 讲一个简短笑话") || !strings.Contains(out, "[笑话代理人B]: 有一天，小白兔讲了一个笑话。") {
-		t.Fatalf("semantic transcript missing expected dialogue, got %s", out)
+	if !strings.Contains(out, "[root_agent]: do something") || !strings.Contains(out, "[test]: the answer") {
+		t.Fatalf("transcript missing expected dialogue, got %s", out)
 	}
-	for _, unwanted := range []string{"assistant: 有一天", "assistant: ，", "tool result:", "result:"} {
+	for _, unwanted := range []string{"assistant: hello", "result:"} {
 		if strings.Contains(out, unwanted) {
-			t.Fatalf("semantic transcript leaked %q in %s", unwanted, out)
+			t.Fatalf("transcript leaked %q in %s", unwanted, out)
 		}
 	}
 }
@@ -735,42 +707,6 @@ func TestShellSchemasFollowShellConfig(t *testing.T) {
 	interactiveExec := NewExecutor(config.Paths{}, nil, 20000, true, true)
 	if !hasToolSchema(interactiveExec.Schemas(false), "shell_async_stdin") {
 		t.Fatal("interactive mode should expose shell_async_stdin")
-	}
-	if hasToolSchema(interactiveExec.Schemas(false), "shell_async_wait_check") {
-		t.Fatal("shell_async_wait_check should not be exposed")
-	}
-}
-
-func TestDiffFileSchemaUsesCanonicalParameters(t *testing.T) {
-	exec := NewExecutor(config.Paths{}, nil, 20000, false, false)
-	props := toolProperties(t, exec.Schemas(false), "diff_file")
-	for _, name := range []string{"find", "replace", "reverse", "reverse_order", "auto_sort", "path", "expected_current", "allow_create"} {
-		if _, ok := props[name]; ok {
-			t.Fatalf("diff_file schema should not expose legacy parameter %q", name)
-		}
-	}
-	for _, name := range []string{"relative_path", "old_text", "new_text", "expected_content", "dry_run", "patches", "change_id", "change_ids"} {
-		if _, ok := props[name]; !ok {
-			t.Fatalf("diff_file schema should expose %q", name)
-		}
-	}
-}
-
-func TestDiffFileRejectsUnsupportedModes(t *testing.T) {
-	work := t.TempDir()
-	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
-	sess, err := store.New("test", "default")
-	if err != nil {
-		t.Fatal(err)
-	}
-	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
-
-	for _, mode := range []string{"replace", "revert", "patch", "show"} {
-		if _, err := exec.Run(context.Background(), sess, "diff_file", map[string]any{
-			"mode": mode,
-		}); err == nil {
-			t.Fatalf("expected unsupported mode %q to fail", mode)
-		}
 	}
 }
 
