@@ -611,6 +611,43 @@ func TestSearchGrepSkipsBinaryFiles(t *testing.T) {
 	}
 }
 
+func TestReadSkillReturnsRawSkillMarkdown(t *testing.T) {
+	home := t.TempDir()
+	work := t.TempDir()
+	skillDir := filepath.Join(work, ".Asayn", "skills", "demo-skill")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw := `---
+name: demo-skill
+description: Use this for demo tasks.
+---
+
+# Demo Skill
+
+Follow these steps.
+`
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	exec := NewExecutor(config.Paths{
+		HomeDir:      home,
+		WorkspaceDir: filepath.Join(work, ".Asayn"),
+		Workplace:    work,
+	}, nil, 20000, false, false)
+
+	out, err := exec.Run(context.Background(), nil, "read_skill", map[string]any{
+		"name":            "demo-skill",
+		"_visible_skills": []string{"demo-skill"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != raw {
+		t.Fatalf("read_skill should return raw SKILL.md only, got:\n%q", out)
+	}
+}
+
 func TestSubAgentWaitCheckSchemaIsRootOnly(t *testing.T) {
 	exec := NewExecutor(config.Paths{}, nil, 20000, false, false)
 	if !hasToolSchema(exec.Schemas(false), "sub_agent_wait_check") {

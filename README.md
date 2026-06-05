@@ -256,7 +256,7 @@ Skills are directory-based packages. Asayn discovers only directories that conta
 <workplace>/.Asayn/skills/<skill-name>/SKILL.md
 ```
 
-`SKILL.md` should include YAML frontmatter metadata, commonly `name` and `description`, followed by Markdown instructions. Visible skill metadata and source are exposed to the model; the full `SKILL.md` body is loaded only through the `read_skill` tool after the skill is enabled with `/model_config` or listed in the active agent config.
+`SKILL.md` must start with YAML frontmatter metadata, commonly `name` and `description`, followed by Markdown instructions. At startup and prompt refresh, Asayn exposes only each visible skill's folder and frontmatter metadata to the model; the full raw `SKILL.md` file is loaded only through the `read_skill` tool after the skill is enabled with `/model_config` or listed in the active agent config.
 
 ## File Edit Tool
 

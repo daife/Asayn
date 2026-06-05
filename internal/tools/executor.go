@@ -303,13 +303,7 @@ func (e *Executor) readSkill(args map[string]any) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	meta := []string{}
-	for k, v := range skill.Metadata {
-		meta = append(meta, fmt.Sprintf("%s=%q", k, v))
-	}
-	sort.Strings(meta)
-	out := fmt.Sprintf("name: %s\nsource: %s\npath: %s\nmetadata: %s\n\n%s", skill.Name, skill.Source, skill.Path, strings.Join(meta, " "), strings.TrimSpace(skill.Body))
-	return truncate(out, e.maxOutputLines), nil
+	return truncate(skill.Content, e.maxOutputLines), nil
 }
 
 func (e *Executor) SubAgentSnapshots() []SubAgentSnapshot {

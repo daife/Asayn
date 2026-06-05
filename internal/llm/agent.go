@@ -320,24 +320,24 @@ func (a *Agent) systemPrompt(sess *session.Session) string {
 		if !visible[skill.Name] {
 			continue
 		}
-		meta := []string{}
-		for k, v := range skill.Metadata {
-			if k == "name" || k == "description" || strings.TrimSpace(v) == "" {
-				continue
-			}
-			meta = append(meta, fmt.Sprintf("%s=%q", k, v))
-		}
-		sort.Strings(meta)
-		description := skill.Description
-		if description == "" {
-			description = "No description."
-		}
-		blocks = append(blocks, fmt.Sprintf("<skill name=%q source=%q description=%q metadata=%q />", skill.Name, skill.Source, description, strings.Join(meta, " ")))
+		blocks = append(blocks, fmt.Sprintf("<skill folder=%q metadata=%q />", skill.Folder, formatSkillMetadata(skill.Metadata)))
 	}
 	if len(blocks) == 0 {
 		return prompt + "\n\nNo skills visible."
 	}
 	return prompt + "\n\nVisible skills (use read_skill before applying):\n" + strings.Join(blocks, "\n")
+}
+
+func formatSkillMetadata(metadata map[string]string) string {
+	items := []string{}
+	for k, v := range metadata {
+		if strings.TrimSpace(v) == "" {
+			continue
+		}
+		items = append(items, fmt.Sprintf("%s=%q", k, v))
+	}
+	sort.Strings(items)
+	return strings.Join(items, " ")
 }
 
 func (a *Agent) runToolCall(parent context.Context, sess *session.Session, call types.ToolCall, emit func(AgentEvent)) string {

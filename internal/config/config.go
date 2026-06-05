@@ -60,10 +60,12 @@ type AgentConfig struct {
 
 type Skill struct {
 	Name        string
+	Folder      string
 	Path        string
 	Source      string
 	Description string
 	Metadata    map[string]string
+	Content     string
 	Body        string
 }
 
@@ -412,10 +414,12 @@ func ListSkills(paths Paths) ([]Skill, error) {
 			}
 			seen[name] = Skill{
 				Name:        name,
+				Folder:      filepath.ToSlash(filepath.Join(base.source, ent.Name())),
 				Path:        skillPath,
 				Source:      base.source,
 				Description: meta["description"],
 				Metadata:    meta,
+				Content:     string(body),
 				Body:        markdown,
 			}
 		}

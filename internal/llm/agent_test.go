@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -202,6 +204,51 @@ func TestSystemPromptDoesNotGuideShellFileOperations(t *testing.T) {
 	} {
 		if strings.Contains(prompt, unwanted) {
 			t.Fatalf("system prompt should not guide shell file operations with %q:\n%s", unwanted, prompt)
+		}
+	}
+}
+
+func TestSystemPromptShowsSkillFolderAndMetadataOnly(t *testing.T) {
+	home := t.TempDir()
+	work := t.TempDir()
+	workspaceDir := filepath.Join(work, ".Asayn")
+	skillDir := filepath.Join(workspaceDir, "skills", "demo-skill")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(`---
+name: demo-skill
+description: Use this for demo tasks.
+version: "1"
+---
+
+Skill body should not appear in the system prompt.
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	agent := NewAgent(config.APIConfig{}, config.AgentConfig{
+		Name:          "default",
+		SystemPrompt:  "base prompt",
+		VisibleSkills: []string{"demo-skill"},
+	}, config.Paths{HomeDir: home, WorkspaceDir: workspaceDir, Workplace: work}, nil)
+	prompt := agent.systemPrompt(&session.Session{})
+
+	for _, want := range []string{
+		`folder="[workplace]/.Asayn/skills/demo-skill"`,
+		`metadata="description=\"Use this for demo tasks.\" name=\"demo-skill\" version=\"1\""`,
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("system prompt missing %q:\n%s", want, prompt)
+		}
+	}
+	for _, unwanted := range []string{
+		`name="demo-skill" source=`,
+		`description="Use this for demo tasks." metadata=`,
+		"Skill body should not appear",
+	} {
+		if strings.Contains(prompt, unwanted) {
+			t.Fatalf("system prompt should not include duplicated skill field/body %q:\n%s", unwanted, prompt)
 		}
 	}
 }
