@@ -7,7 +7,9 @@ import (
 
 	"github.com/asayn/asayn/internal/app"
 	"github.com/asayn/asayn/internal/config"
+	"github.com/asayn/asayn/internal/llm"
 	"github.com/asayn/asayn/internal/session"
+	"github.com/asayn/asayn/internal/tools"
 	"github.com/charmbracelet/bubbles/viewport"
 )
 
@@ -65,10 +67,35 @@ func TestRunningAssistViewShowsWorkingDuration(t *testing.T) {
 		log:                 testViewport(80),
 		width:               100,
 		activeTurnStartedAt: time.Now().Add(-65 * time.Second),
+		ctx:                 &app.Context{},
 	}
 	out := m.runningAssistView()
 	if !strings.Contains(out, "Working(1m 5s)") {
 		t.Fatalf("running assist view missing working duration: %q", out)
+	}
+}
+
+func TestRunningAssistViewShowsRetryAndTimeoutStatus(t *testing.T) {
+	m := model{
+		log:                 testViewport(80),
+		width:               100,
+		activeTurnStartedAt: time.Now(),
+		ctx: &app.Context{
+			Root: config.AgentConfig{Provider: "test"},
+			API:  config.APIConfig{Providers: map[string]config.ProviderConfig{"test": {TimeoutSeconds: 3}}},
+		},
+	}
+
+	_ = m.appendAgentEvent(llm.AgentEvent{Kind: "retry", Text: "Retry for 1/10 after 1s (API rate limit)"})
+	out := m.runningAssistView()
+	if !strings.Contains(out, "Retry for 1/10") || !strings.Contains(out, "Timeout if idle for 0m 3s") {
+		t.Fatalf("running assist view missing retry or timeout status: %q", out)
+	}
+
+	_ = m.appendAgentEvent(llm.AgentEvent{Kind: "timeout", Text: "API stream idle timeout after 3s"})
+	out = m.runningAssistView()
+	if !strings.Contains(out, "Timeout: API stream idle timeout after 3s") {
+		t.Fatalf("running assist view missing timeout event: %q", out)
 	}
 }
 
@@ -82,6 +109,16 @@ func TestIdleAssistViewShowsLastWorkedDuration(t *testing.T) {
 	out := m.idleAssistView()
 	if !strings.Contains(out, "Worked for 1m 5s") {
 		t.Fatalf("idle assist view missing worked duration: %q", out)
+	}
+}
+
+func TestSubAgentFailureReasonIsRendered(t *testing.T) {
+	reason := subAgentFailureReason(tools.SubAgentSnapshot{
+		Status: "failed",
+		Result: "sub-agent error: API stream idle timeout after 120s",
+	})
+	if reason != "API stream idle timeout after 120s" {
+		t.Fatalf("unexpected sub-agent failure reason: %q", reason)
 	}
 }
 

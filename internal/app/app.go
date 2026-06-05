@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/asayn/asayn/internal/config"
 	"github.com/asayn/asayn/internal/llm"
@@ -81,9 +80,7 @@ func Bootstrap(cwd string) (*Context, error) {
 		subExec := tools.NewReadOnlyExecutor(paths, subStore, subCfg.MaxOutputLines)
 		sub := llm.NewSubAgent(api, subCfg, paths, subExec)
 		sub.RefreshSystemPrompt(subSess)
-		ctx, cancel := context.WithTimeout(parent, 10*time.Minute)
-		defer cancel()
-		answer, use, err := sub.AskWithEvents(ctx, subSess, instruction, nil)
+		answer, use, err := sub.AskWithEvents(parent, subSess, instruction, nil)
 		if err == nil {
 			_ = usageTracker.Log(parentSessionID, subSess.Name, subCfg.Model, use)
 		}

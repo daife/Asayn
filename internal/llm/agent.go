@@ -107,6 +107,12 @@ func (a *Agent) AskWithEvents(ctx context.Context, sess *session.Session, prompt
 				contentStreamed = true
 				emit(AgentEvent{Kind: "assistant_delta", Text: delta.Content})
 			}
+			switch delta.Event {
+			case "retry":
+				emit(AgentEvent{Kind: "retry", Text: formatRetryEvent(delta)})
+			case "timeout":
+				emit(AgentEvent{Kind: "timeout", Text: formatTimeoutEvent(delta)})
+			}
 		})
 		if err != nil {
 			if !isContextCanceled(err) && len(sess.Messages) > baseLen {
@@ -143,6 +149,31 @@ func (a *Agent) AskWithEvents(ctx context.Context, sess *session.Session, prompt
 			})
 		}
 	}
+}
+
+func formatRetryEvent(delta StreamDelta) string {
+	if delta.RetryAttempt <= 0 || delta.MaxAttempts <= 0 {
+		return ""
+	}
+	reason := strings.TrimSpace(delta.Message)
+	if reason == "" {
+		reason = "retrying"
+	}
+	if delta.Wait > 0 {
+		return fmt.Sprintf("Retry for %d/%d after %s (%s)", delta.RetryAttempt, delta.MaxAttempts, delta.Wait.Truncate(time.Second), reason)
+	}
+	return fmt.Sprintf("Retry for %d/%d (%s)", delta.RetryAttempt, delta.MaxAttempts, reason)
+}
+
+func formatTimeoutEvent(delta StreamDelta) string {
+	message := strings.TrimSpace(delta.Message)
+	if message == "" {
+		message = "timeout"
+	}
+	if delta.Timeout > 0 {
+		return fmt.Sprintf("%s after %s", message, delta.Timeout.Truncate(time.Second))
+	}
+	return message
 }
 
 func isContextCanceled(err error) bool {

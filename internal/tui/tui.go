@@ -78,6 +78,8 @@ type model struct {
 	activeTurnUsage           types.Usage
 	activeTurnStartedAt       time.Time
 	lastTurnDuration          time.Duration
+	activeRetryStatus         string
+	activeTimeoutStatus       string
 }
 
 type agentMsg struct {
@@ -358,6 +360,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			turnDuration = time.Since(m.activeTurnStartedAt)
 		}
 		m.activeTurnStartedAt = time.Time{}
+		m.activeRetryStatus = ""
+		m.activeTimeoutStatus = ""
 		runKind := msg.kind
 		m.activeRunKind = ""
 		thinkingAlreadyRendered := m.finalizePendingThinking()
@@ -557,6 +561,8 @@ func (m *model) appendDivider() {
 func (m model) startAgentTurn(value string, recordHistory bool) (model, tea.Cmd) {
 	m.commandOutput = ""
 	m.activeTurnUsage = types.Usage{}
+	m.activeRetryStatus = ""
+	m.activeTimeoutStatus = ""
 	if recordHistory {
 		m.addInputHistory(value)
 	}
@@ -615,6 +621,8 @@ func (m model) startCompactTurn() (model, tea.Cmd) {
 	agent.RefreshSystemPrompt(&temp)
 
 	m.activeTurnUsage = types.Usage{}
+	m.activeRetryStatus = ""
+	m.activeTimeoutStatus = ""
 	m.compactBaseLen = len(m.session.Messages)
 	m.pendingCompact = false
 	m.appendLog("\n" + userStyle.Render("You") + ":\n" + compactRetainedPrompt + "\n")
@@ -709,7 +717,7 @@ func (m model) agentRunningStatus() string {
 
 func (m model) ask(prompt string, agent *llm.Agent, sess *session.Session, kind, modelName string) (tea.Cmd, context.CancelFunc, chan agentRunEvent) {
 	events := make(chan agentRunEvent, 64)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithCancel(context.Background())
 	cmd := func() tea.Msg {
 		go func() {
 			defer cancel()
@@ -753,6 +761,12 @@ func uiTick() tea.Cmd {
 func (m *model) appendAgentEvent(event llm.AgentEvent) bool {
 	if event.Kind == "thinking" && isNoiseThinking(event.Text) {
 		return false
+	}
+	if event.Kind != "retry" && event.Kind != "timeout" && event.Kind != "thinking_start" && m.activeRetryStatus != "" {
+		m.activeRetryStatus = ""
+		if strings.HasPrefix(m.status, "Retry for ") {
+			m.status = m.agentRunningStatus()
+		}
 	}
 	switch event.Kind {
 	case "thinking_delta":
@@ -801,6 +815,20 @@ func (m *model) appendAgentEvent(event llm.AgentEvent) bool {
 		if m.applyUsageEvent(event.Usage) {
 			return true
 		}
+	case "retry":
+		text := strings.TrimSpace(event.Text)
+		if text == "" {
+			text = "Retrying"
+		}
+		m.activeRetryStatus = text
+		m.status = text
+	case "timeout":
+		text := strings.TrimSpace(event.Text)
+		if text == "" {
+			text = "timeout"
+		}
+		m.activeTimeoutStatus = "Timeout: " + text
+		m.status = m.activeTimeoutStatus
 	case "tool_start":
 		m.finalizePendingThinking()
 		m.finalizeStreamAnswer("")
@@ -1649,10 +1677,35 @@ func (m model) runningAssistView() string {
 	if !m.activeTurnStartedAt.IsZero() {
 		rows = append(rows, "Working("+formatTurnDuration(time.Since(m.activeTurnStartedAt))+")")
 	}
+	if m.activeRetryStatus != "" {
+		rows = append(rows, m.activeRetryStatus)
+	}
+	if m.activeTimeoutStatus != "" {
+		rows = append(rows, m.activeTimeoutStatus)
+	} else if timeout := m.activeProviderIdleTimeout(); timeout > 0 {
+		rows = append(rows, "Timeout if idle for "+formatTurnDuration(timeout))
+	}
 	return "\n" + lipgloss.NewStyle().
 		Width(m.log.Width).
 		Foreground(lipgloss.Color("8")).
 		Render(wrapANSI(panelBlock("status", rows), m.log.Width))
+}
+
+func (m model) activeProviderIdleTimeout() time.Duration {
+	if m.ctx == nil {
+		return 0
+	}
+	providerName := m.ctx.Root.Provider
+	if m.activeRunKind == "compact" {
+		if cfg, err := config.LoadAgent(m.ctx.Paths, config.SpecialAgentKind, "compact_agent"); err == nil && cfg.Provider != "" {
+			providerName = cfg.Provider
+		}
+	}
+	provider, ok := m.ctx.API.Providers[providerName]
+	if !ok || provider.TimeoutSeconds <= 0 {
+		return 120 * time.Second
+	}
+	return time.Duration(provider.TimeoutSeconds) * time.Second
 }
 
 func formatTurnDuration(d time.Duration) string {
@@ -2006,6 +2059,9 @@ func (m model) rootSidebarLines(width int) ([]string, int, int) {
 			if sub.Agent != "" && sub.Agent != sub.Name {
 				label = sub.Agent + "/" + sub.Name
 			}
+			if reason := subAgentFailureReason(sub); reason != "" {
+				label += " failed: " + reason
+			}
 			lines = append(lines, fmt.Sprintf("%s %s %s", statusDot(sub.Status, m.spinner), short, label))
 		}
 	}
@@ -2079,12 +2135,17 @@ func (m model) subAgentSidebar(width int) string {
 		"read-only view",
 		"",
 		"status: " + snap.Status,
-		"session: " + snap.Name,
-		"session id: " + snap.SessionID,
-		"agent: " + snap.Agent,
-		"description: " + oneLine(cfg.Description),
-		"system prompt:",
 	}
+	if reason := subAgentFailureReason(snap); reason != "" {
+		lines = append(lines, "reason: "+reason)
+	}
+	lines = append(lines,
+		"session: "+snap.Name,
+		"session id: "+snap.SessionID,
+		"agent: "+snap.Agent,
+		"description: "+oneLine(cfg.Description),
+		"system prompt:",
+	)
 	lines = append(lines, indentedSummary(cfg.SystemPrompt, 3)...)
 	lines = append(lines,
 		"",
@@ -2122,15 +2183,21 @@ func (m model) subAgentView() string {
 			fmt.Sprintf("Sub-agent: %s", snap.Name),
 			fmt.Sprintf("id: %s", snap.ID),
 			fmt.Sprintf("status: %s", snap.Status),
+		}
+		if reason := subAgentFailureReason(snap); reason != "" {
+			lines = append(lines, fmt.Sprintf("reason: %s", reason))
+		}
+		lines = append(lines,
 			"Read-only. User cannot directly chat with this sub-agent.",
 			"Esc returns to root conversation.",
 			"",
-		}
+		)
+		contentStart := len(lines)
 		lines = append(lines, snap.Transcript...)
 		if len(snap.Transcript) == 0 && snap.Result != "" {
 			lines = append(lines, snap.Result)
 		}
-		for i := 5; i < len(lines); i++ {
+		for i := contentStart; i < len(lines); i++ {
 			lines[i] = styleTranscriptLine(lines[i])
 		}
 		return lipgloss.NewStyle().
@@ -2148,6 +2215,19 @@ func (m model) subAgentSnapshot(id string) (tools.SubAgentSnapshot, bool) {
 		}
 	}
 	return tools.SubAgentSnapshot{}, false
+}
+
+func subAgentFailureReason(snap tools.SubAgentSnapshot) string {
+	if snap.Status != "failed" {
+		return ""
+	}
+	reason := strings.TrimSpace(snap.Result)
+	reason = strings.TrimPrefix(reason, "sub-agent error:")
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return "unknown"
+	}
+	return oneLine(reason)
 }
 
 func (m model) effectiveSkillVisible(name string) bool {

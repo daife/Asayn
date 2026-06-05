@@ -188,6 +188,26 @@ func TestChatRequestUsesPerAgentThinkingConfig(t *testing.T) {
 	}
 }
 
+func TestFormatRetryAndTimeoutEvents(t *testing.T) {
+	retry := formatRetryEvent(StreamDelta{
+		RetryAttempt: 2,
+		MaxAttempts:  10,
+		Wait:         3 * time.Second,
+		Message:      "API rate limit",
+	})
+	if retry != "Retry for 2/10 after 3s (API rate limit)" {
+		t.Fatalf("unexpected retry event text: %q", retry)
+	}
+
+	timeout := formatTimeoutEvent(StreamDelta{
+		Timeout: 120 * time.Second,
+		Message: "API stream idle timeout",
+	})
+	if timeout != "API stream idle timeout after 2m0s" {
+		t.Fatalf("unexpected timeout event text: %q", timeout)
+	}
+}
+
 func TestChatStreamResetsProviderTimeoutOnKeepAlive(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

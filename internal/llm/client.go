@@ -50,6 +50,12 @@ type StreamDelta struct {
 	ReasoningContent string
 	Content          string
 	Usage            *types.Usage
+	Event            string
+	RetryAttempt     int
+	MaxAttempts      int
+	Wait             time.Duration
+	Timeout          time.Duration
+	Message          string
 }
 
 type streamResponse struct {
@@ -200,6 +206,15 @@ func (c *Client) ChatStream(ctx context.Context, model string, messages []types.
 				return types.ChatMessage{}, types.Usage{}, fmt.Errorf("API rate limit exceeded after %d retries", maxRetries)
 			}
 			wait := baseWait * (1 << attempt)
+			if onDelta != nil {
+				onDelta(StreamDelta{
+					Event:        "retry",
+					RetryAttempt: attempt + 1,
+					MaxAttempts:  maxRetries,
+					Wait:         wait,
+					Message:      "API rate limit",
+				})
+			}
 			select {
 			case <-time.After(wait):
 				continue
@@ -292,6 +307,9 @@ func (c *Client) ChatStream(ctx context.Context, model string, messages []types.
 	}
 	if err := scanner.Err(); err != nil {
 		if idleTimer.TimedOut() {
+			if onDelta != nil {
+				onDelta(StreamDelta{Event: "timeout", Timeout: c.timeout, Message: "API stream idle timeout"})
+			}
 			return types.ChatMessage{}, types.Usage{}, fmt.Errorf("API stream idle timeout after %s", c.timeout)
 		}
 		return types.ChatMessage{}, types.Usage{}, err
