@@ -1516,6 +1516,9 @@ func (m model) handleModelConfigAction() model {
 				parts := strings.Split(next, " (")
 				cfg.Model = parts[0]
 				cfg.Provider = strings.TrimSuffix(parts[1], ")")
+				limits := config.ModelLimitsFor(m.ctx.API, cfg.Provider, cfg.Model)
+				cfg.ContextWindow = limits.ContextWindow
+				cfg.MaxOutputTokens = limits.MaxOutputTokens
 			}
 		case 1: // Thinking Enabled
 			cfg.ThinkingEnabled = !cfg.ThinkingEnabled
@@ -1572,9 +1575,6 @@ func (m model) handleModelConfigAction() model {
 	}
 
 	if configKind == config.RootAgentKind && newCfg.Name == m.session.RootAgent {
-		limits := config.ModelLimitsFor(m.ctx.API, newCfg.Provider, newCfg.Model)
-		newCfg.ContextWindow = limits.ContextWindow
-		newCfg.MaxOutputTokens = limits.MaxOutputTokens
 		m.ctx.Root = newCfg
 		m.ctx.Tools.SetAgentLimits(newCfg.MaxOutputLines, newCfg.AllowParallelShell, newCfg.AllowInteractiveShell)
 		m.ctx.Agent = llm.NewAgent(m.ctx.API, newCfg, m.ctx.Paths, m.ctx.Tools)
@@ -1583,7 +1583,6 @@ func (m model) handleModelConfigAction() model {
 
 	return m
 }
-
 func (m model) modelConfigPickerView() string {
 	if len(m.modelConfigAgents) == 0 {
 		return "\n no agents found"
