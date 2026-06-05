@@ -237,7 +237,7 @@ func (e *Executor) Run(ctx context.Context, sess *session.Session, name string, 
 		return "", fmt.Errorf("tool %q is not available to read-only sub-agents", name)
 	}
 	switch name {
-	case "file_read":
+	case "file_read", "read_file":
 		return e.readFile(args)
 	case "view_dir":
 		return e.viewDir(args)
@@ -245,7 +245,7 @@ func (e *Executor) Run(ctx context.Context, sess *session.Session, name string, 
 		return e.searchGrep(args)
 	case "read_skill":
 		return e.readSkill(args)
-	case "file_edit":
+	case "file_edit", "edit_file":
 		return e.fileEdit(sess, args)
 	case "view_history":
 		return e.viewHistory(sess, args)
