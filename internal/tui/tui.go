@@ -66,6 +66,7 @@ type model struct {
 	pendingToolLine           string
 	pendingToolName           string
 	pendingToolStart          int
+	transientToolLine         string
 	pendingThinkLine          string
 	pendingThinkSpin          bool
 	streamThinkText           string
@@ -236,7 +237,7 @@ func (m *model) syncInputSize() {
 	m.input.SetWidth(width)
 
 	if m.height > 0 {
-		m.log.Height = m.height - m.input.Height() - 6
+		m.log.Height = m.height - m.input.Height() - m.assistHeight()
 		if m.log.Height < 3 {
 			m.log.Height = 3
 		}
@@ -377,7 +378,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.addInputHistory(value)
 				m.queuedMessages = append(m.queuedMessages, value)
 				m.status = m.agentRunningStatus()
-				m.appendLog("\n" + mutedStyle.Render(fmt.Sprintf("queued #%d: %s", len(m.queuedMessages), value)) + "\n")
+				m.syncInputSize()
 				return m, nil
 			}
 			return m.startAgentTurn(value, true)
@@ -408,6 +409,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendingToolLine = ""
 		m.pendingToolName = ""
 		m.pendingToolStart = -1
+		m.transientToolLine = ""
 
 		if msg.err == nil {
 			modelName := msg.model
@@ -741,10 +743,9 @@ func (m model) activeWorkContext() string {
 
 func (m model) handleInterrupt() model {
 	if len(m.queuedMessages) > 0 {
-		removed := m.queuedMessages[len(m.queuedMessages)-1]
 		m.queuedMessages = m.queuedMessages[:len(m.queuedMessages)-1]
 		m.status = m.agentRunningStatus()
-		m.appendLog("\n" + mutedStyle.Render("canceled queued message: "+removed) + "\n")
+		m.syncInputSize()
 		return m
 	}
 	if m.activeCancel != nil {
@@ -843,6 +844,7 @@ func (m *model) appendAgentEvent(event llm.AgentEvent) bool {
 	}
 	switch event.Kind {
 	case "thinking_delta":
+		m.reconcileTransientToolResult()
 		delta := sanitizeThinkingDelta(m.streamThinkText, event.Text)
 		if delta == "" {
 			return false
@@ -851,6 +853,7 @@ func (m *model) appendAgentEvent(event llm.AgentEvent) bool {
 		m.pendingThinkSpin = false
 		m.updatePendingThinking(minorBlock("Thinking", m.streamThinkText, 8) + "\n")
 	case "thinking":
+		m.reconcileTransientToolResult()
 		text := sanitizeThinkingText(event.Text)
 		if text == "" {
 			return false
@@ -863,6 +866,7 @@ func (m *model) appendAgentEvent(event llm.AgentEvent) bool {
 		m.pendingThinkSpin = false
 		m.streamThinkText = ""
 	case "thinking_start":
+		m.reconcileTransientToolResult()
 		line := "\n" + mutedStyle.Render(spinnerFrame(m.spinner)+" Thinking...") + "\n"
 		m.pendingThinkLine = line
 		m.pendingThinkSpin = true
@@ -870,6 +874,7 @@ func (m *model) appendAgentEvent(event llm.AgentEvent) bool {
 		m.pendingThinkStart = len(m.content)
 		m.appendLog(line)
 	case "assistant":
+		m.reconcileTransientToolResult()
 		thinkingAlreadyRendered := m.finalizePendingThinking()
 		m.streamThinkText = ""
 		m.pendingThinkSpin = false
@@ -883,6 +888,7 @@ func (m *model) appendAgentEvent(event llm.AgentEvent) bool {
 		m.pendingAnswerStart = -1
 		m.streamAnswerText = ""
 	case "assistant_delta":
+		m.reconcileTransientToolResult()
 		m.appendAnswerDelta(event.Text)
 	case "usage":
 		if m.applyUsageEvent(event.Usage) {
@@ -903,6 +909,7 @@ func (m *model) appendAgentEvent(event llm.AgentEvent) bool {
 		m.activeTimeoutStatus = "Timeout: " + text
 		m.status = m.activeTimeoutStatus
 	case "tool_start":
+		m.reconcileTransientToolResult()
 		m.finalizePendingThinking()
 		m.finalizeStreamAnswer("")
 		m.streamAnswerText = ""
@@ -912,9 +919,13 @@ func (m *model) appendAgentEvent(event llm.AgentEvent) bool {
 		m.pendingToolStart = len(m.content)
 		m.appendLog(line)
 	case "tool_result":
-		m.replacePendingTool("\n" + successStyle.Render("● Tool result") + ": " + mutedStyle.Render(m.pendingToolName) + minorResult(event.Text, 8) + "\n")
+		replacement := "\n" + successStyle.Render("● Tool result") + ": " + mutedStyle.Render(m.pendingToolName) + minorResult(event.Text, 8) + "\n"
+		m.replacePendingTool(replacement)
+		m.transientToolLine = replacement
 	case "tool_error":
-		m.replacePendingTool("\n" + errorStyle.Render("● Tool failed") + ": " + mutedStyle.Render(m.pendingToolName) + minorResult(event.Text, 10) + "\n")
+		replacement := "\n" + errorStyle.Render("● Tool failed") + ": " + mutedStyle.Render(m.pendingToolName) + minorResult(event.Text, 10) + "\n"
+		m.replacePendingTool(replacement)
+		m.transientToolLine = replacement
 	default:
 		m.appendLog("\n" + event.Display() + "\n")
 	}
@@ -978,6 +989,33 @@ func (m *model) replacePendingTool(replacement string) {
 	m.pendingToolLine = ""
 	m.pendingToolName = ""
 	m.pendingToolStart = -1
+}
+
+func (m *model) reconcileTransientToolResult() {
+	if m.transientToolLine == "" || m.session == nil {
+		return
+	}
+	if !sessionHasRecentToolResult(m.session) {
+		return
+	}
+	m.content = renderSessionContent(m.ctx, m.session, m.renderer, m.log.Width)
+	m.transientToolLine = ""
+	m.pendingToolLine = ""
+	m.pendingToolName = ""
+	m.pendingToolStart = -1
+	m.refreshLog(false)
+}
+
+func sessionHasRecentToolResult(sess *session.Session) bool {
+	for i := len(sess.Messages) - 1; i >= 0; i-- {
+		switch sess.Messages[i].Role {
+		case "tool":
+			return true
+		case "user":
+			return false
+		}
+	}
+	return false
 }
 
 func (m *model) appendAnswerDelta(delta string) {
@@ -1735,6 +1773,17 @@ func (m model) assistView() string {
 		Render(wrapANSI(panelBlock("commands", rows), m.log.Width))
 }
 
+func (m model) assistHeight() int {
+	if m.session == nil && !m.thinking && strings.TrimSpace(m.commandOutput) == "" && len(m.commandSuggestions()) == 0 {
+		return 6
+	}
+	view := strings.TrimSuffix(m.assistView(), "\n")
+	if view == "" {
+		return 1
+	}
+	return strings.Count(view, "\n") + 1
+}
+
 func (m model) commandOutputView() string {
 	return "\n" + lipgloss.NewStyle().
 		Width(m.log.Width).
@@ -1768,6 +1817,7 @@ func (m model) runningAssistView() string {
 	rows := []string{fmt.Sprintf("running: enter queues message, esc interrupts current turn; queued=%d", len(m.queuedMessages))}
 	if len(m.queuedMessages) > 0 {
 		rows[0] = fmt.Sprintf("running: enter queues message, esc cancels last queued message; queued=%d", len(m.queuedMessages))
+		rows = append(rows, queuedMessageRows(m.queuedMessages, m.log.Width)...)
 	}
 	if !m.activeTurnStartedAt.IsZero() {
 		rows = append(rows, "Working("+formatTurnDuration(time.Since(m.activeTurnStartedAt))+")")
@@ -1784,6 +1834,21 @@ func (m model) runningAssistView() string {
 		Width(m.log.Width).
 		Foreground(lipgloss.Color("8")).
 		Render(wrapANSI(panelBlock("status", rows), m.log.Width))
+}
+
+func queuedMessageRows(messages []string, width int) []string {
+	if len(messages) == 0 {
+		return nil
+	}
+	contentWidth := width - 4
+	if contentWidth < 20 {
+		contentWidth = 20
+	}
+	rows := []string{"queued messages:"}
+	for idx, msg := range messages {
+		rows = append(rows, fmt.Sprintf("%d. %s", idx+1, truncateDisplayLine(oneLine(msg), contentWidth)))
+	}
+	return rows
 }
 
 func (m model) activeProviderIdleTimeout() time.Duration {

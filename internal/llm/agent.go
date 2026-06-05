@@ -356,9 +356,9 @@ func toolUsePrompt(workplace string) string {
 
 Tool rules:
 - Workplace: %q. Tool paths must be workspace-relative.
-- File tools: Use file_edit mode=delete_lines|insert|replace_lines|find_replace for edits, mode=write for new/small files. find_replace treats old_text as a search_grep-style regex. Prefer line-based modes (delete_lines, insert, replace_lines) for large changes.
-- File history: Use view_history to inspect recorded change summaries or focused diffs.
-- File reading: Binary files (common extensions like .png, .pdf, .zip, etc.) and files without extensions are considered risky. file_read will show only a short preview unless force_binary=true is set.
+- File tools: file_read returns text ranges or previews. file_edit supports write, delete_lines, insert, replace_lines, find_replace, and rollback. find_replace treats old_text as a search_grep-style regex.
+- File history: view_history returns recorded change summaries or focused diffs.
+- File safety: Binary files (common extensions like .png, .pdf, .zip, etc.) and files without extensions are considered risky. file_read will show only a short preview unless force_binary=true is set.
 - Shell tools: Terminal environment is %s. Commands run in workplace root. shell_run_sync is blocking. shell_run_async runs in background; check it with shell_async_status.
 - Sub-agents: Run in background. Delegate isolated tasks. Check them when ready_for_check. Do not delegate shell coordination.
 - Avoid modifying .Asayn/ unless explicitly asked to change Asayn configurations.`, workplace, tools.ShellEnvironmentName())

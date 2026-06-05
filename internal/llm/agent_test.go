@@ -165,7 +165,7 @@ func TestSystemPromptIncludesConcreteWorkplaceRules(t *testing.T) {
 	prompt := agent.systemPrompt(&session.Session{})
 	for _, want := range []string{
 		`Workplace: "/tmp/asayn-workplace"`,
-		"mode=delete_lines",
+		"delete_lines",
 		"search_grep-style regex",
 		"view_history",
 		"Terminal environment is " + tools.ShellEnvironmentName(),
@@ -173,6 +173,28 @@ func TestSystemPromptIncludesConcreteWorkplaceRules(t *testing.T) {
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("system prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func TestSystemPromptDoesNotGuideShellFileOperations(t *testing.T) {
+	agent := NewAgent(config.APIConfig{}, config.AgentConfig{
+		Name:         "default",
+		SystemPrompt: "base prompt",
+	}, config.Paths{Workplace: "/tmp/asayn-workplace"}, nil)
+	prompt := strings.ToLower(agent.systemPrompt(&session.Session{}))
+	for _, unwanted := range []string{
+		"use shell",
+		"using shell",
+		"shell to read",
+		"shell to edit",
+		"shell for file",
+		"do not use shell",
+		"don't use shell",
+		"avoid shell",
+	} {
+		if strings.Contains(prompt, unwanted) {
+			t.Fatalf("system prompt should not guide shell file operations with %q:\n%s", unwanted, prompt)
 		}
 	}
 }

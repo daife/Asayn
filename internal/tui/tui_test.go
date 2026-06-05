@@ -8,6 +8,7 @@ import (
 	"github.com/asayn/asayn/internal/app"
 	"github.com/asayn/asayn/internal/config"
 	"github.com/asayn/asayn/internal/llm"
+	"github.com/asayn/asayn/internal/llm/types"
 	"github.com/asayn/asayn/internal/session"
 	"github.com/asayn/asayn/internal/tools"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -60,6 +61,89 @@ func TestReplacePendingToolUsesStableStartIndex(t *testing.T) {
 	}
 	if m.pendingToolStart != -1 || m.pendingToolLine != "" || m.pendingToolName != "" {
 		t.Fatalf("pending tool state not cleared: start=%d line=%q name=%q", m.pendingToolStart, m.pendingToolLine, m.pendingToolName)
+	}
+}
+
+func TestTransientToolResultReconcilesBeforeNextThinking(t *testing.T) {
+	sess := &session.Session{Messages: []types.ChatMessage{
+		{Role: "system", Content: "system"},
+		{Role: "user", Content: "run a tool"},
+		{Role: "assistant", ToolCalls: []types.ToolCall{{
+			ID: "call-1",
+			Function: types.ToolFunction{
+				Name:      "view_dir",
+				Arguments: `{"relative_path":"."}`,
+			},
+		}}},
+		{Role: "tool", ToolCallID: "call-1", Content: "file list"},
+	}}
+	m := model{
+		ctx:               &app.Context{},
+		session:           sess,
+		log:               testViewport(80),
+		pendingToolStart:  -1,
+		pendingThinkStart: -1,
+	}
+	m.initRenderer(80)
+	m.content = "\n" + successStyle.Render("● Tool result") + ": " + mutedStyle.Render(`view_dir({"relative_path":"."})`) + minorResult("file list", 8) + "\n"
+	m.transientToolLine = m.content
+
+	_ = m.appendAgentEvent(llm.AgentEvent{Kind: "thinking_start"})
+
+	if got := strings.Count(m.content, "Tool result"); got != 1 {
+		t.Fatalf("expected one rendered tool result after reconciliation, got %d in %q", got, m.content)
+	}
+	if m.transientToolLine != "" {
+		t.Fatalf("transient tool line should be cleared, got %q", m.transientToolLine)
+	}
+	if !strings.Contains(m.content, "Thinking") {
+		t.Fatalf("next thinking line should still render, got %q", m.content)
+	}
+}
+
+func TestQueuedMessagesRenderBelowInputAndEscCancelsLast(t *testing.T) {
+	store := session.NewStore(t.TempDir())
+	sess, err := store.New("test", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := model{
+		ctx:                 &app.Context{Sessions: store},
+		session:             sess,
+		input:               newChatInput(),
+		log:                 testViewport(80),
+		width:               100,
+		height:              30,
+		thinking:            true,
+		activeTurnStartedAt: time.Now(),
+		historyIndex:        -1,
+	}
+	m.syncInputSize()
+	m.input.SetValue("first queued")
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	m.input.SetValue("second queued")
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+
+	if len(m.queuedMessages) != 2 {
+		t.Fatalf("expected two queued messages, got %#v", m.queuedMessages)
+	}
+	if strings.Contains(m.content, "queued #") {
+		t.Fatalf("queued messages should not be appended to conversation content: %q", m.content)
+	}
+	assist := m.assistView()
+	if !strings.Contains(assist, "1. first queued") || !strings.Contains(assist, "2. second queued") {
+		t.Fatalf("queued messages should render below input in assist view: %q", assist)
+	}
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(model)
+	if len(m.queuedMessages) != 1 || m.queuedMessages[0] != "first queued" {
+		t.Fatalf("esc should cancel the latest queued message, got %#v", m.queuedMessages)
+	}
+	if strings.Contains(m.content, "canceled queued message") {
+		t.Fatalf("queue cancellation should not be appended to conversation content: %q", m.content)
 	}
 }
 

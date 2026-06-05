@@ -715,6 +715,57 @@ func TestShellSchemasFollowShellConfig(t *testing.T) {
 	}
 }
 
+func TestToolDescriptionsDoNotGuideShellFileOperations(t *testing.T) {
+	exec := NewExecutor(config.Paths{}, nil, 20000, true, true)
+	descriptions := collectSchemaDescriptions(exec.Schemas(false))
+	for _, desc := range descriptions {
+		lower := strings.ToLower(desc)
+		if !strings.Contains(lower, "shell") {
+			continue
+		}
+		for _, unwanted := range []string{
+			"read file",
+			"read a file",
+			"file read",
+			"edit file",
+			"edit a file",
+			"file edit",
+			"do not use",
+			"don't use",
+			"avoid",
+		} {
+			if strings.Contains(lower, unwanted) {
+				t.Fatalf("tool description should not guide shell file operations with %q in %q", unwanted, desc)
+			}
+		}
+	}
+}
+
+func collectSchemaDescriptions(schemas []types.ToolSchema) []string {
+	var out []string
+	var walk func(any)
+	walk = func(value any) {
+		switch v := value.(type) {
+		case map[string]any:
+			if desc, ok := v["description"].(string); ok {
+				out = append(out, desc)
+			}
+			for _, child := range v {
+				walk(child)
+			}
+		case []any:
+			for _, child := range v {
+				walk(child)
+			}
+		}
+	}
+	for _, item := range schemas {
+		out = append(out, item.Function.Description)
+		walk(item.Function.Parameters)
+	}
+	return out
+}
+
 func TestRelativePathRejectsAbsolutePath(t *testing.T) {
 	work := t.TempDir()
 	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
