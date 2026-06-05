@@ -10,8 +10,8 @@ import (
 )
 
 func main() {
-	if runtime.GOOS != "linux" && runtime.GOOS != "windows" && os.Getenv("ASAYN_ALLOW_NON_LINUX") != "1" {
-		fmt.Fprintln(os.Stderr, "Asayn runs on Linux and Windows. Set ASAYN_ALLOW_NON_LINUX=1 for unsupported platforms.")
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" && runtime.GOOS != "windows" && os.Getenv("ASAYN_ALLOW_NON_LINUX") != "1" {
+		fmt.Fprintln(os.Stderr, "Asayn runs on Linux, macOS, and Windows. Set ASAYN_ALLOW_NON_LINUX=1 for unsupported platforms.")
 		os.Exit(1)
 	}
 
