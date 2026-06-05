@@ -251,7 +251,7 @@ Root agents can list, start, check, wait-check, and resume sub-agents through th
 
 When thinking mode is enabled, prior assistant `reasoning_content` is sent back only for assistant turns that made tool calls. Reasoning from prior no-tool turns is kept in the local transcript but omitted from later API requests.
 
-The root agent's real-time context control beta can be toggled in `/model_config`. It is disabled by default because it may significantly reduce cache hit rates. When enabled, older tool results are hidden during API request assembly: while turn 4 is running, tool results from turn 1 are replaced with `A long time has passed; hidden.`, keeping only the two most recent completed turns' tool results.
+The root agent's real-time context control beta can be toggled in `/model_config`. It is disabled by default because it may significantly reduce cache hit rates. When enabled, older tool results are hidden during API request assembly, keeping only the two most recent completed turns' tool results. Among the hidden older tool results, earlier entries are replaced with `hidden` and only the last hidden entry says `Previous tool results are hidden as they may be outdated.`
 
 ## Skills
 

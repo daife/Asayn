@@ -15,6 +15,8 @@ import (
 	"github.com/asayn/asayn/internal/tools"
 )
 
+const staleToolResultsHiddenMessage = "Previous tool results are hidden as they may be outdated."
+
 type Agent struct {
 	client     *Client
 	root       config.AgentConfig
@@ -242,6 +244,7 @@ func prepareMessagesForAPI(messages []types.ChatMessage, thinkingEnabled, realTi
 	latestUser := latestUserMessageIndex(messages)
 	latestTurn := latestUserTurn(messages)
 	currentTurn := 0
+	staleToolResultIndexes := []int{}
 	for i, msg := range messages {
 		out[i] = msg
 		if msg.Role == "user" {
@@ -263,11 +266,17 @@ func prepareMessagesForAPI(messages []types.ChatMessage, thinkingEnabled, realTi
 				out[i].Content = fmt.Sprintf("Skill %q content from a previous skill_read call is hidden. Use the skill_read tool again if you need to view it.", name)
 			}
 			if realTimeContextControl && currentTurn > 0 && latestTurn-currentTurn >= 3 {
-				out[i].Content = "A long time has passed; hidden."
+				staleToolResultIndexes = append(staleToolResultIndexes, i)
 			}
 		}
 		if msg.Role == "assistant" && msg.ReasoningContent != "" && (!thinkingEnabled || len(msg.ToolCalls) == 0) {
 			out[i].ReasoningContent = ""
+		}
+	}
+	for i, idx := range staleToolResultIndexes {
+		out[idx].Content = "hidden"
+		if i == len(staleToolResultIndexes)-1 {
+			out[idx].Content = staleToolResultsHiddenMessage
 		}
 	}
 	return out

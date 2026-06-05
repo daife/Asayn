@@ -45,7 +45,7 @@ jobs:
             ## Changes
             - Omit prior no-tool-turn `reasoning_content` from later API requests while preserving tool-turn reasoning.
             - Add configurable auto-compaction threshold in `/model_config` with persisted values from 5% to 95%.
-            - Add real-time context control beta in `/model_config`; when enabled, older tool results are hidden to keep only the two most recent turns' tool results.
+            - Refine real-time context control beta so older tool results collapse to `hidden`, with only the last hidden entry carrying the outdated-results notice.
             - Publish prebuilt executable files directly instead of archives.
 
             ## Assets

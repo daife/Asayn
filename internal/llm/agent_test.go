@@ -80,6 +80,8 @@ func TestPrepareMessagesForAPIRealTimeContextControlHidesOldToolResults(t *testi
 		{Role: "user", Content: "turn 1"},
 		{Role: "assistant", ToolCalls: []types.ToolCall{{ID: "call_1", Type: "function", Function: types.ToolFunction{Name: "search", Arguments: "{}"}}}},
 		{Role: "tool", ToolCallID: "call_1", Content: "turn 1 result"},
+		{Role: "assistant", ToolCalls: []types.ToolCall{{ID: "call_1b", Type: "function", Function: types.ToolFunction{Name: "read", Arguments: "{}"}}}},
+		{Role: "tool", ToolCallID: "call_1b", Content: "turn 1 second result"},
 		{Role: "assistant", Content: "done 1"},
 		{Role: "user", Content: "turn 2"},
 		{Role: "assistant", ToolCalls: []types.ToolCall{{ID: "call_2", Type: "function", Function: types.ToolFunction{Name: "search", Arguments: "{}"}}}},
@@ -94,14 +96,17 @@ func TestPrepareMessagesForAPIRealTimeContextControlHidesOldToolResults(t *testi
 
 	got := prepareMessagesForAPI(messages, true, true)
 
-	if got[2].Content != "A long time has passed; hidden." {
+	if got[2].Content != "hidden" {
 		t.Fatalf("expected turn 1 tool result to be hidden, got %q", got[2].Content)
 	}
-	if got[6].Content != "turn 2 result" {
-		t.Fatalf("expected turn 2 tool result to remain, got %q", got[6].Content)
+	if got[4].Content != staleToolResultsHiddenMessage {
+		t.Fatalf("expected final stale tool result to carry the explanatory hidden message, got %q", got[4].Content)
 	}
-	if got[10].Content != "turn 3 result" {
-		t.Fatalf("expected turn 3 tool result to remain, got %q", got[10].Content)
+	if got[8].Content != "turn 2 result" {
+		t.Fatalf("expected turn 2 tool result to remain, got %q", got[8].Content)
+	}
+	if got[12].Content != "turn 3 result" {
+		t.Fatalf("expected turn 3 tool result to remain, got %q", got[12].Content)
 	}
 }
 
