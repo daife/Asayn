@@ -15,7 +15,7 @@ func (m *ShellManager) start(command string, interactive bool) (*shellRun, error
 	if !interactive {
 		args = append(args, "-NonInteractive")
 	}
-	args = append(args, "-ExecutionPolicy", "Bypass", "-Command", command)
+	args = append(args, "-ExecutionPolicy", "Bypass", "-Command", "[Console]::OutputEncoding = [Text.Encoding]::UTF8; "+command)
 	cmd := exec.Command("powershell.exe", args...)
 	cmd.Dir = m.workdir
 	out := &safeBuffer{}
