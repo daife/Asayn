@@ -1,4 +1,5 @@
 name = "compact_agent"
+provider = "DeepSeek"
 model = "deepseek-v4-flash"
 description = "Summarizes prior context into a compact continuation state."
 system_prompt = """

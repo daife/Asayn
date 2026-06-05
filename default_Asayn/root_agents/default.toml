@@ -1,4 +1,5 @@
 name = "default"
+provider = "DeepSeek"
 model = "deepseek-v4-pro"
 description = "General-purpose root agent."
 system_prompt = "You are a highly competent agent."

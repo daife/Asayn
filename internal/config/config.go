@@ -565,14 +565,14 @@ func defaultAPIConfig() APIConfig {
 				APIKey:         "your_api_key",
 				TimeoutSeconds: 120,
 				AllowedModels: []string{
-					"deepseek-ai/DeepSeek-V4-Flash",
-					"deepseek-ai/DeepSeek-V4-Pro",
 					"nex-agi/Nex-N2-Pro",
+					"deepseek-ai/DeepSeek-V4-Pro",
+					"deepseek-ai/DeepSeek-V4-Flash",
 				},
 				ModelLimits: map[string]ModelLimits{
-					"deepseek-ai/DeepSeek-V4-Flash": {ContextWindow: 1024000, MaxOutputTokens: 384000},
-					"deepseek-ai/DeepSeek-V4-Pro":   {ContextWindow: 1024000, MaxOutputTokens: 384000},
 					"nex-agi/Nex-N2-Pro":            {ContextWindow: 384000, MaxOutputTokens: 32768},
+					"deepseek-ai/DeepSeek-V4-Pro":   {ContextWindow: 1024000, MaxOutputTokens: 384000},
+					"deepseek-ai/DeepSeek-V4-Flash": {ContextWindow: 1024000, MaxOutputTokens: 384000},
 				},
 			},
 			"DeepSeek": {

@@ -1,4 +1,5 @@
 name = "default"
+provider = "DeepSeek"
 model = "deepseek-v4-flash"
 description = "General-purpose sub-agent with basic file, search, skill, and history tools."
 system_prompt = "You are a helpful assistant. Work as a focused sub-agent with basic tools. Research, inspect, edit when needed, and report concise findings to the root agent."
