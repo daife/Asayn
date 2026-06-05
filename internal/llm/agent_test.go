@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"github.com/asayn/asayn/internal/config"
 	"github.com/asayn/asayn/internal/llm/types"
 	"github.com/asayn/asayn/internal/session"
+	"github.com/asayn/asayn/internal/tools"
 )
 
 func TestMessagesForAPIHidesPreviousTurnReadSkillContent(t *testing.T) {
@@ -67,7 +69,7 @@ func TestMessagesForAPIDropsReasoningWhenThinkingDisabled(t *testing.T) {
 			ID:   "call-1",
 			Type: "function",
 			Function: types.ToolFunction{
-				Name:      "read_file",
+				Name:      "file_read",
 				Arguments: `{"relative_path":"x"}`,
 			},
 		}}},
@@ -86,7 +88,7 @@ func TestMessagesForAPIKeepsToolReasoningWhenThinkingEnabled(t *testing.T) {
 			ID:   "call-1",
 			Type: "function",
 			Function: types.ToolFunction{
-				Name:      "read_file",
+				Name:      "file_read",
 				Arguments: `{"relative_path":"x"}`,
 			},
 		}}},
@@ -164,8 +166,10 @@ func TestSystemPromptIncludesConcreteWorkplaceRules(t *testing.T) {
 	for _, want := range []string{
 		`Workplace: "/tmp/asayn-workplace"`,
 		"mode=delete_lines",
-		"old_text from read_file output",
-		"Run in workplace root",
+		"search_grep-style regex",
+		"view_history",
+		"Terminal environment is " + tools.ShellEnvironmentName(),
+		"Commands run in workplace root",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("system prompt missing %q:\n%s", want, prompt)
@@ -262,9 +266,59 @@ func TestChatStreamFailsAfterProviderIdleTimeout(t *testing.T) {
 		TimeoutSeconds: 1,
 	})
 
-	_, _, err := client.ChatStream(context.Background(), "model", []types.ChatMessage{{Role: "user", Content: "hi"}}, nil, false, "", nil)
+	msg, _, err := client.ChatStream(context.Background(), "model", []types.ChatMessage{{Role: "user", Content: "hi"}}, nil, false, "", nil)
 	if err == nil || !strings.Contains(err.Error(), "idle timeout") {
 		t.Fatalf("expected stream idle timeout, got %v", err)
+	}
+	var streamErr *StreamError
+	if !errors.As(err, &streamErr) {
+		t.Fatalf("expected StreamError, got %T", err)
+	}
+	if msg.Content != "first" || streamErr.Partial.Content != "first" {
+		t.Fatalf("timeout should return partial assistant content, got msg=%q partial=%q", msg.Content, streamErr.Partial.Content)
+	}
+}
+
+func TestAgentPreservesSessionProgressAfterProviderIdleTimeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("test server does not support flushing")
+		}
+		fmt.Fprintln(w, `data: {"choices":[{"delta":{"role":"assistant","content":"partial answer"}}]}`)
+		flusher.Flush()
+		time.Sleep(1100 * time.Millisecond)
+		fmt.Fprintln(w, `data: {"choices":[{"delta":{"content":" after timeout"}}]}`)
+	}))
+	defer server.Close()
+
+	work := t.TempDir()
+	store := session.NewStore(t.TempDir())
+	exec := tools.NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
+	agent := NewAgent(config.APIConfig{
+		Providers: map[string]config.ProviderConfig{
+			"test": {BaseURL: server.URL, TimeoutSeconds: 1},
+		},
+	}, config.AgentConfig{
+		Name:     "default",
+		Provider: "test",
+		Model:    "model",
+	}, config.Paths{Workplace: work}, exec)
+	sess := &session.Session{}
+
+	_, _, err := agent.AskWithEvents(context.Background(), sess, "keep this request", nil)
+	if err == nil || !strings.Contains(err.Error(), "idle timeout") {
+		t.Fatalf("expected idle timeout, got %v", err)
+	}
+	if len(sess.Messages) != 3 {
+		t.Fatalf("expected system, user, and partial assistant messages, got %#v", sess.Messages)
+	}
+	if sess.Messages[1].Role != "user" || sess.Messages[1].Content != "keep this request" {
+		t.Fatalf("timeout should preserve user request, got %#v", sess.Messages[1])
+	}
+	if sess.Messages[2].Role != "assistant" || sess.Messages[2].Content != "partial answer" {
+		t.Fatalf("timeout should preserve partial assistant, got %#v", sess.Messages[2])
 	}
 }
 

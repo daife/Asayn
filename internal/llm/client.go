@@ -58,6 +58,16 @@ type StreamDelta struct {
 	Message          string
 }
 
+type StreamError struct {
+	Message string
+	Partial types.ChatMessage
+	Usage   types.Usage
+}
+
+func (e *StreamError) Error() string {
+	return e.Message
+}
+
 type streamResponse struct {
 	Choices []struct {
 		Delta        streamChoiceDelta `json:"delta"`
@@ -307,27 +317,38 @@ func (c *Client) ChatStream(ctx context.Context, model string, messages []types.
 	}
 	if err := scanner.Err(); err != nil {
 		if idleTimer.TimedOut() {
+			msg.ToolCalls = assembledToolCalls(toolCalls, maxToolIndex)
 			if onDelta != nil {
 				onDelta(StreamDelta{Event: "timeout", Timeout: c.timeout, Message: "API stream idle timeout"})
 			}
-			return types.ChatMessage{}, types.Usage{}, fmt.Errorf("API stream idle timeout after %s", c.timeout)
+			return msg, finalUsage, &StreamError{
+				Message: fmt.Sprintf("API stream idle timeout after %s", c.timeout),
+				Partial: msg,
+				Usage:   finalUsage,
+			}
 		}
 		return types.ChatMessage{}, types.Usage{}, err
 	}
-	if maxToolIndex >= 0 {
-		msg.ToolCalls = make([]types.ToolCall, 0, maxToolIndex+1)
-		for i := 0; i <= maxToolIndex; i++ {
-			call, ok := toolCalls[i]
-			if !ok {
-				continue
-			}
-			if call.Type == "" {
-				call.Type = "function"
-			}
-			msg.ToolCalls = append(msg.ToolCalls, call)
-		}
-	}
+	msg.ToolCalls = assembledToolCalls(toolCalls, maxToolIndex)
 	return msg, finalUsage, nil
+}
+
+func assembledToolCalls(toolCalls map[int]types.ToolCall, maxToolIndex int) []types.ToolCall {
+	if maxToolIndex < 0 {
+		return nil
+	}
+	out := make([]types.ToolCall, 0, maxToolIndex+1)
+	for i := 0; i <= maxToolIndex; i++ {
+		call, ok := toolCalls[i]
+		if !ok {
+			continue
+		}
+		if call.Type == "" {
+			call.Type = "function"
+		}
+		out = append(out, call)
+	}
+	return out
 }
 
 func newHTTPClient(timeout time.Duration) *http.Client {

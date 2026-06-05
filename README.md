@@ -179,11 +179,14 @@ allow_parallel_shell = false
 allow_interactive_shell = false
 ```
 
+Shell tools use the platform terminal environment: Windows runs commands through PowerShell, while Linux and other non-Windows builds use `sh`. The active terminal environment is included in the shell tool descriptions and root-agent tool rules so the model can choose the right command syntax.
+
 ## Slash Commands
 
 - `/help`
 - `/new [name]`
 - `/resume [session]`
+- `/retry` retries the last saved user request, useful after an idle timeout.
 - `/rename [name]`
 - `/fork [name]`
 - `/root_agent [name]` (alias: `/model`)
@@ -211,14 +214,13 @@ Skills are directory-based packages. Asayn discovers only directories that conta
 
 `SKILL.md` should include YAML frontmatter metadata, commonly `name` and `description`, followed by Markdown instructions. Visible skill metadata and source are exposed to the model; the full `SKILL.md` body is loaded only through the `read_skill` tool after the skill is enabled with `/model_config` or listed in the active agent config.
 
-## Diff Tool
+## File Edit Tool
 
-`diff_file` records reversible file changes and returns a verification diff:
+`file_edit` records reversible file changes and returns a focused unified diff for the change:
 
-- `mode="find_replace"` edits a localized exact `old_text` block into `new_text`, records a change ID, and returns the resulting diff. This is preferred for multi-line edits because it does not rely on line numbers.
-- Add `dry_run=true` to `find_replace`, `write`, `delete`, or `apply` to preview without writing.
-- `mode="apply"` with `unified_diff` or `patches` applies one or more unified diff file patches and records change IDs. Patch paths come from diff headers; headerless patches use `relative_path` as the fallback. If both are provided and disagree, the tool errors.
-- `mode="history"` lists recent change summaries, optionally filtered by `relative_path`. Default output is limited; with `change_id` or `change_ids`, it shows the recorded diff for those changes.
+- `mode="write"` creates or overwrites a file.
+- `mode="delete_lines"`, `mode="insert"`, and `mode="replace_lines"` edit by 1-based line numbers.
+- `mode="find_replace"` treats `old_text` as a `search_grep`-style regex and replaces it with `new_text`; use `replace_all=true` when multiple matches are intended.
 - `mode="rollback"` restores one or more recorded changes and removes those change records from history.
 
-Full-file `write` is still available for new or small files. Unified diffs remain useful when context is certain; `find_replace` is safer when editing JSON tails, comma-sensitive blocks, or other multi-line regions where line numbers are easy to get wrong.
+Use `view_history` to list recent change summaries or view the recorded diff for `change_id` / `change_ids`. Use `file_read` for file contents.

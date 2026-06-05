@@ -11,7 +11,7 @@ import (
 )
 
 func (m *ShellManager) start(command string) (*shellRun, error) {
-	cmd := exec.Command("cmd", "/c", command)
+	cmd := exec.Command("powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command)
 	cmd.Dir = m.workdir
 	out := &safeBuffer{}
 	stdin, err := cmd.StdinPipe()
@@ -36,6 +36,10 @@ func (m *ShellManager) start(command string) (*shellRun, error) {
 		run.Finish(cmd.Wait())
 	}()
 	return run, nil
+}
+
+func ShellEnvironmentName() string {
+	return "PowerShell"
 }
 
 func (m *ShellManager) killRun(run *shellRun) {

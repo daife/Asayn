@@ -112,6 +112,18 @@ func TestIdleAssistViewShowsLastWorkedDuration(t *testing.T) {
 	}
 }
 
+func TestInputDisplayHeightExpandsUpToFourRows(t *testing.T) {
+	if got := inputDisplayHeight("short", 20); got != 1 {
+		t.Fatalf("short input should use one row, got %d", got)
+	}
+	if got := inputDisplayHeight("123456789012345678901", 10); got != 3 {
+		t.Fatalf("wrapped input should use three rows, got %d", got)
+	}
+	if got := inputDisplayHeight(strings.Repeat("x", 200), 10); got != 4 {
+		t.Fatalf("input height should cap at four rows, got %d", got)
+	}
+}
+
 func TestSubAgentFailureReasonIsRendered(t *testing.T) {
 	reason := subAgentFailureReason(tools.SubAgentSnapshot{
 		Status: "failed",

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -13,13 +14,13 @@ import (
 )
 
 // fileEdit is the unified file editing tool. Modes:
-//   write         - write full file content (creates or overwrites)
-//   delete_lines  - delete a line range
-//   insert        - insert text after a given line
-//   replace_lines - replace a line range with new text
-//   find_replace  - find exact old_text and replace with new_text
-//   view          - view change history or detail
-//   rollback      - rollback recorded changes
+//
+//	write         - write full file content (creates or overwrites)
+//	delete_lines  - delete a line range
+//	insert        - insert text after a given line
+//	replace_lines - replace a line range with new text
+//	find_replace  - find old_text as a regex and replace with new_text
+//	rollback      - rollback recorded changes
 func (e *Executor) fileEdit(sess *session.Session, args map[string]any) (string, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -28,16 +29,10 @@ func (e *Executor) fileEdit(sess *session.Session, args map[string]any) (string,
 	changeID := stringArg(args, "change_id")
 
 	switch mode {
-	case "view":
-		if changeID != "" || len(stringSliceArg(args, "change_ids")) > 0 {
-			return e.viewChanges(sess, changeID, stringSliceArg(args, "change_ids"))
-		}
-		return e.listChanges(sess, stringArg(args, "relative_path"), intArg(args, "limit", 0))
 	case "rollback":
 		return e.rollback(sess, appendIDs(changeID, stringSliceArg(args, "change_ids")))
 	}
 
-	dryRun := boolArg(args, "dry_run", false)
 	path, err := e.resolveWorkplacePath(stringArg(args, "relative_path"))
 	if err != nil {
 		return "", err
@@ -128,33 +123,34 @@ func (e *Executor) fileEdit(sess *session.Session, args map[string]any) (string,
 		if !existed {
 			return "", fmt.Errorf("file does not exist; use write mode to create files")
 		}
-		oldText := stringArg(args, "old_text")
-		if oldText == "" {
+		pattern := stringArg(args, "old_text")
+		if pattern == "" {
 			return "", fmt.Errorf("old_text is required for find_replace")
 		}
 		newText := stringArg(args, "new_text")
-		count := strings.Count(before, oldText)
-		if count == 0 {
-			return "", fmt.Errorf("old_text not found in file")
+		re, err := compileSearchPattern(pattern, true)
+		if err != nil {
+			return "", err
+		}
+		matches := re.FindAllStringIndex(before, -1)
+		if len(matches) == 0 {
+			return "", fmt.Errorf("old_text pattern not found in file")
 		}
 		replaceAll := boolArg(args, "replace_all", false)
-		if !replaceAll && count > 1 {
-			return "", fmt.Errorf("old_text matched %d times; use more surrounding context or set replace_all=true", count)
+		if !replaceAll && len(matches) > 1 {
+			return "", fmt.Errorf("old_text pattern matched %d times; use a more specific regex or set replace_all=true", len(matches))
 		}
 		if replaceAll {
-			after = strings.ReplaceAll(before, oldText, newText)
+			after = re.ReplaceAllString(before, newText)
 		} else {
-			after = strings.Replace(before, oldText, newText, 1)
+			after = replaceFirstRegexMatch(re, before, newText, matches[0])
 		}
 
 	default:
-		return "", fmt.Errorf("unsupported file_edit mode %q; valid: write, delete_lines, insert, replace_lines, find_replace, view, rollback", mode)
+		return "", fmt.Errorf("unsupported file_edit mode %q; valid: write, delete_lines, insert, replace_lines, find_replace, rollback", mode)
 	}
 
 	diff := e.computeDiff(stringArg(args, "relative_path"), before, after, mode)
-	if dryRun {
-		return truncate(diff, e.maxOutputLines), nil
-	}
 
 	if mode == "delete_lines" && after == "" {
 		if err := os.Remove(path); err != nil {
@@ -183,6 +179,26 @@ func (e *Executor) fileEdit(sess *session.Session, args map[string]any) (string,
 		return "", err
 	}
 	return truncate(fmt.Sprintf("change_id=%s\n%s", change.ID, diff), e.maxOutputLines), nil
+}
+
+func replaceFirstRegexMatch(re *regexp.Regexp, src, repl string, match []int) string {
+	var b strings.Builder
+	b.WriteString(src[:match[0]])
+	b.WriteString(re.ReplaceAllString(src[match[0]:match[1]], repl))
+	b.WriteString(src[match[1]:])
+	return b.String()
+}
+
+func (e *Executor) viewHistory(sess *session.Session, args map[string]any) (string, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	changeID := stringArg(args, "change_id")
+	changeIDs := stringSliceArg(args, "change_ids")
+	if changeID != "" || len(changeIDs) > 0 {
+		return e.viewChanges(sess, changeID, changeIDs)
+	}
+	return e.listChanges(sess, stringArg(args, "relative_path"), intArg(args, "limit", 0))
 }
 
 // computeDiff produces a focused diff with 2 lines of surrounding context.

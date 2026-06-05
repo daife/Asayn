@@ -20,7 +20,7 @@ import (
 	"github.com/asayn/asayn/internal/llm/usage"
 	"github.com/asayn/asayn/internal/session"
 	"github.com/asayn/asayn/internal/tools"
-	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
@@ -30,7 +30,7 @@ import (
 type model struct {
 	ctx                       *app.Context
 	session                   *session.Session
-	input                     textinput.Model
+	input                     textarea.Model
 	log                       viewport.Model
 	renderer                  *glamour.TermRenderer
 	content                   string
@@ -164,6 +164,7 @@ var commands = []commandSpec{
 	{Name: "/help", Description: "show help"},
 	{Name: "/new", Description: "start a new session"},
 	{Name: "/resume", Description: "resume a saved session"},
+	{Name: "/retry", Description: "retry the last request"},
 	{Name: "/rename", Description: "rename current session"},
 	{Name: "/fork", Description: "fork from the current point"},
 	{Name: "/copy_answer", Description: "export and copy latest answer"},
@@ -191,11 +192,14 @@ func Run(ctx *app.Context) error {
 	if err != nil {
 		return err
 	}
-	input := textinput.New()
+	input := textarea.New()
 	input.Placeholder = "message or /help"
 	input.Focus()
 	input.CharLimit = 8000
 	input.Prompt = "› "
+	input.ShowLineNumbers = false
+	input.MaxHeight = 4
+	input.SetHeight(1)
 	vp := viewport.New(80, 20)
 	content := ""
 	vp.SetContent(content)
@@ -214,6 +218,7 @@ func Run(ctx *app.Context) error {
 	}
 	m.usageStats, _ = m.ctx.UsageTracker.GetStats(m.session.ID)
 	m.initRenderer(80)
+	m.syncInputSize()
 	_, err = tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
 	return err
 }
@@ -229,8 +234,49 @@ func (m *model) initRenderer(width int) {
 	m.renderer = r
 }
 
+func (m *model) syncInputSize() {
+	width := m.log.Width
+	if width <= 0 {
+		width = 80
+	}
+	m.input.SetWidth(width)
+	m.input.SetHeight(inputDisplayHeight(m.input.Value(), width-lipgloss.Width(m.input.Prompt)))
+
+	if m.height > 0 {
+		m.log.Height = m.height - m.input.Height() - 6
+		if m.log.Height < 3 {
+			m.log.Height = 3
+		}
+	}
+}
+
+func inputDisplayHeight(value string, contentWidth int) int {
+	if contentWidth < 1 {
+		contentWidth = 1
+	}
+	if value == "" {
+		return 1
+	}
+	rows := 0
+	for _, line := range strings.Split(value, "\n") {
+		width := lipgloss.Width(line)
+		lineRows := 1
+		if width > 0 {
+			lineRows = (width + contentWidth - 1) / contentWidth
+		}
+		rows += lineRows
+		if rows >= 4 {
+			return 4
+		}
+	}
+	if rows < 1 {
+		return 1
+	}
+	return rows
+}
+
 func (m model) Init() tea.Cmd {
-	return tea.Batch(textinput.Blink, uiTick())
+	return tea.Batch(textarea.Blink, uiTick())
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -247,11 +293,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.log.Width < 20 {
 			m.log.Width = msg.Width
 		}
-		m.log.Height = msg.Height - 7
-		if m.log.Height < 3 {
-			m.log.Height = 3
-		}
-		m.input.Width = m.log.Width - 1
+		m.syncInputSize()
 		m.initRenderer(m.log.Width)
 		m.content = renderSessionContent(m.ctx, m.session, m.renderer, m.log.Width)
 		m.log.SetContent(m.wrapContent(m.content))
@@ -326,6 +368,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			value := strings.TrimSpace(m.input.Value())
 			m.input.SetValue("")
+			m.syncInputSize()
 			if value == "" {
 				return m, nil
 			}
@@ -398,6 +441,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.appendLog("\n" + errorStyle.Render("● Asayn error") + ": " + msg.err.Error() + "\n")
 			}
 			m.appendDivider()
+			_ = m.ctx.Sessions.Save(m.session)
 		} else {
 			m.status = "ready"
 			m.lastTurnDuration = turnDuration
@@ -460,6 +504,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resetHistoryNavigation()
 	}
 	m.input, cmd = m.input.Update(msg)
+	m.syncInputSize()
 	cmds = append(cmds, cmd)
 	m.clampCommandSelection()
 	m.log, cmd = m.log.Update(msg)
@@ -575,6 +620,24 @@ func (m model) startAgentTurn(value string, recordHistory bool) (model, tea.Cmd)
 	m.lastTurnDuration = 0
 	m.status = m.agentRunningStatus()
 	cmd, cancel, events := m.ask(prompt, m.ctx.Agent, m.session, "agent", m.ctx.Root.Model)
+	m.activeCancel = cancel
+	m.agentEvents = events
+	return m, tea.Batch(cmd, pollAgentEvents(events))
+}
+
+func (m model) startRetryTurn() (model, tea.Cmd) {
+	m.commandOutput = ""
+	m.activeTurnUsage = types.Usage{}
+	m.activeRetryStatus = ""
+	m.activeTimeoutStatus = ""
+	m.appendLog("\n" + mutedStyle.Render("retrying previous request...") + "\n")
+	m.log.GotoBottom()
+	m.thinking = true
+	m.activeRunKind = "agent"
+	m.activeTurnStartedAt = time.Now()
+	m.lastTurnDuration = 0
+	m.status = m.agentRunningStatus()
+	cmd, cancel, events := m.retryAsk(m.ctx.Agent, m.session, "agent", m.ctx.Root.Model)
 	m.activeCancel = cancel
 	m.agentEvents = events
 	return m, tea.Batch(cmd, pollAgentEvents(events))
@@ -722,6 +785,23 @@ func (m model) ask(prompt string, agent *llm.Agent, sess *session.Session, kind,
 		go func() {
 			defer cancel()
 			answer, usage, err := agent.AskWithEvents(ctx, sess, prompt, func(event llm.AgentEvent) {
+				events <- agentRunEvent{event: event}
+			})
+			events <- agentRunEvent{done: &agentMsg{answer: answer, usage: usage, err: err, kind: kind, model: modelName}}
+			close(events)
+		}()
+		return agentPollMsg{}
+	}
+	return cmd, cancel, events
+}
+
+func (m model) retryAsk(agent *llm.Agent, sess *session.Session, kind, modelName string) (tea.Cmd, context.CancelFunc, chan agentRunEvent) {
+	events := make(chan agentRunEvent, 64)
+	ctx, cancel := context.WithCancel(context.Background())
+	cmd := func() tea.Msg {
+		go func() {
+			defer cancel()
+			answer, usage, err := agent.RetryWithEvents(ctx, sess, func(event llm.AgentEvent) {
 				events <- agentRunEvent{event: event}
 			})
 			events <- agentRunEvent{done: &agentMsg{answer: answer, usage: usage, err: err, kind: kind, model: modelName}}
@@ -1165,6 +1245,16 @@ func (m model) handleCommand(raw string) (model, tea.Cmd) {
 			return m.startResumePicker()
 		}
 		return m.resumeSession(arg)
+	case "retry":
+		if m.thinking {
+			m.setCommandOutput("cannot retry while an agent turn is running")
+			return m, nil
+		}
+		if !hasRetryableUserRequest(m.session) {
+			m.setCommandOutput("no previous user request to retry")
+			return m, nil
+		}
+		return m.startRetryTurn()
 	case "rename":
 		if arg == "" {
 			m.setCommandOutput("usage: /rename [name]")
@@ -1583,6 +1673,18 @@ func (m model) resumeSession(idOrName string) (model, tea.Cmd) {
 	return m, nil
 }
 
+func hasRetryableUserRequest(sess *session.Session) bool {
+	if sess == nil {
+		return false
+	}
+	for i := len(sess.Messages) - 1; i >= 0; i-- {
+		if sess.Messages[i].Role == "user" && strings.TrimSpace(sess.Messages[i].Content) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func (m model) assistView() string {
 	if m.resumePicker {
 		return m.resumePickerView()
@@ -1899,6 +2001,7 @@ func (m model) clampedCommandSelected(length int) int {
 func (m *model) completeCommand(name string) {
 	m.input.SetValue(name)
 	m.input.CursorEnd()
+	m.syncInputSize()
 	m.commandSelected = 0
 }
 
@@ -1937,6 +2040,7 @@ func (m *model) navigateInputHistory(direction string) bool {
 			m.historyIndex = -1
 			m.input.SetValue(m.historyDraft)
 			m.input.CursorEnd()
+			m.syncInputSize()
 			m.historyDraft = ""
 			return true
 		}
@@ -1945,6 +2049,7 @@ func (m *model) navigateInputHistory(direction string) bool {
 	}
 	m.input.SetValue(m.inputHistory[m.historyIndex])
 	m.input.CursorEnd()
+	m.syncInputSize()
 	return true
 }
 
@@ -1954,6 +2059,7 @@ func (m *model) restoreHistoryDraft() {
 	}
 	m.input.SetValue(m.historyDraft)
 	m.input.CursorEnd()
+	m.syncInputSize()
 	m.resetHistoryNavigation()
 }
 

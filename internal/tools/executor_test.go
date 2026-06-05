@@ -152,6 +152,34 @@ func TestFileEditFindReplace(t *testing.T) {
 	}
 }
 
+func TestFileEditFindReplaceUsesRegex(t *testing.T) {
+	work := t.TempDir()
+	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
+	sess, err := store.New("test", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
+	os.WriteFile(filepath.Join(work, "f.txt"), []byte("alpha-123\nomega\n"), 0o644)
+
+	out, err := exec.Run(context.Background(), sess, "file_edit", map[string]any{
+		"mode":          "find_replace",
+		"relative_path": "f.txt",
+		"old_text":      `alpha-\d+`,
+		"new_text":      "beta",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "+beta") || !strings.Contains(out, "-alpha-123") {
+		t.Fatalf("expected regex replace diff, got: %s", out)
+	}
+	data, _ := os.ReadFile(filepath.Join(work, "f.txt"))
+	if string(data) != "beta\nomega\n" {
+		t.Fatalf("unexpected content: %q", data)
+	}
+}
+
 func TestFileEditFindReplaceDuplicateError(t *testing.T) {
 	work := t.TempDir()
 	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
@@ -223,18 +251,16 @@ func TestFileEditViewHistory(t *testing.T) {
 		}
 	}
 
-	out, err := exec.Run(context.Background(), sess, "file_edit", map[string]any{
-		"mode": "view",
-	})
+	out, err := exec.Run(context.Background(), sess, "view_history", map[string]any{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	if len(lines) != 10 {
-		t.Fatalf("view should default to 10 summaries, got %d:\n%s", len(lines), out)
+		t.Fatalf("view_history should default to 10 summaries, got %d:\n%s", len(lines), out)
 	}
 	if strings.Contains(out, "00.txt") || !strings.Contains(out, "11.txt") {
-		t.Fatalf("view should show recent changes only:\n%s", out)
+		t.Fatalf("view_history should show recent changes only:\n%s", out)
 	}
 }
 
@@ -259,8 +285,7 @@ func TestFileEditViewDetail(t *testing.T) {
 	}
 
 	id := sess.Changes[len(sess.Changes)-1].ID
-	viewed, err := exec.Run(context.Background(), sess, "file_edit", map[string]any{
-		"mode":      "view",
+	viewed, err := exec.Run(context.Background(), sess, "view_history", map[string]any{
 		"change_id": id,
 	})
 	if err != nil {
@@ -427,39 +452,6 @@ func TestFileEditRollbackBothChangesWorks(t *testing.T) {
 	}
 }
 
-func TestFileEditDryRun(t *testing.T) {
-	work := t.TempDir()
-	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
-	sess, err := store.New("test", "default")
-	if err != nil {
-		t.Fatal(err)
-	}
-	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
-	os.WriteFile(filepath.Join(work, "hello.txt"), []byte("alpha\nomega\n"), 0o644)
-
-	out, err := exec.Run(context.Background(), sess, "file_edit", map[string]any{
-		"mode":          "find_replace",
-		"relative_path": "hello.txt",
-		"old_text":      "omega",
-		"new_text":      "beta",
-		"dry_run":       true,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(out, "change_id=") {
-		t.Fatalf("dry_run should not include change_id: %s", out)
-	}
-	if !strings.Contains(out, "-omega") || !strings.Contains(out, "+beta") {
-		t.Fatalf("dry_run should show the diff: %s", out)
-	}
-
-	data, _ := os.ReadFile(filepath.Join(work, "hello.txt"))
-	if string(data) != "alpha\nomega\n" {
-		t.Fatalf("dry_run should not write: %q", data)
-	}
-}
-
 func TestFileEditRejectsUnsupportedModes(t *testing.T) {
 	work := t.TempDir()
 	store := session.NewStore(filepath.Join(work, ".Asayn", ".sessions", "root_agents"))
@@ -469,7 +461,7 @@ func TestFileEditRejectsUnsupportedModes(t *testing.T) {
 	}
 	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
 
-	for _, mode := range []string{"apply", "revert", "patch", "show", "history"} {
+	for _, mode := range []string{"apply", "revert", "patch", "show", "history", "view"} {
 		_, err := exec.Run(context.Background(), sess, "file_edit", map[string]any{
 			"mode":          mode,
 			"relative_path": "x.txt",
@@ -483,14 +475,24 @@ func TestFileEditRejectsUnsupportedModes(t *testing.T) {
 func TestFileEditSchemaHasCorrectParameters(t *testing.T) {
 	exec := NewExecutor(config.Paths{}, nil, 20000, false, false)
 	props := toolProperties(t, exec.Schemas(false), "file_edit")
-	for _, name := range []string{"mode", "dry_run", "relative_path", "start_line", "end_line", "insert_after_line", "text", "old_text", "new_text", "replace_all", "change_id", "change_ids", "limit"} {
+	for _, name := range []string{"mode", "relative_path", "start_line", "end_line", "insert_after_line", "text", "old_text", "new_text", "replace_all", "change_id", "change_ids"} {
 		if _, ok := props[name]; !ok {
 			t.Fatalf("file_edit schema should expose %q", name)
 		}
 	}
-	for _, name := range []string{"unified_diff", "patches", "expected_content", "find", "replace", "reverse"} {
+	for _, name := range []string{"dry_run", "limit", "unified_diff", "patches", "expected_content", "find", "replace", "reverse"} {
 		if _, ok := props[name]; ok {
 			t.Fatalf("file_edit schema should not expose legacy parameter %q", name)
+		}
+	}
+}
+
+func TestViewHistorySchemaHasCorrectParameters(t *testing.T) {
+	exec := NewExecutor(config.Paths{}, nil, 20000, false, false)
+	props := toolProperties(t, exec.Schemas(false), "view_history")
+	for _, name := range []string{"relative_path", "change_id", "change_ids", "limit"} {
+		if _, ok := props[name]; !ok {
+			t.Fatalf("view_history schema should expose %q", name)
 		}
 	}
 }
@@ -565,7 +567,7 @@ func TestReadFileDetectsBinaryByContent(t *testing.T) {
 	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
 	os.WriteFile(filepath.Join(work, "binary.txt"), []byte{'o', 'k', 0, 'h', 'i'}, 0o644)
 
-	out, err := exec.Run(context.Background(), sess, "read_file", map[string]any{"relative_path": "binary.txt"})
+	out, err := exec.Run(context.Background(), sess, "file_read", map[string]any{"relative_path": "binary.txt"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -573,7 +575,7 @@ func TestReadFileDetectsBinaryByContent(t *testing.T) {
 		t.Fatalf("expected binary preview, got %s", out)
 	}
 
-	out, err = exec.Run(context.Background(), sess, "read_file", map[string]any{
+	out, err = exec.Run(context.Background(), sess, "file_read", map[string]any{
 		"relative_path": "binary.txt",
 		"force_binary":  true,
 	})
@@ -692,6 +694,9 @@ func TestShellSchemasFollowShellConfig(t *testing.T) {
 	if !hasToolSchema(syncExec.Schemas(false), "shell_run_sync") {
 		t.Fatal("sync mode should expose shell_run_sync")
 	}
+	if desc := toolDescription(t, syncExec.Schemas(false), "shell_run_sync"); !strings.Contains(desc, ShellEnvironmentName()) {
+		t.Fatalf("shell_run_sync description should include shell environment %q, got %q", ShellEnvironmentName(), desc)
+	}
 	if hasToolSchema(syncExec.Schemas(false), "shell_run_async") || hasToolSchema(syncExec.Schemas(false), "shell_async_status") || hasToolSchema(syncExec.Schemas(false), "shell_async_kill") || hasToolSchema(syncExec.Schemas(false), "shell_async_stdin") {
 		t.Fatal("sync mode should expose only shell_run_sync")
 	}
@@ -718,7 +723,7 @@ func TestRelativePathRejectsAbsolutePath(t *testing.T) {
 		t.Fatal(err)
 	}
 	exec := NewExecutor(config.Paths{Workplace: work}, store, 20000, false, false)
-	_, err = exec.Run(context.Background(), sess, "read_file", map[string]any{
+	_, err = exec.Run(context.Background(), sess, "file_read", map[string]any{
 		"relative_path": filepath.Join(work, "hello.txt"),
 	})
 	if err == nil || !strings.Contains(err.Error(), "only relative paths are supported") {
@@ -826,4 +831,15 @@ func toolProperties(t *testing.T, schemas []types.ToolSchema, name string) map[s
 	}
 	t.Fatalf("tool schema %q not found", name)
 	return nil
+}
+
+func toolDescription(t *testing.T, schemas []types.ToolSchema, name string) string {
+	t.Helper()
+	for _, item := range schemas {
+		if item.Function.Name == name {
+			return item.Function.Description
+		}
+	}
+	t.Fatalf("tool schema %q not found", name)
+	return ""
 }

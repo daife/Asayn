@@ -85,9 +85,19 @@ func (a *Agent) Ask(ctx context.Context, sess *session.Session, prompt string) (
 }
 
 func (a *Agent) AskWithEvents(ctx context.Context, sess *session.Session, prompt string, emit func(AgentEvent)) (string, types.Usage, error) {
+	return a.askWithEvents(ctx, sess, prompt, emit, true)
+}
+
+func (a *Agent) RetryWithEvents(ctx context.Context, sess *session.Session, emit func(AgentEvent)) (string, types.Usage, error) {
+	return a.askWithEvents(ctx, sess, "", emit, false)
+}
+
+func (a *Agent) askWithEvents(ctx context.Context, sess *session.Session, prompt string, emit func(AgentEvent), appendPrompt bool) (string, types.Usage, error) {
 	a.EnsureSystemPrompt(sess)
 	baseLen := len(sess.Messages)
-	sess.Messages = append(sess.Messages, types.ChatMessage{Role: "user", Content: prompt})
+	if appendPrompt {
+		sess.Messages = append(sess.Messages, types.ChatMessage{Role: "user", Content: prompt})
+	}
 
 	var totalUsage types.Usage
 	toolSchemas := a.tools.Schemas(a.isSubAgent)
@@ -115,7 +125,14 @@ func (a *Agent) AskWithEvents(ctx context.Context, sess *session.Session, prompt
 			}
 		})
 		if err != nil {
-			if !isContextCanceled(err) && len(sess.Messages) > baseLen {
+			totalUsage.PromptTokens += usage.PromptTokens
+			totalUsage.CompletionTokens += usage.CompletionTokens
+			totalUsage.TotalTokens = usage.TotalTokens
+			totalUsage.PromptCacheHitTokens += usage.PromptCacheHitTokens
+			totalUsage.PromptCacheMissTokens += usage.PromptCacheMissTokens
+			if streamErr := streamError(err); streamErr != nil && hasAssistantTextProgress(streamErr.Partial) {
+				sess.Messages = append(sess.Messages, streamErr.Partial)
+			} else if !isContextCanceled(err) && !isStreamTimeout(err) && len(sess.Messages) > baseLen {
 				sess.Messages = sess.Messages[:baseLen]
 			}
 			return "", totalUsage, err
@@ -178,6 +195,22 @@ func formatTimeoutEvent(delta StreamDelta) string {
 
 func isContextCanceled(err error) bool {
 	return err != nil && (errors.Is(err, context.Canceled) || strings.Contains(err.Error(), "context canceled"))
+}
+
+func isStreamTimeout(err error) bool {
+	return streamError(err) != nil || strings.Contains(err.Error(), "idle timeout")
+}
+
+func streamError(err error) *StreamError {
+	var streamErr *StreamError
+	if errors.As(err, &streamErr) {
+		return streamErr
+	}
+	return nil
+}
+
+func hasAssistantTextProgress(msg types.ChatMessage) bool {
+	return strings.TrimSpace(msg.Content) != "" || strings.TrimSpace(msg.ReasoningContent) != ""
 }
 
 func messagesForAPI(sess *session.Session, thinkingEnabled bool) []types.ChatMessage {
@@ -323,11 +356,12 @@ func toolUsePrompt(workplace string) string {
 
 Tool rules:
 - Workplace: %q. Tool paths must be workspace-relative.
-- File tools: Use file_edit mode=delete_lines|insert|replace_lines|find_replace for edits, mode=write for new/small files. find_replace requires exact old_text from read_file output. Prefer line-based modes (delete_lines, insert, replace_lines) for large changes.
-- File reading: Binary files (common extensions like .png, .pdf, .zip, etc.) and files without extensions are considered risky. read_file will show only a short preview unless force_binary=true is set.
-- Shell tools: Run in workplace root. shell_run_sync is blocking. shell_run_async runs in background; check it with shell_async_status.
+- File tools: Use file_edit mode=delete_lines|insert|replace_lines|find_replace for edits, mode=write for new/small files. find_replace treats old_text as a search_grep-style regex. Prefer line-based modes (delete_lines, insert, replace_lines) for large changes.
+- File history: Use view_history to inspect recorded change summaries or focused diffs.
+- File reading: Binary files (common extensions like .png, .pdf, .zip, etc.) and files without extensions are considered risky. file_read will show only a short preview unless force_binary=true is set.
+- Shell tools: Terminal environment is %s. Commands run in workplace root. shell_run_sync is blocking. shell_run_async runs in background; check it with shell_async_status.
 - Sub-agents: Run in background. Delegate isolated tasks. Check them when ready_for_check. Do not delegate shell coordination.
-- Avoid modifying .Asayn/ unless explicitly asked to change Asayn configurations.`, workplace)
+- Avoid modifying .Asayn/ unless explicitly asked to change Asayn configurations.`, workplace, tools.ShellEnvironmentName())
 }
 
 func (a *Agent) runToolCall(parent context.Context, sess *session.Session, call types.ToolCall, emit func(AgentEvent)) string {

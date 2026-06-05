@@ -40,6 +40,10 @@ func (m *ShellManager) start(command string) (*shellRun, error) {
 	return run, nil
 }
 
+func ShellEnvironmentName() string {
+	return "sh"
+}
+
 func (m *ShellManager) killRun(run *shellRun) {
 	if run == nil || run.cmd.Process == nil {
 		return

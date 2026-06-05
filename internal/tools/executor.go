@@ -79,7 +79,7 @@ func (e *Executor) SetAgentLimits(maxOutputLines int, allowParallelShell, allowI
 
 func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 	schemas := []types.ToolSchema{
-		schema("read_file", "Read a file. Binary files and files without extensions are considered risky and will only show a preview unless force_binary is set.", map[string]any{
+		schema("file_read", "Read a file. Binary files and files without extensions are considered risky and will only show a preview unless force_binary is set.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"relative_path": prop("string", "File path relative to the workspace."),
@@ -114,22 +114,29 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 		schema("file_edit", "Edit files with line-based operations. All edits are recorded as reversible changes.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"mode":              prop("string", "write, delete_lines, insert, replace_lines, find_replace, view, or rollback."),
-				"dry_run":           prop("boolean", "Preview changes without writing. Default false."),
+				"mode":              prop("string", "write, delete_lines, insert, replace_lines, find_replace, or rollback."),
 				"relative_path":     prop("string", "File path relative to the workspace."),
 				"content":           prop("string", "Full file content for write mode."),
 				"start_line":        prop("integer", "First line, 1-based. For delete_lines and replace_lines."),
 				"end_line":          prop("integer", "Last line, 1-based inclusive. For delete_lines and replace_lines."),
 				"insert_after_line": prop("integer", "Line number to insert after. 0 = prepend. For insert mode."),
 				"text":              prop("string", "New text for insert or replace_lines."),
-				"old_text":          prop("string", "Exact substring from read_file output. For find_replace mode."),
-				"new_text":          prop("string", "Replacement substring. For find_replace mode."),
+				"old_text":          prop("string", "Regex pattern using search_grep syntax. For find_replace mode."),
+				"new_text":          prop("string", "Replacement text. For find_replace mode."),
 				"replace_all":       prop("boolean", "Replace all matches. Default false. For find_replace mode."),
-				"change_id":         prop("string", "Recorded change ID for view or rollback."),
+				"change_id":         prop("string", "Recorded change ID for rollback."),
 				"change_ids":        prop("array", "Recorded change IDs for rollback."),
-				"limit":             prop("integer", "History summary limit. Default 10, max 25."),
 			},
-			"required": []string{"mode", "relative_path"},
+			"required": []string{"mode"},
+		}),
+		schema("view_history", "View recorded file change history or focused diffs for change IDs.", map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"relative_path": prop("string", "Optional file path filter relative to the workspace."),
+				"change_id":     prop("string", "Recorded change ID to view."),
+				"change_ids":    prop("array", "Recorded change IDs to view."),
+				"limit":         prop("integer", "History summary limit. Default 10, max 25."),
+			},
 		}),
 	}
 	if forSubAgent {
@@ -139,10 +146,11 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 	if shellCWD == "" {
 		shellCWD = "workplace"
 	}
-	schemas = append(schemas, schema("shell_run_sync", fmt.Sprintf("Run a shell command in %q.", shellCWD), map[string]any{
+	shellEnv := ShellEnvironmentName()
+	schemas = append(schemas, schema("shell_run_sync", fmt.Sprintf("Run a %s command in %q.", shellEnv, shellCWD), map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"command":     prop("string", "Shell command."),
+			"command":     prop("string", shellEnv+" command."),
 			"timeout_sec": prop("integer", "Timeout seconds."),
 		},
 		"required": []string{"command"},
@@ -151,14 +159,14 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 		return append(schemas, subAgentSchemas()...)
 	}
 	schemas = append(schemas,
-		schema("shell_run_async", fmt.Sprintf("Start a background shell command in %q.", shellCWD), map[string]any{
+		schema("shell_run_async", fmt.Sprintf("Start a background %s command in %q.", shellEnv, shellCWD), map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"command": prop("string", "Shell command."),
+				"command": prop("string", shellEnv+" command."),
 			},
 			"required": []string{"command"},
 		}),
-		schema("shell_async_status", "Check a background shell command.", map[string]any{
+		schema("shell_async_status", "Check a background "+shellEnv+" command.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"shell_id": prop("string", "Shell ID."),
@@ -225,11 +233,11 @@ func subAgentSchemas() []types.ToolSchema {
 }
 
 func (e *Executor) Run(ctx context.Context, sess *session.Session, name string, args map[string]any) (string, error) {
-	if e.readOnly && name != "read_file" && name != "view_dir" && name != "search_grep" && name != "read_skill" && name != "file_edit" {
+	if e.readOnly && name != "file_read" && name != "view_dir" && name != "search_grep" && name != "read_skill" && name != "file_edit" && name != "view_history" {
 		return "", fmt.Errorf("tool %q is not available to read-only sub-agents", name)
 	}
 	switch name {
-	case "read_file":
+	case "file_read":
 		return e.readFile(args)
 	case "view_dir":
 		return e.viewDir(args)
@@ -239,6 +247,8 @@ func (e *Executor) Run(ctx context.Context, sess *session.Session, name string, 
 		return e.readSkill(args)
 	case "file_edit":
 		return e.fileEdit(sess, args)
+	case "view_history":
+		return e.viewHistory(sess, args)
 	case "shell_run_sync":
 		return e.shells.RunBlocking(ctx, stringArg(args, "command"), intArg(args, "timeout_sec", 60))
 	case "shell_run_async":
@@ -672,7 +682,7 @@ func truncate(s string, limitLines int) string {
 
 	var out strings.Builder
 	out.WriteString(strings.Join(lines[:head], "\n"))
-	out.WriteString(fmt.Sprintf("\n\n--- [Output truncated: omitted lines %d to %d (total %d lines). Use search_grep/read_file for specific sections.] ---\n\n", truncStart, truncEnd, len(lines)))
+	out.WriteString(fmt.Sprintf("\n\n--- [Output truncated: omitted lines %d to %d (total %d lines). Use search_grep/file_read for specific sections.] ---\n\n", truncStart, truncEnd, len(lines)))
 	out.WriteString(strings.Join(lines[len(lines)-tail:], "\n"))
 	return out.String()
 }
@@ -727,4 +737,3 @@ func safePreview(data []byte, limit int) string {
 	}
 	return b.String()
 }
-
