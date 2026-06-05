@@ -1,6 +1,6 @@
 # Asayn
 
-Asayn means **agent skills are all you need**. It is a Go + Bubble Tea TUI agent scaffold inspired by Claude Code, designed to run on Ubuntu/Linux.
+Asayn means **agent skills are all you need**. It is a Go + Bubble Tea TUI agent scaffold inspired by Claude Code, designed to run on Linux and Windows.
 
 ## What This MVP Includes
 
@@ -102,10 +102,16 @@ Run the built binary from any project directory:
 ./asayn
 ```
 
-For local development on non-Linux machines:
+For local development on unsupported platforms:
 
 ```bash
 ASAYN_ALLOW_NON_LINUX=1 go run ./cmd/asayn
+```
+
+To build a Windows executable from source:
+
+```bash
+GOOS=windows GOARCH=amd64 go build -o asayn.exe ./cmd/asayn
 ```
 
 ## API Config
