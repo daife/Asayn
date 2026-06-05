@@ -10,8 +10,13 @@ import (
 	"github.com/google/uuid"
 )
 
-func (m *ShellManager) start(command string) (*shellRun, error) {
-	cmd := exec.Command("powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command)
+func (m *ShellManager) start(command string, interactive bool) (*shellRun, error) {
+	args := []string{"-NoLogo", "-NoProfile"}
+	if !interactive {
+		args = append(args, "-NonInteractive")
+	}
+	args = append(args, "-ExecutionPolicy", "Bypass", "-Command", command)
+	cmd := exec.Command("powershell.exe", args...)
 	cmd.Dir = m.workdir
 	out := &safeBuffer{}
 	stdin, err := cmd.StdinPipe()

@@ -77,7 +77,7 @@ func Bootstrap(cwd string) (*Context, error) {
 		if bind != nil {
 			bind(subSess.ID)
 		}
-		subExec := tools.NewReadOnlyExecutor(paths, subStore, subCfg.MaxOutputLines)
+		subExec := tools.NewBasicExecutor(paths, subStore, subCfg.MaxOutputLines)
 		sub := llm.NewSubAgent(api, subCfg, paths, subExec)
 		sub.RefreshSystemPrompt(subSess)
 		answer, use, err := sub.AskWithEvents(parent, subSess, instruction, nil)

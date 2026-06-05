@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func (m *ShellManager) start(command string) (*shellRun, error) {
+func (m *ShellManager) start(command string, interactive bool) (*shellRun, error) {
 	cmd := exec.Command("sh", "-lc", command)
 	cmd.Dir = m.workdir
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}

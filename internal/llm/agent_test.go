@@ -82,7 +82,7 @@ func TestMessagesForAPIDropsReasoningWhenThinkingDisabled(t *testing.T) {
 	}
 }
 
-func TestMessagesForAPIKeepsToolReasoningWhenThinkingEnabled(t *testing.T) {
+func TestMessagesForAPIKeepsAllReasoningWhenThinkingEnabled(t *testing.T) {
 	messages := []types.ChatMessage{
 		{Role: "assistant", ReasoningContent: "tool thinking", ToolCalls: []types.ToolCall{{
 			ID:   "call-1",
@@ -93,11 +93,15 @@ func TestMessagesForAPIKeepsToolReasoningWhenThinkingEnabled(t *testing.T) {
 			},
 		}}},
 		{Role: "tool", ToolCallID: "call-1", Content: "result"},
+		{Role: "assistant", Content: "done", ReasoningContent: "final thinking"},
 	}
 
 	out := prepareMessagesForAPI(messages, true)
 	if out[0].ReasoningContent != "tool thinking" {
 		t.Fatalf("enabled thinking should keep tool reasoning, got %q", out[0].ReasoningContent)
+	}
+	if out[2].ReasoningContent != "final thinking" {
+		t.Fatalf("enabled thinking should keep non-tool reasoning, got %q", out[2].ReasoningContent)
 	}
 }
 
@@ -157,22 +161,25 @@ func TestMessagesForAPIRepeatedCompressionDoesNotExposeOlderHistory(t *testing.T
 	}
 }
 
-func TestSystemPromptIncludesConcreteWorkplaceRules(t *testing.T) {
+func TestSystemPromptDoesNotIncludeToolRules(t *testing.T) {
 	agent := NewAgent(config.APIConfig{}, config.AgentConfig{
 		Name:         "default",
 		SystemPrompt: "base prompt",
 	}, config.Paths{Workplace: "/tmp/asayn-workplace"}, nil)
 	prompt := agent.systemPrompt(&session.Session{})
-	for _, want := range []string{
+	if !strings.HasPrefix(prompt, "base prompt") {
+		t.Fatalf("system prompt should preserve configured prompt, got:\n%s", prompt)
+	}
+	for _, unwanted := range []string{
 		`Workplace: "/tmp/asayn-workplace"`,
 		"delete_lines",
 		"search_grep-style regex",
 		"view_history",
-		"Terminal environment is " + tools.ShellEnvironmentName(),
+		"Terminal environment is ",
 		"Commands run in workplace root",
 	} {
-		if !strings.Contains(prompt, want) {
-			t.Fatalf("system prompt missing %q:\n%s", want, prompt)
+		if strings.Contains(prompt, unwanted) {
+			t.Fatalf("system prompt should not include tool rule %q:\n%s", unwanted, prompt)
 		}
 	}
 }

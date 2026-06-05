@@ -258,18 +258,7 @@ func prepareMessagesForAPI(messages []types.ChatMessage, thinkingEnabled bool) [
 				out[i].Content = fmt.Sprintf("Skill %q content from a previous read_skill call is hidden. Use the read_skill tool again if you need to view it.", name)
 			}
 		}
-		if msg.Role != "assistant" || msg.ReasoningContent == "" {
-			continue
-		}
-		if !thinkingEnabled {
-			out[i].ReasoningContent = ""
-			continue
-		}
-		keepReasoning := len(msg.ToolCalls) > 0
-		if !keepReasoning && i > 0 && messages[i-1].Role == "tool" {
-			keepReasoning = true
-		}
-		if !keepReasoning {
+		if !thinkingEnabled && msg.Role == "assistant" && msg.ReasoningContent != "" {
 			out[i].ReasoningContent = ""
 		}
 	}
@@ -320,7 +309,7 @@ func (a *Agent) RefreshSystemPrompt(sess *session.Session) {
 }
 
 func (a *Agent) systemPrompt(sess *session.Session) string {
-	prompt := a.root.SystemPrompt + toolUsePrompt(a.paths.Workplace)
+	prompt := a.root.SystemPrompt
 	skills, err := config.ListSkills(a.paths)
 	if err != nil || len(skills) == 0 {
 		return prompt
@@ -349,19 +338,6 @@ func (a *Agent) systemPrompt(sess *session.Session) string {
 		return prompt + "\n\nNo skills visible."
 	}
 	return prompt + "\n\nVisible skills (use read_skill before applying):\n" + strings.Join(blocks, "\n")
-}
-
-func toolUsePrompt(workplace string) string {
-	return fmt.Sprintf(`
-
-Tool rules:
-- Workplace: %q. Tool paths must be workspace-relative.
-- File tools: file_read returns text ranges or previews. file_edit supports write, delete_lines, insert, replace_lines, find_replace, and rollback. find_replace treats old_text as a search_grep-style regex.
-- File history: view_history returns recorded change summaries or focused diffs.
-- File safety: Binary files (common extensions like .png, .pdf, .zip, etc.) and files without extensions are considered risky. file_read will show only a short preview unless force_binary=true is set.
-- Shell tools: Terminal environment is %s. Commands run in workplace root. shell_run_sync is blocking. shell_run_async runs in background; check it with shell_async_status.
-- Sub-agents: Run in background. Delegate isolated tasks. Check them when ready_for_check. Do not delegate shell coordination.
-- Avoid modifying .Asayn/ unless explicitly asked to change Asayn configurations.`, workplace, tools.ShellEnvironmentName())
 }
 
 func (a *Agent) runToolCall(parent context.Context, sess *session.Session, call types.ToolCall, emit func(AgentEvent)) string {

@@ -13,7 +13,7 @@ Asayn means **agent skills are all you need**. It is a Go + Bubble Tea TUI agent
 - Thinking mode support with `reasoning_effort` and `thinking.type`.
 - Session history and per-session file change chains.
 - Bubble Tea TUI with slash commands and a chat input that soft-wraps upward to four rows.
-- Built-in tool schemas only: file reading, grep, directory view, diff-based file changes, shell execution, and sub-agent delegation.
+- Built-in tool schemas only: file reading, grep, directory view, diff-based file changes, shell execution, and sub-agent delegation. Fixed tool usage rules live in each tool description sent to the API.
 - Right sidebar sub-agent status; click a sub-agent row to print its current transcript/status.
 
 DeepSeek reference behavior used here:
@@ -222,7 +222,7 @@ allow_parallel_shell = false
 allow_interactive_shell = false
 ```
 
-Shell tools use the platform terminal environment: Windows runs commands through PowerShell, while Linux and other non-Windows builds use `sh`. The active terminal environment is included in the shell tool descriptions and root-agent tool rules so the model can choose the right command syntax.
+Shell tools use the platform terminal environment: Windows runs commands through PowerShell, while Linux and other non-Windows builds use `sh`. The active terminal environment is included in shell tool descriptions so the model can choose the right command syntax. Synchronous shell commands are non-interactive. When interactive shell is enabled, asynchronous PowerShell sessions omit `-NonInteractive` and expose stdin.
 
 ## Slash Commands
 
@@ -241,11 +241,11 @@ Shell tools use the platform terminal environment: Windows runs commands through
 
 ## Sub-Agents
 
-Root agents can list, start, check, wait-check, and resume sub-agents through the fixed `sub_agent_*` tools. `sub_agent_list` lists configured `sub_agents/*.toml` names and descriptions. `sub_agent_start_async` accepts an `agent` name from that list; workplace configs override global configs. A sub-agent keeps its own session history and cannot see `sub_agent_*` or shell tools.
+Root agents can list, start, check, wait-check, and resume sub-agents through the fixed `sub_agent_*` tools. `sub_agent_list` lists configured `sub_agents/*.toml` names and descriptions. `sub_agent_start_async` accepts an `agent` name from that list; workplace configs override global configs. A sub-agent keeps its own session history and only sees the basic file, search, skill, and history tools; it cannot see `sub_agent_*` or shell tools.
 
 ## Context Compression
 
-`/compact` runs `special_agents/compact_agent.toml` to summarize the current effective conversation into a compact continuation state. The compact agent receives detailed compression instructions as that temporary user turn, but the retained conversation replaces that long prompt with `Recall what we worked on before.` so later root-agent calls are not polluted by compression instructions. The visible transcript remains in the TUI, but subsequent model calls only send the root system prompt plus the new compact summary round and newer messages. Repeated compression only summarizes the current effective context; history hidden by an earlier compression is not sent to `compact_agent` again. Asayn also starts compression automatically when the latest context-window usage reaches 80%; if an agent turn is still running, it is canceled first and the compact agent summarizes the partial chain that had already been recorded. Compression token usage is logged against the same session. Special agents appear in `/model_config`; they use the same non-shell, non-sub-agent tool exposure as sub-agents and only see skills selected for that special agent.
+`/compact` runs `special_agents/compact_agent.toml` to summarize the current effective conversation into a compact continuation state. The compact agent receives detailed compression instructions as that temporary user turn, but the retained conversation replaces that long prompt with `Recall what we worked on before.` so later root-agent calls are not polluted by compression instructions. The visible transcript remains in the TUI, but subsequent model calls only send the root system prompt plus the new compact summary round and newer messages. Repeated compression only summarizes the current effective context; history hidden by an earlier compression is not sent to `compact_agent` again. Asayn also starts compression automatically when the latest context-window usage reaches 80%; if an agent turn is still running, it is canceled first and the compact agent summarizes the partial chain that had already been recorded. Compression token usage is logged against the same session. Special agents appear in `/model_config`; they use the same basic tool exposure as sub-agents and only see skills selected for that special agent.
 
 ## Skills
 

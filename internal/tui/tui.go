@@ -674,7 +674,7 @@ func (m model) startCompactTurn() (model, tea.Cmd) {
 		temp.VisibleSkills[k] = v
 	}
 
-	exec := tools.NewReadOnlyExecutor(m.ctx.Paths, m.ctx.Sessions, cfg.MaxOutputLines)
+	exec := tools.NewBasicExecutor(m.ctx.Paths, m.ctx.Sessions, cfg.MaxOutputLines)
 	agent := llm.NewSubAgent(m.ctx.API, cfg, m.ctx.Paths, exec)
 	agent.RefreshSystemPrompt(&temp)
 
@@ -2296,7 +2296,7 @@ func (m model) subAgentSidebar(width int) string {
 	}
 	lines := []string{
 		sectionStyle.Render("Sub-agent"),
-		"read-only view",
+		"basic tool view",
 		"",
 		"status: " + snap.Status,
 	}
@@ -2333,7 +2333,7 @@ func (m model) subAgentView() string {
 		if snap.Status == "completed" || snap.Status == "failed" {
 			if snap.SessionID != "" {
 				if sess, err := m.ctx.SubSessions.LoadByID(snap.SessionID); err == nil && len(sess.Messages) > 0 {
-					body := mutedStyle.Render("Sub-agent conversation (read-only). User cannot directly chat with this sub-agent; root agent controls follow-ups.")
+					body := mutedStyle.Render("Sub-agent conversation. User cannot directly chat with this sub-agent; root agent controls follow-ups.")
 					body += "\n" + mutedStyle.Render("Esc returns to root conversation.") + "\n"
 					body += renderSessionContent(m.ctx, sess, m.renderer, m.log.Width)
 					return lipgloss.NewStyle().

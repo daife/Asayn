@@ -26,7 +26,7 @@ type Executor struct {
 	maxOutputLines        int
 	allowParallelShell    bool
 	allowInteractiveShell bool
-	readOnly              bool
+	basicOnly             bool
 	shells                *ShellManager
 	subAgents             *SubAgentManager
 	mu                    sync.Mutex
@@ -51,9 +51,9 @@ func NewExecutor(paths config.Paths, store *session.Store, maxOutputLines int, a
 	return exec
 }
 
-func NewReadOnlyExecutor(paths config.Paths, store *session.Store, maxOutputLines int) *Executor {
+func NewBasicExecutor(paths config.Paths, store *session.Store, maxOutputLines int) *Executor {
 	exec := NewExecutor(paths, store, maxOutputLines, false, false)
-	exec.readOnly = true
+	exec.basicOnly = true
 	return exec
 }
 
@@ -78,8 +78,9 @@ func (e *Executor) SetAgentLimits(maxOutputLines int, allowParallelShell, allowI
 }
 
 func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
+	workplaceRule := "Tool paths must be workspace-relative. Avoid modifying .Asayn/ unless explicitly asked to change Asayn configurations."
 	schemas := []types.ToolSchema{
-		schema("file_read", "Read a file. Binary files and files without extensions are considered risky and will only show a preview unless force_binary is set.", map[string]any{
+		schema("file_read", "Read a file. "+workplaceRule+" Binary files and files without extensions are considered risky and will only show a preview unless force_binary is set.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"relative_path": prop("string", "File path relative to the workspace."),
@@ -89,13 +90,13 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 			},
 			"required": []string{"relative_path"},
 		}),
-		schema("view_dir", "List a directory.", map[string]any{
+		schema("view_dir", "List a directory. "+workplaceRule, map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"relative_path": prop("string", "Directory path relative to the workspace."),
 			},
 		}),
-		schema("search_grep", "Search files with a regex.", map[string]any{
+		schema("search_grep", "Search files with a regex. Tool paths are workspace-relative; .Asayn/ is skipped. Content mode skips known binary files.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"query":          prop("string", "Regex pattern."),
@@ -104,14 +105,14 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 			},
 			"required": []string{"query"},
 		}),
-		schema("read_skill", "Read a visible skill.", map[string]any{
+		schema("read_skill", "Read a visible skill before applying it. Only skills listed as visible in the active session can be read.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"name": prop("string", "Skill name."),
 			},
 			"required": []string{"name"},
 		}),
-		schema("file_edit", "Edit files with line-based operations. All edits are recorded as reversible changes.", map[string]any{
+		schema("file_edit", "Edit files with line-based operations. "+workplaceRule+" All edits are recorded as reversible changes. find_replace treats old_text as a search_grep-style regex.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"mode":              prop("string", "write, delete_lines, insert, replace_lines, find_replace, or rollback."),
@@ -129,7 +130,7 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 			},
 			"required": []string{"mode"},
 		}),
-		schema("view_history", "View recorded file change history or focused diffs for change IDs.", map[string]any{
+		schema("view_history", "View recorded file change history or focused diffs for change IDs. Paths are workspace-relative when a path filter is supplied.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"relative_path": prop("string", "Optional file path filter relative to the workspace."),
@@ -147,7 +148,7 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 		shellCWD = "workplace"
 	}
 	shellEnv := ShellEnvironmentName()
-	schemas = append(schemas, schema("shell_run_sync", fmt.Sprintf("Run a %s command in %q.", shellEnv, shellCWD), map[string]any{
+	schemas = append(schemas, schema("shell_run_sync", fmt.Sprintf("Run a blocking non-interactive %s command in %q. Commands run in the workplace root.", shellEnv, shellCWD), map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"command":     prop("string", shellEnv+" command."),
@@ -162,7 +163,7 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 		schema("shell_run_async", fmt.Sprintf("Start a background %s command in %q.", shellEnv, shellCWD), map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"command": prop("string", shellEnv+" command."),
+				"command": prop("string", shellEnv+" command. Commands run in the workplace root; check background commands with shell_async_status."),
 			},
 			"required": []string{"command"},
 		}),
@@ -182,7 +183,7 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 	)
 	if e.allowInteractiveShell {
 		schemas = append(schemas,
-			schema("shell_async_stdin", "Send stdin to an interactive shell.", map[string]any{
+			schema("shell_async_stdin", "Send stdin to an interactive background shell. Raw input is forwarded exactly; include \\n to press Enter.", map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"shell_id": prop("string", "Shell ID."),
@@ -197,7 +198,7 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 func subAgentSchemas() []types.ToolSchema {
 	return []types.ToolSchema{
 		schema("sub_agent_list", "List available sub-agents.", nil),
-		schema("sub_agent_start_async", "Start a background sub-agent.", map[string]any{
+		schema("sub_agent_start_async", "Start a background sub-agent for isolated work. Do not delegate shell coordination.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"agent":       prop("string", "Sub-agent name."),
@@ -206,7 +207,7 @@ func subAgentSchemas() []types.ToolSchema {
 			},
 			"required": []string{"instruction"},
 		}),
-		schema("sub_agent_check", "Check a sub-agent.", map[string]any{
+		schema("sub_agent_check", "Check a sub-agent. When a ready_for_check result is read, the task is marked completed.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"sub_agent_id": prop("string", "Sub-agent ID."),
@@ -221,7 +222,7 @@ func subAgentSchemas() []types.ToolSchema {
 			},
 			"required": []string{"sub_agent_id", "wait_seconds"},
 		}),
-		schema("sub_agent_resume_async", "Resume a completed sub-agent.", map[string]any{
+		schema("sub_agent_resume_async", "Resume a completed sub-agent with follow-up instructions.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"sub_agent_id": prop("string", "Sub-agent ID."),
@@ -233,8 +234,8 @@ func subAgentSchemas() []types.ToolSchema {
 }
 
 func (e *Executor) Run(ctx context.Context, sess *session.Session, name string, args map[string]any) (string, error) {
-	if e.readOnly && name != "file_read" && name != "view_dir" && name != "search_grep" && name != "read_skill" && name != "file_edit" && name != "view_history" {
-		return "", fmt.Errorf("tool %q is not available to read-only sub-agents", name)
+	if e.basicOnly && name != "file_read" && name != "view_dir" && name != "search_grep" && name != "read_skill" && name != "file_edit" && name != "view_history" {
+		return "", fmt.Errorf("tool %q is not available to basic-only agents", name)
 	}
 	switch name {
 	case "file_read", "read_file":

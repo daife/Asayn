@@ -69,7 +69,7 @@ func (m *ShellManager) RunBlocking(ctx context.Context, command string, timeoutS
 	if timeoutSec <= 0 {
 		timeoutSec = 60
 	}
-	run, err := m.start(command)
+	run, err := m.start(command, false)
 	if err != nil {
 		return "", err
 	}
@@ -97,7 +97,7 @@ func (m *ShellManager) StartAsync(command string, interactive bool) (string, err
 	if command == "" {
 		return "", fmt.Errorf("command is required")
 	}
-	run, err := m.start(command)
+	run, err := m.start(command, interactive)
 	if err != nil {
 		return "", err
 	}
