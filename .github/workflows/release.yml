@@ -1,0 +1,76 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME}"
+          mkdir -p "dist/asayn-${version}-linux-macos" "dist/asayn-${version}-windows"
+
+          GOOS=linux GOARCH=amd64 go build -o "dist/asayn-${version}-linux-macos/asayn-linux-amd64" ./cmd/asayn
+          GOOS=linux GOARCH=arm64 go build -o "dist/asayn-${version}-linux-macos/asayn-linux-arm64" ./cmd/asayn
+          GOOS=darwin GOARCH=amd64 go build -o "dist/asayn-${version}-linux-macos/asayn-darwin-amd64" ./cmd/asayn
+          GOOS=darwin GOARCH=arm64 go build -o "dist/asayn-${version}-linux-macos/asayn-darwin-arm64" ./cmd/asayn
+          GOOS=windows GOARCH=amd64 go build -o "dist/asayn-${version}-windows/asayn-windows-amd64.exe" ./cmd/asayn
+
+          cat > "dist/asayn-${version}-linux-macos/README.txt" <<'EOF'
+          Asayn prebuilt binaries for Linux and macOS.
+
+          Choose the binary matching your OS and CPU architecture, rename it to "asayn" if desired, then install it somewhere on PATH.
+
+          Examples:
+            install -D -m 0755 asayn-linux-amd64 ~/.local/bin/asayn
+            install -D -m 0755 asayn-linux-arm64 ~/.local/bin/asayn
+            install -D -m 0755 asayn-darwin-arm64 ~/.local/bin/asayn
+          EOF
+
+          cat > "dist/asayn-${version}-windows/README.txt" <<'EOF'
+          Asayn prebuilt binary for Windows amd64.
+
+          Rename asayn-windows-amd64.exe to asayn.exe if desired, then place it in a directory on PATH.
+          EOF
+
+          tar -C dist -czf "dist/asayn-${version}-linux-macos.tar.gz" "asayn-${version}-linux-macos"
+          (cd dist && zip -qr "asayn-${version}-windows.zip" "asayn-${version}-windows")
+          (cd dist && sha256sum "asayn-${version}-linux-macos.tar.gz" "asayn-${version}-windows.zip" > SHA256SUMS.txt)
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Asayn ${{ github.ref_name }}
+          body: |
+            ## Changes
+            - Use minimal standard unified diffs for `file_edit`.
+            - Add macOS as a supported prebuilt target.
+
+            ## Assets
+            - `asayn-${{ github.ref_name }}-linux-macos.tar.gz`: Linux amd64/arm64 and macOS amd64/arm64 binaries.
+            - `asayn-${{ github.ref_name }}-windows.zip`: Windows amd64 binary.
+            - `SHA256SUMS.txt`: asset checksums.
+          files: |
+            dist/asayn-${{ github.ref_name }}-linux-macos.tar.gz
+            dist/asayn-${{ github.ref_name }}-windows.zip
+            dist/SHA256SUMS.txt
