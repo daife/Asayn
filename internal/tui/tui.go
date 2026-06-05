@@ -1796,7 +1796,7 @@ func (m model) idleAssistView() string {
 	if m.width < 100 {
 		rows = append(rows,
 			"session: "+m.session.Name+" ("+m.session.ID+")",
-			"workplace: "+m.ctx.Paths.Workplace,
+			"workspace: "+m.ctx.Paths.WorkspaceRoot,
 			"root_agent: "+m.session.RootAgent,
 		)
 	}
@@ -2812,7 +2812,7 @@ func (m model) exportLatestAnswer() (string, error) {
 	if strings.TrimSpace(answer) == "" {
 		return "", fmt.Errorf("no assistant answer to copy")
 	}
-	dir := filepath.Join(m.ctx.Paths.Workplace, ".Asayn")
+	dir := filepath.Join(m.ctx.Paths.WorkspaceRoot, ".Asayn")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}

@@ -46,7 +46,7 @@ func NewExecutor(paths config.Paths, store *session.Store, maxOutputLines int, a
 		allowParallelShell:    allowParallelShell,
 		allowInteractiveShell: allowInteractiveShell,
 	}
-	exec.shells = NewShellManager(paths.Workplace, maxOutputLines)
+	exec.shells = NewShellManager(paths.WorkspaceRoot, maxOutputLines)
 	exec.subAgents = NewSubAgentManager(maxOutputLines)
 	return exec
 }
@@ -78,25 +78,25 @@ func (e *Executor) SetAgentLimits(maxOutputLines int, allowParallelShell, allowI
 }
 
 func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
-	workplaceRule := "Tool paths must be workspace-relative. Avoid modifying .Asayn/ unless explicitly asked to change Asayn configurations."
+	workspaceRule := "Use workspace-relative paths by default. Absolute paths are accepted only when they stay inside the workspace. Avoid modifying .Asayn/ unless explicitly asked to change Asayn configurations."
 	schemas := []types.ToolSchema{
-		schema("file_read", "Read a file. "+workplaceRule+" Binary files and files without extensions are considered risky and will only show a preview unless force_binary is set.", map[string]any{
+		schema("file_read", "Read a file. "+workspaceRule+" Binary files and files without extensions are considered risky and will only show a preview unless force_binary is set.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"relative_path": prop("string", "File path relative to the workspace."),
-				"start_line":    prop("integer", "First line, 1-based."),
-				"end_line":      prop("integer", "Last line, 1-based."),
-				"force_binary":  prop("boolean", "Force reading a binary or extensionless file as text."),
+				"path":         prop("string", "File path. Prefer a path relative to the workspace."),
+				"start_line":   prop("integer", "First line, 1-based."),
+				"end_line":     prop("integer", "Last line, 1-based."),
+				"force_binary": prop("boolean", "Force reading a binary or extensionless file as text."),
 			},
-			"required": []string{"relative_path"},
+			"required": []string{"path"},
 		}),
-		schema("view_dir", "List a directory. "+workplaceRule, map[string]any{
+		schema("dir_view", "List a directory. "+workspaceRule, map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"relative_path": prop("string", "Directory path relative to the workspace."),
+				"path": prop("string", "Directory path. Prefer a path relative to the workspace."),
 			},
 		}),
-		schema("search_grep", "Search files with a regex. Tool paths are workspace-relative; .Asayn/ is skipped. Content mode skips known binary files.", map[string]any{
+		schema("grep_search", "Search workspace files with a regex. .Asayn/ is skipped. Content mode skips known binary files.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"query":          prop("string", "Regex pattern."),
@@ -105,24 +105,24 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 			},
 			"required": []string{"query"},
 		}),
-		schema("read_skill", "Read a visible skill before applying it. Only skills listed as visible in the active session can be read.", map[string]any{
+		schema("skill_read", "Read a visible skill before applying it. Only skills listed as visible in the active session can be read.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"name": prop("string", "Skill name."),
 			},
 			"required": []string{"name"},
 		}),
-		schema("file_edit", "Edit files with line-based operations. "+workplaceRule+" All edits are recorded as reversible changes. find_replace treats old_text as a search_grep-style regex.", map[string]any{
+		schema("file_edit", "Edit files with line-based operations. "+workspaceRule+" All edits are recorded as reversible changes. find_replace treats old_text as a grep_search-style regex.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"mode":              prop("string", "write, delete_lines, insert, replace_lines, find_replace, or rollback."),
-				"relative_path":     prop("string", "File path relative to the workspace."),
+				"path":              prop("string", "File path. Prefer a path relative to the workspace."),
 				"content":           prop("string", "Full file content for write mode."),
 				"start_line":        prop("integer", "First line, 1-based. For delete_lines and replace_lines."),
 				"end_line":          prop("integer", "Last line, 1-based inclusive. For delete_lines and replace_lines."),
 				"insert_after_line": prop("integer", "Line number to insert after. 0 = prepend. For insert mode."),
 				"text":              prop("string", "New text for insert or replace_lines."),
-				"old_text":          prop("string", "Regex pattern using search_grep syntax. For find_replace mode."),
+				"old_text":          prop("string", "Regex pattern using grep_search syntax. For find_replace mode."),
 				"new_text":          prop("string", "Replacement text. For find_replace mode."),
 				"replace_all":       prop("boolean", "Replace all matches. Default false. For find_replace mode."),
 				"change_id":         prop("string", "Recorded change ID for rollback."),
@@ -130,25 +130,25 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 			},
 			"required": []string{"mode"},
 		}),
-		schema("view_history", "View recorded file change history or focused diffs for change IDs. Paths are workspace-relative when a path filter is supplied.", map[string]any{
+		schema("view_history", "View recorded file change history or focused diffs for change IDs. Prefer workspace-relative paths when a path filter is supplied.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"relative_path": prop("string", "Optional file path filter relative to the workspace."),
-				"change_id":     prop("string", "Recorded change ID to view."),
-				"change_ids":    prop("array", "Recorded change IDs to view."),
-				"limit":         prop("integer", "History summary limit. Default 10, max 25."),
+				"path":       prop("string", "Optional file path filter. Prefer a path relative to the workspace."),
+				"change_id":  prop("string", "Recorded change ID to view."),
+				"change_ids": prop("array", "Recorded change IDs to view."),
+				"limit":      prop("integer", "History summary limit. Default 10, max 25."),
 			},
 		}),
 	}
 	if forSubAgent {
 		return schemas
 	}
-	shellCWD := e.paths.Workplace
+	shellCWD := e.paths.WorkspaceRoot
 	if shellCWD == "" {
-		shellCWD = "workplace"
+		shellCWD = "workspace"
 	}
 	shellEnv := ShellEnvironmentName()
-	schemas = append(schemas, schema("shell_run_sync", fmt.Sprintf("Run a blocking non-interactive %s command in %q. Commands run in the workplace root.", shellEnv, shellCWD), map[string]any{
+	schemas = append(schemas, schema("shell_run_sync", fmt.Sprintf("Run a blocking non-interactive %s command in %q(workspace). Commands run in the workspace root.", shellEnv, shellCWD), map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"command":     prop("string", shellEnv+" command."),
@@ -160,10 +160,10 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 		return append(schemas, subAgentSchemas()...)
 	}
 	schemas = append(schemas,
-		schema("shell_run_async", fmt.Sprintf("Start a background %s command in %q.", shellEnv, shellCWD), map[string]any{
+		schema("shell_run_async", fmt.Sprintf("Start a background %s command in %q(workspace).", shellEnv, shellCWD), map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"command": prop("string", shellEnv+" command. Commands run in the workplace root; check background commands with shell_async_status."),
+				"command": prop("string", shellEnv+" command. Commands run in the workspace root; check background commands with shell_async_status."),
 			},
 			"required": []string{"command"},
 		}),
@@ -201,8 +201,8 @@ func subAgentSchemas() []types.ToolSchema {
 		schema("sub_agent_start_async", "Start a background sub-agent for isolated work. Do not delegate shell coordination.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"agent":       prop("string", "Sub-agent name."),
-				"name":        prop("string", "Task name."),
+				"name":        prop("string", "Sub-agent config name."),
+				"task_name":   prop("string", "Task name."),
 				"instruction": prop("string", "Instructions."),
 			},
 			"required": []string{"instruction"},
@@ -234,54 +234,54 @@ func subAgentSchemas() []types.ToolSchema {
 }
 
 func (e *Executor) Run(ctx context.Context, sess *session.Session, name string, args map[string]any) (string, error) {
-	if e.basicOnly && name != "file_read" && name != "view_dir" && name != "search_grep" && name != "read_skill" && name != "file_edit" && name != "view_history" {
+	if e.basicOnly && name != "file_read" && name != "dir_view" && name != "grep_search" && name != "skill_read" && name != "file_edit" && name != "view_history" {
 		return "", fmt.Errorf("tool %q is not available to basic-only agents", name)
 	}
 	switch name {
-	case "file_read", "read_file":
+	case "file_read":
 		return e.readFile(args)
-	case "view_dir":
+	case "dir_view":
 		return e.viewDir(args)
-	case "search_grep":
+	case "grep_search":
 		return e.searchGrep(args)
-	case "read_skill":
+	case "skill_read":
 		return e.readSkill(args)
-	case "file_edit", "edit_file":
+	case "file_edit":
 		return e.fileEdit(sess, args)
 	case "view_history":
 		return e.viewHistory(sess, args)
 	case "shell_run_sync":
-		return e.shells.RunBlocking(ctx, stringArgR(args, "command"), intArgR(args, "timeout_sec", 60))
+		return e.shells.RunBlocking(ctx, stringArg(args, "command"), intArg(args, "timeout_sec", 60))
 	case "shell_run_async":
 		if !e.allowParallelShell {
 			return "", fmt.Errorf("shell_run_async is not available unless parallel shell is enabled")
 		}
-		return e.shells.StartAsync(stringArgR(args, "command"), e.allowInteractiveShell)
+		return e.shells.StartAsync(stringArg(args, "command"), e.allowInteractiveShell)
 	case "shell_async_status":
 		if !e.allowParallelShell {
 			return "", fmt.Errorf("shell_async_status is not available unless parallel shell is enabled")
 		}
-		return e.shells.Status(stringArgR(args, "shell_id")), nil
+		return e.shells.Status(stringArg(args, "shell_id")), nil
 	case "shell_async_kill":
 		if !e.allowParallelShell {
 			return "", fmt.Errorf("shell_async_kill is not available unless parallel shell is enabled")
 		}
-		return e.shells.Kill(stringArgR(args, "shell_id"))
+		return e.shells.Kill(stringArg(args, "shell_id"))
 	case "shell_async_stdin":
 		if !e.allowInteractiveShell {
 			return "", fmt.Errorf("shell_async_stdin is not available unless interactive shell is enabled")
 		}
-		return e.shells.Write(stringArgR(args, "shell_id"), stringArgR(args, "input"))
+		return e.shells.Write(stringArg(args, "shell_id"), stringArg(args, "input"))
 	case "sub_agent_list":
 		return e.subAgents.List(e.paths), nil
 	case "sub_agent_start_async":
-		return e.subAgents.Start(sess, e.store, stringArgR(args, "agent"), stringArgR(args, "name"), stringArgR(args, "instruction")), nil
+		return e.subAgents.Start(sess, e.store, stringArg(args, "name"), stringArg(args, "task_name"), stringArg(args, "instruction")), nil
 	case "sub_agent_check":
-		return e.subAgents.Check(stringArgR(args, "sub_agent_id")), nil
+		return e.subAgents.Check(stringArg(args, "sub_agent_id")), nil
 	case "sub_agent_wait_check":
-		return e.subAgents.WaitCheck(ctx, stringArgR(args, "sub_agent_id"), intArgR(args, "wait_seconds", 0))
+		return e.subAgents.WaitCheck(ctx, stringArg(args, "sub_agent_id"), intArg(args, "wait_seconds", 0))
 	case "sub_agent_resume_async":
-		return e.subAgents.ResumeAsync(stringArgR(args, "sub_agent_id"), stringArgR(args, "instruction")), nil
+		return e.subAgents.ResumeAsync(stringArg(args, "sub_agent_id"), stringArg(args, "instruction")), nil
 	default:
 		return "", fmt.Errorf("unknown tool %q", name)
 	}
@@ -347,7 +347,7 @@ func isRiskyFile(name string) bool {
 }
 
 func (e *Executor) readFile(args map[string]any) (string, error) {
-	path, err := e.resolveWorkplacePath(stringArg(args, "relative_path"))
+	path, err := e.resolveWorkspaceRootPath(stringArg(args, "path"))
 	if err != nil {
 		return "", err
 	}
@@ -382,11 +382,11 @@ func (e *Executor) readFile(args map[string]any) (string, error) {
 }
 
 func (e *Executor) viewDir(args map[string]any) (string, error) {
-	rel := stringArg(args, "relative_path")
-	if rel == "" {
-		rel = "."
+	inputPath := stringArg(args, "path")
+	if inputPath == "" {
+		inputPath = "."
 	}
-	path, err := e.resolveWorkplacePath(rel)
+	path, err := e.resolveWorkspaceRootPath(inputPath)
 	if err != nil {
 		return "", err
 	}
@@ -421,11 +421,11 @@ func (e *Executor) searchGrep(args map[string]any) (string, error) {
 		return "", err
 	}
 	matches := []string{}
-	err = filepath.WalkDir(e.paths.Workplace, func(path string, d os.DirEntry, err error) error {
+	err = filepath.WalkDir(e.paths.WorkspaceRoot, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
-		rel, _ := filepath.Rel(e.paths.Workplace, path)
+		rel, _ := filepath.Rel(e.paths.WorkspaceRoot, path)
 		if strings.HasPrefix(rel, ".Asayn"+string(filepath.Separator)) || rel == ".Asayn" {
 			return nil
 		}
@@ -541,27 +541,46 @@ func grepTextFile(path, rel string, re *regexp.Regexp, remaining int) ([]string,
 	return matches, nil
 }
 
-func (e *Executor) resolveWorkplacePath(rel string) (string, error) {
-	if rel == "" {
-		return "", fmt.Errorf("relative_path is required")
+func (e *Executor) resolveWorkspaceRootPath(path string) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("path is required")
 	}
-	clean := filepath.Clean(rel)
-	if filepath.IsAbs(clean) {
-		return "", fmt.Errorf("only relative paths are supported")
+	clean := filepath.Clean(path)
+	candidate := clean
+	if !filepath.IsAbs(candidate) {
+		candidate = filepath.Join(e.paths.WorkspaceRoot, clean)
 	}
-	abs := filepath.Join(e.paths.Workplace, clean)
-	resolved, err := filepath.Abs(abs)
+	resolved, err := filepath.Abs(candidate)
 	if err != nil {
 		return "", err
 	}
-	root, err := filepath.Abs(e.paths.Workplace)
+	root, err := filepath.Abs(e.paths.WorkspaceRoot)
 	if err != nil {
 		return "", err
 	}
 	if resolved != root && !strings.HasPrefix(resolved, root+string(filepath.Separator)) {
-		return "", fmt.Errorf("path escapes workplace")
+		return "", fmt.Errorf("path escapes workspace")
 	}
 	return resolved, nil
+}
+
+func (e *Executor) workspaceDisplayPath(path string) (string, error) {
+	resolved, err := e.resolveWorkspaceRootPath(path)
+	if err != nil {
+		return "", err
+	}
+	root, err := filepath.Abs(e.paths.WorkspaceRoot)
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(root, resolved)
+	if err != nil {
+		return "", err
+	}
+	if rel == "." {
+		return ".", nil
+	}
+	return filepath.ToSlash(rel), nil
 }
 
 func schema(name, desc string, params map[string]any) types.ToolSchema {
@@ -658,122 +677,6 @@ func boolArg(args map[string]any, key string, def bool) bool {
 	}
 }
 
-// paramAliases maps canonical parameter names (shown in schemas/models) to
-// accepted aliases. Aliases are silently resolved at parse time to reduce
-// LLM transcription errors; the exposed API is unchanged.
-var paramAliases = map[string][]string{
-	"relative_path":     {"file_path", "path"},
-	"change_id":         {"id"},
-	"change_ids":        {"ids"},
-	"sub_agent_id":      {"agent_id", "id"},
-	"shell_id":          {"id"},
-	"query":             {"pattern", "regex"},
-	"case_sensitive":    {"case"},
-	"start_line":        {"from_line"},
-	"end_line":          {"to_line"},
-	"insert_after_line": {"after_line"},
-	"old_text":          {"old", "pattern"},
-	"new_text":          {"new", "replacement"},
-	"replace_all":       {"all"},
-	"force_binary":      {"binary", "force"},
-	"wait_seconds":      {"wait", "timeout"},
-	"timeout_sec":       {"timeout_seconds", "timeout"},
-	"instruction":       {"prompt", "instructions"},
-	"input":             {"stdin", "text"},
-	"command":           {"cmd"},
-}
-
-func resolveArg(args map[string]any, canonical string) any {
-	if v, ok := args[canonical]; ok && v != nil {
-		return v
-	}
-	for _, alias := range paramAliases[canonical] {
-		if v, ok := args[alias]; ok && v != nil {
-			return v
-		}
-	}
-	return nil
-}
-
-func stringArgR(args map[string]any, canonical string) string {
-	v := resolveArg(args, canonical)
-	if v == nil {
-		return ""
-	}
-	switch t := v.(type) {
-	case string:
-		return t
-	case json.Number:
-		return t.String()
-	default:
-		return fmt.Sprint(t)
-	}
-}
-
-func intArgR(args map[string]any, canonical string, def int) int {
-	v := resolveArg(args, canonical)
-	if v == nil {
-		return def
-	}
-	switch t := v.(type) {
-	case float64:
-		return int(t)
-	case int:
-		return t
-	case json.Number:
-		n, _ := strconv.Atoi(t.String())
-		return n
-	case string:
-		n, err := strconv.Atoi(t)
-		if err == nil {
-			return n
-		}
-	}
-	return def
-}
-
-func boolArgR(args map[string]any, canonical string, def bool) bool {
-	v := resolveArg(args, canonical)
-	if v == nil {
-		return def
-	}
-	switch t := v.(type) {
-	case bool:
-		return t
-	case string:
-		return t == "true"
-	default:
-		return def
-	}
-}
-
-func stringSliceArgR(args map[string]any, canonical string) []string {
-	v := resolveArg(args, canonical)
-	if v == nil {
-		return nil
-	}
-	switch t := v.(type) {
-	case []string:
-		return t
-	case []any:
-		out := []string{}
-		for _, item := range t {
-			if item == nil {
-				continue
-			}
-			out = append(out, fmt.Sprint(item))
-		}
-		return out
-	case string:
-		if t == "" {
-			return nil
-		}
-		return []string{t}
-	default:
-		return nil
-	}
-}
-
 func truncate(s string, limitLines int) string {
 	if limitLines <= 0 {
 		return s
@@ -793,7 +696,7 @@ func truncate(s string, limitLines int) string {
 
 	var out strings.Builder
 	out.WriteString(strings.Join(lines[:head], "\n"))
-	out.WriteString(fmt.Sprintf("\n\n--- [Output truncated: omitted lines %d to %d (total %d lines). Use search_grep/file_read for specific sections.] ---\n\n", truncStart, truncEnd, len(lines)))
+	out.WriteString(fmt.Sprintf("\n\n--- [Output truncated: omitted lines %d to %d (total %d lines). Use grep_search/file_read for specific sections.] ---\n\n", truncStart, truncEnd, len(lines)))
 	out.WriteString(strings.Join(lines[len(lines)-tail:], "\n"))
 	return out.String()
 }

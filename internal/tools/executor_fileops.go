@@ -33,7 +33,12 @@ func (e *Executor) fileEdit(sess *session.Session, args map[string]any) (string,
 		return e.rollback(sess, appendIDs(changeID, stringSliceArg(args, "change_ids")))
 	}
 
-	path, err := e.resolveWorkplacePath(stringArg(args, "relative_path"))
+	inputPath := stringArg(args, "path")
+	displayPath, err := e.workspaceDisplayPath(inputPath)
+	if err != nil {
+		return "", err
+	}
+	path, err := e.resolveWorkspaceRootPath(inputPath)
 	if err != nil {
 		return "", err
 	}
@@ -150,7 +155,7 @@ func (e *Executor) fileEdit(sess *session.Session, args map[string]any) (string,
 		return "", fmt.Errorf("unsupported file_edit mode %q; valid: write, delete_lines, insert, replace_lines, find_replace, rollback", mode)
 	}
 
-	diff := e.computeDiff(stringArg(args, "relative_path"), before, after, mode)
+	diff := e.computeDiff(displayPath, before, after, mode)
 
 	if mode == "delete_lines" && after == "" {
 		if err := os.Remove(path); err != nil {
@@ -169,7 +174,7 @@ func (e *Executor) fileEdit(sess *session.Session, args map[string]any) (string,
 	change := session.FileChange{
 		ID:            uuid.NewString(),
 		At:            time.Now(),
-		Path:          filepath.ToSlash(stringArg(args, "relative_path")),
+		Path:          displayPath,
 		Action:        action,
 		BeforeContent: before,
 		AfterContent:  after,
@@ -198,7 +203,15 @@ func (e *Executor) viewHistory(sess *session.Session, args map[string]any) (stri
 	if changeID != "" || len(changeIDs) > 0 {
 		return e.viewChanges(sess, changeID, changeIDs)
 	}
-	return e.listChanges(sess, stringArg(args, "relative_path"), intArg(args, "limit", 0))
+	pathFilter := stringArg(args, "path")
+	if pathFilter != "" {
+		displayPath, err := e.workspaceDisplayPath(pathFilter)
+		if err != nil {
+			return "", err
+		}
+		pathFilter = displayPath
+	}
+	return e.listChanges(sess, pathFilter, intArg(args, "limit", 0))
 }
 
 // computeDiff produces a focused diff with 2 lines of surrounding context.
@@ -368,7 +381,7 @@ func (e *Executor) rollback(sess *session.Session, changeIDs []string) (string, 
 	out := make([]string, 0, len(indexes))
 	for _, idx := range indexes {
 		ch := sess.Changes[idx]
-		path, err := e.resolveWorkplacePath(ch.Path)
+		path, err := e.resolveWorkspaceRootPath(ch.Path)
 		if err != nil {
 			return strings.Join(out, "\n"), err
 		}

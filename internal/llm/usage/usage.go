@@ -12,15 +12,15 @@ import (
 )
 
 type Record struct {
-	Timestamp       time.Time   `json:"timestamp"`
-	SessionID       string      `json:"session_id"`
-	SessionName     string      `json:"session_name"`
-	Model           string      `json:"model"`
-	PromptTokens    int         `json:"prompt_tokens"`
-	CompletionTokens int         `json:"completion_tokens"`
-	TotalTokens     int         `json:"total_tokens"`
-	CacheHitTokens  int         `json:"cache_hit_tokens"`
-	CacheMissTokens int         `json:"cache_miss_tokens"`
+	Timestamp        time.Time `json:"timestamp"`
+	SessionID        string    `json:"session_id"`
+	SessionName      string    `json:"session_name"`
+	Model            string    `json:"model"`
+	PromptTokens     int       `json:"prompt_tokens"`
+	CompletionTokens int       `json:"completion_tokens"`
+	TotalTokens      int       `json:"total_tokens"`
+	CacheHitTokens   int       `json:"cache_hit_tokens"`
+	CacheMissTokens  int       `json:"cache_miss_tokens"`
 }
 
 type Tracker struct {
@@ -37,15 +37,15 @@ func (t *Tracker) Log(sessionID, sessionName, model string, usage types.Usage) e
 	defer t.mu.Unlock()
 
 	record := Record{
-		Timestamp:       time.Now(),
-		SessionID:       sessionID,
-		SessionName:     sessionName,
-		Model:           model,
-		PromptTokens:    usage.PromptTokens,
+		Timestamp:        time.Now(),
+		SessionID:        sessionID,
+		SessionName:      sessionName,
+		Model:            model,
+		PromptTokens:     usage.PromptTokens,
 		CompletionTokens: usage.CompletionTokens,
-		TotalTokens:     usage.TotalTokens,
-		CacheHitTokens:  usage.PromptCacheHitTokens,
-		CacheMissTokens: usage.PromptCacheMissTokens,
+		TotalTokens:      usage.TotalTokens,
+		CacheHitTokens:   usage.PromptCacheHitTokens,
+		CacheMissTokens:  usage.PromptCacheMissTokens,
 	}
 
 	path := t.paths.HomePath("usage.jsonl")
@@ -64,11 +64,11 @@ func (t *Tracker) Log(sessionID, sessionName, model string, usage types.Usage) e
 }
 
 type Stats struct {
-	TotalInput     int64
-	TotalOutput    int64
-	TotalCacheHit  int64
-	SessionInput   int64
-	SessionOutput  int64
+	TotalInput      int64
+	TotalOutput     int64
+	TotalCacheHit   int64
+	SessionInput    int64
+	SessionOutput   int64
 	SessionCacheHit int64
 }
 

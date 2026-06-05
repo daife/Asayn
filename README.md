@@ -4,11 +4,11 @@ Asayn means **agent skills are all you need**. It is a Go + Bubble Tea TUI agent
 
 ## What This MVP Includes
 
-- Workplaces: running `asayn` in any directory treats that directory as the workplace.
+- Workspaces: running `asayn` in any directory treats that directory as the workspace.
 - Global config: `~/.Asayn/`.
-- Workplace config: `./.Asayn/`.
-- First-run setup: creates `.Asayn/` and `.Asayn/.sessions/`. If the workplace already has `.gitignore`, Asayn adds `.Asayn/` once; it does not run `git init` or create `.gitignore`.
-- Config precedence: workplace files win over global files (except `api_config.toml` which is global-only). Skills are visible from both `./.Asayn/skills` when that folder exists and `~/.Asayn/skills`; duplicate skill names prefer the workplace skill. Workspace setup does not copy global skills.
+- Workspace config: `./.Asayn/`.
+- First-run setup: creates `.Asayn/` and `.Asayn/.sessions/`. If the workspace already has `.gitignore`, Asayn adds `.Asayn/` once; it does not run `git init` or create `.gitignore`.
+- Config precedence: workspace files win over global files (except `api_config.toml` which is global-only). Skills are visible from both `./.Asayn/skills` when that folder exists and `~/.Asayn/skills`; duplicate skill names prefer the workspace skill. Workspace setup does not copy global skills.
 - OpenAI-compatible `/chat/completions` client with DeepSeek and SiliconFlow defaults.
 - Thinking mode support with `reasoning_effort` and `thinking.type`.
 - Session history and per-session file change chains.
@@ -44,7 +44,7 @@ default_Asayn/        # repository defaults embedded into the binary
     example-skill/
       SKILL.md
 
-<workplace>/.Asayn/
+<workspace>/.Asayn/
   root_agents/
   sub_agents/
   special_agents/
@@ -88,7 +88,7 @@ cd /path/to/your/project
 asayn
 ```
 
-The first run creates `~/.Asayn/` with global defaults and creates `<project>/.Asayn/` for the current workplace. `api_config.toml` is stored exclusively in `~/.Asayn/` and is never copied to or read from the project directory.
+The first run creates `~/.Asayn/` with global defaults and creates `<project>/.Asayn/` for the current workspace. `api_config.toml` is stored exclusively in `~/.Asayn/` and is never copied to or read from the project directory.
 
 ## Windows Installation
 
@@ -128,7 +128,7 @@ The first run writes `~/.Asayn/api_config.toml` (which resolves to `$env:USERPRO
 api_key = "your-api-key"
 ```
 
-The first run also creates `<project>\.Asayn\` for the current workplace. `api_config.toml` is stored exclusively in `~/.Asayn/` and is never copied to or read from the project directory.
+The first run also creates `<project>\.Asayn\` for the current workspace. `api_config.toml` is stored exclusively in `~/.Asayn/` and is never copied to or read from the project directory.
 
 > **Note:** Shell tools on Windows run commands through PowerShell. The terminal environment is included in tool descriptions so the model can choose the right command syntax.
 
@@ -241,7 +241,7 @@ Shell tools use the platform terminal environment: Windows runs commands through
 
 ## Sub-Agents
 
-Root agents can list, start, check, wait-check, and resume sub-agents through the fixed `sub_agent_*` tools. `sub_agent_list` lists configured `sub_agents/*.toml` names and descriptions. `sub_agent_start_async` accepts an `agent` name from that list; workplace configs override global configs. A sub-agent keeps its own session history and only sees the basic file, search, skill, and history tools; it cannot see `sub_agent_*` or shell tools.
+Root agents can list, start, check, wait-check, and resume sub-agents through the fixed `sub_agent_*` tools. `sub_agent_list` lists configured `sub_agents/*.toml` names and descriptions. `sub_agent_start_async` accepts a `name` from that list; workspace configs override global configs. A sub-agent keeps its own session history and only sees the basic file, search, skill, and history tools; it cannot see `sub_agent_*` or shell tools.
 
 ## Context Compression
 
@@ -253,10 +253,10 @@ Skills are directory-based packages. Asayn discovers only directories that conta
 
 ```text
 ~/.Asayn/skills/<skill-name>/SKILL.md
-<workplace>/.Asayn/skills/<skill-name>/SKILL.md
+<workspace>/.Asayn/skills/<skill-name>/SKILL.md
 ```
 
-`SKILL.md` must start with YAML frontmatter metadata, commonly `name` and `description`, followed by Markdown instructions. At startup and prompt refresh, Asayn exposes only each visible skill's folder and frontmatter metadata to the model; the full raw `SKILL.md` file is loaded only through the `read_skill` tool after the skill is enabled with `/model_config` or listed in the active agent config.
+`SKILL.md` must start with YAML frontmatter metadata, commonly `name` and `description`, followed by Markdown instructions. At startup and prompt refresh, Asayn exposes only each visible skill's folder and frontmatter metadata to the model; the full raw `SKILL.md` file is loaded only through the `skill_read` tool after the skill is enabled with `/model_config` or listed in the active agent config.
 
 ## File Edit Tool
 
@@ -264,35 +264,7 @@ Skills are directory-based packages. Asayn discovers only directories that conta
 
 - `mode="write"` creates or overwrites a file.
 - `mode="delete_lines"`, `mode="insert"`, and `mode="replace_lines"` edit by 1-based line numbers.
-- `mode="find_replace"` treats `old_text` as a `search_grep`-style regex and replaces it with `new_text`; use `replace_all=true` when multiple matches are intended.
+- `mode="find_replace"` treats `old_text` as a `grep_search`-style regex and replaces it with `new_text`; use `replace_all=true` when multiple matches are intended.
 - `mode="rollback"` restores one or more recorded changes and removes those change records from history.
 
 Use `view_history` to list recent change summaries or view the recorded diff for `change_id` / `change_ids`. Use `file_read` for file contents.
-
-## Tool Parameter Aliases
-
-Tool parameter names are resolved with tolerance for common LLM transcription errors. The model-facing schemas show only canonical parameter names (e.g. `relative_path`), but the executor also accepts aliases at parse time:
-
-| Canonical name      | Also accepted                  |
-|---------------------|--------------------------------|
-| `relative_path`     | `file_path`, `path`           |
-| `query`             | `pattern`, `regex`            |
-| `old_text`          | `old`, `pattern`              |
-| `new_text`          | `new`, `replacement`          |
-| `command`           | `cmd`                         |
-| `instruction`       | `prompt`, `instructions`      |
-| `sub_agent_id`      | `agent_id`, `id`              |
-| `shell_id`          | `id`                          |
-| `input`             | `stdin`, `text`               |
-| `force_binary`      | `binary`, `force`             |
-| `start_line`        | `from_line`                   |
-| `end_line`          | `to_line`                     |
-| `insert_after_line` | `after_line`                  |
-| `replace_all`       | `all`                         |
-| `case_sensitive`    | `case`                        |
-| `wait_seconds`      | `wait`, `timeout`             |
-| `timeout_sec`       | `timeout_seconds`, `timeout`  |
-| `change_id`         | `id`                          |
-| `change_ids`        | `ids`                         |
-
-Tool names also accept common variants: `read_file` maps to `file_read`, and `edit_file` maps to `file_edit`. These aliases are invisible to the model.

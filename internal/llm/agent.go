@@ -244,7 +244,7 @@ func prepareMessagesForAPI(messages []types.ChatMessage, thinkingEnabled bool) [
 		out[i] = msg
 		if msg.Role == "assistant" {
 			for _, call := range msg.ToolCalls {
-				if call.Function.Name != "read_skill" {
+				if call.Function.Name != "skill_read" {
 					continue
 				}
 				name := skillNameFromArgs(call.Function.Arguments)
@@ -255,7 +255,7 @@ func prepareMessagesForAPI(messages []types.ChatMessage, thinkingEnabled bool) [
 		}
 		if msg.Role == "tool" {
 			if name := readSkillCalls[msg.ToolCallID]; name != "" && i < latestUser {
-				out[i].Content = fmt.Sprintf("Skill %q content from a previous read_skill call is hidden. Use the read_skill tool again if you need to view it.", name)
+				out[i].Content = fmt.Sprintf("Skill %q content from a previous skill_read call is hidden. Use the skill_read tool again if you need to view it.", name)
 			}
 		}
 		if !thinkingEnabled && msg.Role == "assistant" && msg.ReasoningContent != "" {
@@ -325,7 +325,7 @@ func (a *Agent) systemPrompt(sess *session.Session) string {
 	if len(blocks) == 0 {
 		return prompt + "\n\nNo skills visible."
 	}
-	return prompt + "\n\nVisible skills (use read_skill before applying):\n" + strings.Join(blocks, "\n")
+	return prompt + "\n\nVisible skills (use skill_read before applying):\n" + strings.Join(blocks, "\n")
 }
 
 func formatSkillMetadata(metadata map[string]string) string {
@@ -345,7 +345,7 @@ func (a *Agent) runToolCall(parent context.Context, sess *session.Session, call 
 	if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {
 		return fmt.Sprintf("tool argument JSON error: %v", err)
 	}
-	if call.Function.Name == "read_skill" {
+	if call.Function.Name == "skill_read" {
 		args["_visible_skills"] = a.visibleSkillNames(sess)
 	}
 	if emit != nil {

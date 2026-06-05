@@ -20,9 +20,9 @@ const (
 )
 
 type Paths struct {
-	HomeDir      string
-	WorkspaceDir string
-	Workplace    string
+	HomeDir       string
+	WorkspaceDir  string
+	WorkspaceRoot string
 }
 
 type ProviderConfig struct {
@@ -85,9 +85,9 @@ func Bootstrap(cwd string) (Paths, error) {
 		return Paths{}, err
 	}
 	paths := Paths{
-		HomeDir:      filepath.Join(home, ".Asayn"),
-		WorkspaceDir: filepath.Join(abs, ".Asayn"),
-		Workplace:    abs,
+		HomeDir:       filepath.Join(home, ".Asayn"),
+		WorkspaceDir:  filepath.Join(abs, ".Asayn"),
+		WorkspaceRoot: abs,
 	}
 	if err := ensureHome(paths); err != nil {
 		return Paths{}, err
@@ -316,7 +316,7 @@ func ListAgentInfos(paths Paths, kind string) ([]AgentInfo, error) {
 		root, source string
 	}{
 		{paths.HomePath(kind), "home"},
-		{paths.WorkspacePath(kind), "workplace"},
+		{paths.WorkspacePath(kind), "workspace"},
 	} {
 		entries, err := os.ReadDir(base.root)
 		if errors.Is(err, os.ErrNotExist) {
@@ -355,7 +355,7 @@ func ListAgents(paths Paths, kind string) ([]string, error) {
 		root, source string
 	}{
 		{paths.HomePath(kind), "home"},
-		{paths.WorkspacePath(kind), "workplace"},
+		{paths.WorkspacePath(kind), "workspace"},
 	} {
 		entries, err := os.ReadDir(base.root)
 		if errors.Is(err, os.ErrNotExist) {
@@ -386,7 +386,7 @@ func ListSkills(paths Paths) ([]Skill, error) {
 		root, source string
 	}{
 		{paths.HomePath("skills"), "~/.Asayn/skills"},
-		{paths.WorkspacePath("skills"), "[workplace]/.Asayn/skills"},
+		{paths.WorkspacePath("skills"), "[workspace]/.Asayn/skills"},
 	} {
 		entries, err := os.ReadDir(base.root)
 		if errors.Is(err, os.ErrNotExist) {
@@ -532,11 +532,11 @@ func ensureWorkspace(paths Paths) error {
 			return err
 		}
 	}
-	return ensureGitIgnore(paths.Workplace)
+	return ensureGitIgnore(paths.WorkspaceRoot)
 }
 
-func ensureGitIgnore(workplace string) error {
-	path := filepath.Join(workplace, ".gitignore")
+func ensureGitIgnore(workspace string) error {
+	path := filepath.Join(workspace, ".gitignore")
 	b, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
