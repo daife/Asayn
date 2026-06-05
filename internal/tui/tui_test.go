@@ -10,7 +10,6 @@ import (
 	"github.com/asayn/asayn/internal/llm"
 	"github.com/asayn/asayn/internal/session"
 	"github.com/asayn/asayn/internal/tools"
-	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -127,16 +126,27 @@ func TestInputDisplayHeightExpandsUpToFourRows(t *testing.T) {
 }
 
 func TestInputPromptOnlyShowsOnFirstVisualLine(t *testing.T) {
-	input := textarea.New()
-	configureInputPrompt(&input)
-	input.ShowLineNumbers = false
+	input := newChatInput()
 	input.SetWidth(12)
-	input.SetHeight(3)
 	input.SetValue("12345678901234567890")
+	input.CursorEnd()
 
 	out := input.View()
 	if got := strings.Count(out, "›"); got != 1 {
 		t.Fatalf("wrapped input should render one prompt marker, got %d in %q", got, out)
+	}
+}
+
+func TestInputShowsPlaceholderWhenEmpty(t *testing.T) {
+	input := newChatInput()
+	input.SetWidth(40)
+
+	out := input.View()
+	if !strings.Contains(out, "message or /help") {
+		t.Fatalf("empty input should show placeholder: %q", out)
+	}
+	if got := strings.Count(out, "›"); got != 1 {
+		t.Fatalf("empty input should render one prompt marker, got %d in %q", got, out)
 	}
 }
 
@@ -148,11 +158,33 @@ func TestInputWrapKeepsFirstLineVisibleOnInitialExpansion(t *testing.T) {
 		t.Fatalf("input should expand to two rows, got %d", got)
 	}
 	out := m.input.View()
-	if !strings.Contains(out, "› 1234567890") {
-		t.Fatalf("wrapped input should keep the first visual line visible: %q", out)
+	lines := strings.Split(out, "\n")
+	if len(lines) != 2 {
+		t.Fatalf("wrapped input should render two visual lines: %q", out)
+	}
+	if strings.Contains(lines[0], "›") {
+		t.Fatalf("wrapped continuation line should not render a prompt marker: %q", out)
+	}
+	if !strings.Contains(lines[1], "› 1") {
+		t.Fatalf("cursor line should stay at the bottom with the newest input: %q", out)
 	}
 	if got := strings.Count(out, "›"); got != 1 {
 		t.Fatalf("wrapped input should render one prompt marker, got %d in %q", got, out)
+	}
+}
+
+func TestInputWrapBoundaryKeepsCursorLineAtBottom(t *testing.T) {
+	m := testInputModel(12)
+	m = typeIntoInput(t, m, "12345678901")
+	m.input.field.SetCursor(10)
+
+	out := m.input.View()
+	lines := strings.Split(out, "\n")
+	if len(lines) != 2 {
+		t.Fatalf("wrapped input should render two visual lines: %q", out)
+	}
+	if !strings.Contains(lines[1], "›") {
+		t.Fatalf("cursor at wrap boundary should stay on the lower line: %q", out)
 	}
 }
 
@@ -178,12 +210,7 @@ func TestInputBackspaceShrinksWrappedRows(t *testing.T) {
 }
 
 func testInputModel(width int) model {
-	input := textarea.New()
-	input.Focus()
-	configureInputPrompt(&input)
-	input.ShowLineNumbers = false
-	input.MaxHeight = 4
-	input.SetHeight(1)
+	input := newChatInput()
 	m := model{
 		input: input,
 		log:   viewport.New(width, 20),

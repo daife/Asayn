@@ -20,7 +20,6 @@ import (
 	"github.com/asayn/asayn/internal/llm/usage"
 	"github.com/asayn/asayn/internal/session"
 	"github.com/asayn/asayn/internal/tools"
-	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
@@ -30,7 +29,7 @@ import (
 type model struct {
 	ctx                       *app.Context
 	session                   *session.Session
-	input                     textarea.Model
+	input                     chatInput
 	log                       viewport.Model
 	renderer                  *glamour.TermRenderer
 	content                   string
@@ -194,14 +193,7 @@ func Run(ctx *app.Context) error {
 	if err != nil {
 		return err
 	}
-	input := textarea.New()
-	input.Placeholder = "message or /help"
-	input.Focus()
-	input.CharLimit = 8000
-	configureInputPrompt(&input)
-	input.ShowLineNumbers = false
-	input.MaxHeight = 4
-	input.SetHeight(1)
+	input := newChatInput()
 	vp := viewport.New(80, 20)
 	content := ""
 	vp.SetContent(content)
@@ -242,12 +234,6 @@ func (m *model) syncInputSize() {
 		width = 80
 	}
 	m.input.SetWidth(width)
-	nextHeight := inputDisplayHeight(m.input.Value(), width-lipgloss.Width(inputPrompt))
-	heightChanged := m.input.Height() != nextHeight
-	m.input.SetHeight(nextHeight)
-	if heightChanged {
-		m.resetInputViewport()
-	}
 
 	if m.height > 0 {
 		m.log.Height = m.height - m.input.Height() - 6
@@ -255,22 +241,6 @@ func (m *model) syncInputSize() {
 			m.log.Height = 3
 		}
 	}
-}
-
-func (m *model) resetInputViewport() {
-	value := m.input.Value()
-	m.input.SetValue(value)
-	m.input.CursorEnd()
-}
-
-func configureInputPrompt(input *textarea.Model) {
-	input.Prompt = ""
-	input.SetPromptFunc(lipgloss.Width(inputPrompt), func(lineIdx int) string {
-		if lineIdx == 0 {
-			return inputPrompt
-		}
-		return ""
-	})
 }
 
 func inputDisplayHeight(value string, contentWidth int) int {
@@ -299,7 +269,7 @@ func inputDisplayHeight(value string, contentWidth int) int {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(textarea.Blink, uiTick())
+	return tea.Batch(m.input.Blink(), uiTick())
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
