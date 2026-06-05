@@ -10,6 +10,7 @@ import (
 	"github.com/asayn/asayn/internal/llm"
 	"github.com/asayn/asayn/internal/session"
 	"github.com/asayn/asayn/internal/tools"
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 )
 
@@ -121,6 +122,20 @@ func TestInputDisplayHeightExpandsUpToFourRows(t *testing.T) {
 	}
 	if got := inputDisplayHeight(strings.Repeat("x", 200), 10); got != 4 {
 		t.Fatalf("input height should cap at four rows, got %d", got)
+	}
+}
+
+func TestInputPromptOnlyShowsOnFirstVisualLine(t *testing.T) {
+	input := textarea.New()
+	configureInputPrompt(&input)
+	input.ShowLineNumbers = false
+	input.SetWidth(12)
+	input.SetHeight(3)
+	input.SetValue("12345678901234567890")
+
+	out := input.View()
+	if got := strings.Count(out, "›"); got != 1 {
+		t.Fatalf("wrapped input should render one prompt marker, got %d in %q", got, out)
 	}
 }
 

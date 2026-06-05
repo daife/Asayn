@@ -187,6 +187,8 @@ var (
 	sectionStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true)
 )
 
+const inputPrompt = "› "
+
 func Run(ctx *app.Context) error {
 	sess, err := ctx.Sessions.New("", ctx.Root.Name)
 	if err != nil {
@@ -196,7 +198,7 @@ func Run(ctx *app.Context) error {
 	input.Placeholder = "message or /help"
 	input.Focus()
 	input.CharLimit = 8000
-	input.Prompt = "› "
+	configureInputPrompt(&input)
 	input.ShowLineNumbers = false
 	input.MaxHeight = 4
 	input.SetHeight(1)
@@ -240,7 +242,7 @@ func (m *model) syncInputSize() {
 		width = 80
 	}
 	m.input.SetWidth(width)
-	m.input.SetHeight(inputDisplayHeight(m.input.Value(), width-lipgloss.Width(m.input.Prompt)))
+	m.input.SetHeight(inputDisplayHeight(m.input.Value(), width-lipgloss.Width(inputPrompt)))
 
 	if m.height > 0 {
 		m.log.Height = m.height - m.input.Height() - 6
@@ -248,6 +250,16 @@ func (m *model) syncInputSize() {
 			m.log.Height = 3
 		}
 	}
+}
+
+func configureInputPrompt(input *textarea.Model) {
+	input.Prompt = ""
+	input.SetPromptFunc(lipgloss.Width(inputPrompt), func(lineIdx int) string {
+		if lineIdx == 0 {
+			return inputPrompt
+		}
+		return ""
+	})
 }
 
 func inputDisplayHeight(value string, contentWidth int) int {
