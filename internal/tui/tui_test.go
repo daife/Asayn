@@ -12,6 +12,7 @@ import (
 	"github.com/asayn/asayn/internal/tools"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestCommandSuggestionsForFuzzyMatch(t *testing.T) {
@@ -137,6 +138,67 @@ func TestInputPromptOnlyShowsOnFirstVisualLine(t *testing.T) {
 	if got := strings.Count(out, "›"); got != 1 {
 		t.Fatalf("wrapped input should render one prompt marker, got %d in %q", got, out)
 	}
+}
+
+func TestInputWrapKeepsFirstLineVisibleOnInitialExpansion(t *testing.T) {
+	m := testInputModel(12)
+	m = typeIntoInput(t, m, "12345678901")
+
+	if got := m.input.Height(); got != 2 {
+		t.Fatalf("input should expand to two rows, got %d", got)
+	}
+	out := m.input.View()
+	if !strings.Contains(out, "› 1234567890") {
+		t.Fatalf("wrapped input should keep the first visual line visible: %q", out)
+	}
+	if got := strings.Count(out, "›"); got != 1 {
+		t.Fatalf("wrapped input should render one prompt marker, got %d in %q", got, out)
+	}
+}
+
+func TestInputBackspaceShrinksWrappedRows(t *testing.T) {
+	m := testInputModel(12)
+	m = typeIntoInput(t, m, "123456789012345678901")
+	if got := m.input.Height(); got != 3 {
+		t.Fatalf("input should start at three rows, got %d", got)
+	}
+
+	for range 11 {
+		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+		m = next.(model)
+	}
+
+	if got := m.input.Height(); got != 1 {
+		t.Fatalf("input should shrink back to one row, got %d", got)
+	}
+	out := m.input.View()
+	if !strings.Contains(out, "› 1234567890") {
+		t.Fatalf("shrunk input should show remaining leading content: %q", out)
+	}
+}
+
+func testInputModel(width int) model {
+	input := textarea.New()
+	input.Focus()
+	configureInputPrompt(&input)
+	input.ShowLineNumbers = false
+	input.MaxHeight = 4
+	input.SetHeight(1)
+	m := model{
+		input: input,
+		log:   viewport.New(width, 20),
+	}
+	m.syncInputSize()
+	return m
+}
+
+func typeIntoInput(t *testing.T, m model, value string) model {
+	t.Helper()
+	for _, r := range value {
+		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = next.(model)
+	}
+	return m
 }
 
 func TestSubAgentFailureReasonIsRendered(t *testing.T) {

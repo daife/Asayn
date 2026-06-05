@@ -242,7 +242,12 @@ func (m *model) syncInputSize() {
 		width = 80
 	}
 	m.input.SetWidth(width)
-	m.input.SetHeight(inputDisplayHeight(m.input.Value(), width-lipgloss.Width(inputPrompt)))
+	nextHeight := inputDisplayHeight(m.input.Value(), width-lipgloss.Width(inputPrompt))
+	heightChanged := m.input.Height() != nextHeight
+	m.input.SetHeight(nextHeight)
+	if heightChanged {
+		m.resetInputViewport()
+	}
 
 	if m.height > 0 {
 		m.log.Height = m.height - m.input.Height() - 6
@@ -250,6 +255,12 @@ func (m *model) syncInputSize() {
 			m.log.Height = 3
 		}
 	}
+}
+
+func (m *model) resetInputViewport() {
+	value := m.input.Value()
+	m.input.SetValue(value)
+	m.input.CursorEnd()
 }
 
 func configureInputPrompt(input *textarea.Model) {
