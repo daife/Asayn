@@ -216,6 +216,8 @@ description = "General-purpose agent."
 system_prompt = "You are a highly competent agent."
 visible_skills = []
 max_output_lines = 2000
+auto_compact_threshold_percent = 80
+real_time_context_control = false
 thinking_enabled = false
 reasoning_effort = "max"
 allow_parallel_shell = false
@@ -234,7 +236,7 @@ Shell tools use the platform terminal environment: Windows runs commands through
 - `/fork [name]`
 - `/copy_answer` copies the latest assistant answer and writes Markdown/HTML preview files under `.Asayn/`.
 - `/root_agent [name]` (alias: `/model`)
-- `/model_config` opens the interactive model, thinking, shell, and skill picker for root, sub, and special agents.
+- `/model_config` opens the interactive model, thinking, shell, context-control, and skill picker for root, sub, and special agents.
 - `/compact`
 - `/btw <question>` reserved
 - `/exit`
@@ -245,7 +247,11 @@ Root agents can list, start, check, wait-check, and resume sub-agents through th
 
 ## Context Compression
 
-`/compact` runs `special_agents/compact_agent.toml` to summarize the current effective conversation into a compact continuation state. The compact agent receives detailed compression instructions as that temporary user turn, but the retained conversation replaces that long prompt with `Recall what we worked on before.` so later root-agent calls are not polluted by compression instructions. The visible transcript remains in the TUI, but subsequent model calls only send the root system prompt plus the new compact summary round and newer messages. Repeated compression only summarizes the current effective context; history hidden by an earlier compression is not sent to `compact_agent` again. Asayn also starts compression automatically when the latest context-window usage reaches 80%; if an agent turn is still running, it is canceled first and the compact agent summarizes the partial chain that had already been recorded. Compression token usage is logged against the same session. Special agents appear in `/model_config`; they use the same basic tool exposure as sub-agents and only see skills selected for that special agent.
+`/compact` runs `special_agents/compact_agent.toml` to summarize the current effective conversation into a compact continuation state. The compact agent receives detailed compression instructions as that temporary user turn, but the retained conversation replaces that long prompt with `Recall what we worked on before.` so later root-agent calls are not polluted by compression instructions. The visible transcript remains in the TUI, but subsequent model calls only send the root system prompt plus the new compact summary round and newer messages. Repeated compression only summarizes the current effective context; history hidden by an earlier compression is not sent to `compact_agent` again. Asayn also starts compression automatically when the latest context-window usage reaches the root agent's `auto_compact_threshold_percent` setting, which defaults to 80%; if an agent turn is still running, it is canceled first and the compact agent summarizes the partial chain that had already been recorded. Compression token usage is logged against the same session. Special agents appear in `/model_config`; they use the same basic tool exposure as sub-agents and only see skills selected for that special agent.
+
+When thinking mode is enabled, prior assistant `reasoning_content` is sent back only for assistant turns that made tool calls. Reasoning from prior no-tool turns is kept in the local transcript but omitted from later API requests.
+
+The root agent's real-time context control beta can be toggled in `/model_config`. It is disabled by default because it may significantly reduce cache hit rates. When enabled, older tool results are hidden during API request assembly: while turn 4 is running, tool results from turn 1 are replaced with `A long time has passed; hidden.`, keeping only the two most recent completed turns' tool results.
 
 ## Skills
 

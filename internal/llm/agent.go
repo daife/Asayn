@@ -106,7 +106,7 @@ func (a *Agent) askWithEvents(ctx context.Context, sess *session.Session, prompt
 			emit(AgentEvent{Kind: "thinking_start"})
 		}
 		contentStreamed := false
-		msg, usage, err := a.client.ChatStream(ctx, a.root.Model, messagesForAPI(sess, a.root.ThinkingEnabled), toolSchemas, a.root.ThinkingEnabled, a.root.ReasoningEffort, func(delta StreamDelta) {
+		msg, usage, err := a.client.ChatStream(ctx, a.root.Model, messagesForAPI(sess, a.root.ThinkingEnabled, a.root.RealTimeContextControl), toolSchemas, a.root.ThinkingEnabled, a.root.ReasoningEffort, func(delta StreamDelta) {
 			if emit == nil {
 				return
 			}
@@ -213,11 +213,11 @@ func hasAssistantTextProgress(msg types.ChatMessage) bool {
 	return strings.TrimSpace(msg.Content) != "" || strings.TrimSpace(msg.ReasoningContent) != ""
 }
 
-func messagesForAPI(sess *session.Session, thinkingEnabled bool) []types.ChatMessage {
+func messagesForAPI(sess *session.Session, thinkingEnabled, realTimeContextControl bool) []types.ChatMessage {
 	if sess == nil {
 		return nil
 	}
-	return prepareMessagesForAPI(activeMessagesForAPI(sess), thinkingEnabled)
+	return prepareMessagesForAPI(activeMessagesForAPI(sess), thinkingEnabled, realTimeContextControl)
 }
 
 func activeMessagesForAPI(sess *session.Session) []types.ChatMessage {
@@ -236,12 +236,17 @@ func activeMessagesForAPI(sess *session.Session) []types.ChatMessage {
 	return out
 }
 
-func prepareMessagesForAPI(messages []types.ChatMessage, thinkingEnabled bool) []types.ChatMessage {
+func prepareMessagesForAPI(messages []types.ChatMessage, thinkingEnabled, realTimeContextControl bool) []types.ChatMessage {
 	out := make([]types.ChatMessage, len(messages))
 	readSkillCalls := map[string]string{}
 	latestUser := latestUserMessageIndex(messages)
+	latestTurn := latestUserTurn(messages)
+	currentTurn := 0
 	for i, msg := range messages {
 		out[i] = msg
+		if msg.Role == "user" {
+			currentTurn++
+		}
 		if msg.Role == "assistant" {
 			for _, call := range msg.ToolCalls {
 				if call.Function.Name != "skill_read" {
@@ -257,8 +262,11 @@ func prepareMessagesForAPI(messages []types.ChatMessage, thinkingEnabled bool) [
 			if name := readSkillCalls[msg.ToolCallID]; name != "" && i < latestUser {
 				out[i].Content = fmt.Sprintf("Skill %q content from a previous skill_read call is hidden. Use the skill_read tool again if you need to view it.", name)
 			}
+			if realTimeContextControl && currentTurn > 0 && latestTurn-currentTurn >= 3 {
+				out[i].Content = "A long time has passed; hidden."
+			}
 		}
-		if !thinkingEnabled && msg.Role == "assistant" && msg.ReasoningContent != "" {
+		if msg.Role == "assistant" && msg.ReasoningContent != "" && (!thinkingEnabled || len(msg.ToolCalls) == 0) {
 			out[i].ReasoningContent = ""
 		}
 	}
@@ -272,6 +280,16 @@ func latestUserMessageIndex(messages []types.ChatMessage) int {
 		}
 	}
 	return len(messages)
+}
+
+func latestUserTurn(messages []types.ChatMessage) int {
+	turn := 0
+	for _, msg := range messages {
+		if msg.Role == "user" {
+			turn++
+		}
+	}
+	return turn
 }
 
 func skillNameFromArgs(raw string) string {

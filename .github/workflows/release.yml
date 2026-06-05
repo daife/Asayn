@@ -43,8 +43,9 @@ jobs:
           name: Asayn ${{ github.ref_name }}
           body: |
             ## Changes
-            - Use minimal standard unified diffs for `file_edit`.
-            - Add macOS as a supported prebuilt target.
+            - Omit prior no-tool-turn `reasoning_content` from later API requests while preserving tool-turn reasoning.
+            - Add configurable auto-compaction threshold in `/model_config` with persisted values from 5% to 95%.
+            - Add real-time context control beta in `/model_config`; when enabled, older tool results are hidden to keep only the two most recent turns' tool results.
             - Publish prebuilt executable files directly instead of archives.
 
             ## Assets

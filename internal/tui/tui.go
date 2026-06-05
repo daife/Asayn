@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -60,6 +61,8 @@ type model struct {
 	modelConfigAgentKinds     []string
 	modelConfigOptionSelected int
 	modelConfigModels         []string
+	modelConfigEditingPercent bool
+	modelConfigPercentDraft   string
 	skillItems                []config.Skill
 	subViewID                 string
 	spinner                   int
@@ -963,7 +966,11 @@ func (m *model) shouldAutoCompact(totalTokens int) bool {
 	if m.activeRunKind != "agent" || m.pendingCompact || totalTokens <= 0 || m.ctx.Root.ContextWindow <= 0 {
 		return false
 	}
-	return totalTokens*100 >= m.ctx.Root.ContextWindow*80
+	threshold := m.ctx.Root.AutoCompactThresholdPercent
+	if threshold <= 0 {
+		threshold = 80
+	}
+	return totalTokens*100 >= m.ctx.Root.ContextWindow*threshold
 }
 
 func (m *model) replacePendingTool(replacement string) {
@@ -1431,6 +1438,8 @@ func (m model) startModelConfigPicker() (model, tea.Cmd) {
 
 	m.modelConfigPicker = true
 	m.modelConfigAgentSelected = 0
+	m.modelConfigEditingPercent = false
+	m.modelConfigPercentDraft = ""
 	for i, agent := range m.modelConfigAgents {
 		if m.modelConfigAgentKinds[i] == "root" && agent.Name == m.session.RootAgent {
 			m.modelConfigAgentSelected = i
@@ -1443,12 +1452,17 @@ func (m model) startModelConfigPicker() (model, tea.Cmd) {
 }
 
 func (m model) handleModelConfigPickerKey(msg tea.KeyMsg) (model, tea.Cmd, bool) {
+	if m.modelConfigEditingPercent {
+		return m.handleModelConfigPercentEditKey(msg)
+	}
 	switch msg.String() {
 	case "ctrl+c":
 		_ = m.cleanupEmptySession()
 		return m, tea.Quit, true
 	case "esc":
 		m.modelConfigPicker = false
+		m.modelConfigEditingPercent = false
+		m.modelConfigPercentDraft = ""
 		m.status = "ready"
 		return m, nil, true
 	case "left":
@@ -1471,20 +1485,53 @@ func (m model) handleModelConfigPickerKey(msg tea.KeyMsg) (model, tea.Cmd, bool)
 		return m, nil, true
 	case "up":
 		m.modelConfigOptionSelected--
-		maxOptions := 5 + len(m.skillItems)
+		maxOptions := 7 + len(m.skillItems)
 		if m.modelConfigOptionSelected < 0 {
 			m.modelConfigOptionSelected = maxOptions - 1
 		}
 		return m, nil, true
 	case "down":
 		m.modelConfigOptionSelected++
-		maxOptions := 5 + len(m.skillItems)
+		maxOptions := 7 + len(m.skillItems)
 		if m.modelConfigOptionSelected >= maxOptions {
 			m.modelConfigOptionSelected = 0
 		}
 		return m, nil, true
 	case " ", "enter":
 		return m.handleModelConfigAction(), nil, true
+	}
+	return m, nil, true
+}
+
+func (m model) handleModelConfigPercentEditKey(msg tea.KeyMsg) (model, tea.Cmd, bool) {
+	switch msg.String() {
+	case "ctrl+c":
+		_ = m.cleanupEmptySession()
+		return m, tea.Quit, true
+	case "esc":
+		m.modelConfigEditingPercent = false
+		m.modelConfigPercentDraft = ""
+		return m, nil, true
+	case "enter":
+		value, err := strconv.Atoi(strings.TrimSpace(m.modelConfigPercentDraft))
+		if err != nil || value < 5 || value > 95 {
+			m.setCommandOutput("auto compact threshold must be a number from 5 to 95")
+			m.modelConfigEditingPercent = false
+			m.modelConfigPercentDraft = ""
+			return m, nil, true
+		}
+		m.modelConfigEditingPercent = false
+		m.modelConfigPercentDraft = ""
+		return m.saveModelConfigThreshold(value), nil, true
+	case "backspace", "ctrl+h":
+		if len(m.modelConfigPercentDraft) > 0 {
+			m.modelConfigPercentDraft = m.modelConfigPercentDraft[:len(m.modelConfigPercentDraft)-1]
+		}
+		return m, nil, true
+	}
+	raw := msg.String()
+	if len(raw) == 1 && raw[0] >= '0' && raw[0] <= '9' && len(m.modelConfigPercentDraft) < 2 {
+		m.modelConfigPercentDraft += raw
 	}
 	return m, nil, true
 }
@@ -1497,6 +1544,19 @@ func (m model) handleModelConfigAction() model {
 		configKind = config.SubAgentKind
 	} else if kind == "special" {
 		configKind = config.SpecialAgentKind
+	}
+
+	if m.modelConfigOptionSelected == 5 {
+		if configKind == config.RootAgentKind {
+			cfg, err := config.LoadAgent(m.ctx.Paths, configKind, agentInfo.Name)
+			if err != nil {
+				m.setCommandOutput("error loading agent: " + err.Error())
+				return m
+			}
+			m.modelConfigEditingPercent = true
+			m.modelConfigPercentDraft = strconv.Itoa(cfg.AutoCompactThresholdPercent)
+		}
+		return m
 	}
 
 	update := func(cfg *config.AgentConfig) {
@@ -1547,8 +1607,12 @@ func (m model) handleModelConfigAction() model {
 					cfg.AllowParallelShell = true
 				}
 			}
+		case 6: // Real-time Context Control
+			if configKind == config.RootAgentKind {
+				cfg.RealTimeContextControl = !cfg.RealTimeContextControl
+			}
 		default: // Skills
-			skillIdx := m.modelConfigOptionSelected - 5
+			skillIdx := m.modelConfigOptionSelected - 7
 			if skillIdx >= 0 && skillIdx < len(m.skillItems) {
 				skillName := m.skillItems[skillIdx].Name
 				found := -1
@@ -1583,6 +1647,32 @@ func (m model) handleModelConfigAction() model {
 
 	return m
 }
+
+func (m model) saveModelConfigThreshold(value int) model {
+	if len(m.modelConfigAgents) == 0 {
+		return m
+	}
+	agentInfo := m.modelConfigAgents[m.modelConfigAgentSelected]
+	kind := m.modelConfigAgentKinds[m.modelConfigAgentSelected]
+	if kind != "root" {
+		return m
+	}
+	newCfg, err := config.SaveAgent(m.ctx.Paths, config.RootAgentKind, agentInfo.Name, func(cfg *config.AgentConfig) {
+		cfg.AutoCompactThresholdPercent = value
+	})
+	if err != nil {
+		m.setCommandOutput("error saving agent: " + err.Error())
+		return m
+	}
+	if newCfg.Name == m.session.RootAgent {
+		m.ctx.Root = newCfg
+		m.ctx.Tools.SetAgentLimits(newCfg.MaxOutputLines, newCfg.AllowParallelShell, newCfg.AllowInteractiveShell)
+		m.ctx.Agent = llm.NewAgent(m.ctx.API, newCfg, m.ctx.Paths, m.ctx.Tools)
+		m.ctx.Agent.RefreshSystemPrompt(m.session)
+	}
+	return m
+}
+
 func (m model) modelConfigPickerView() string {
 	if len(m.modelConfigAgents) == 0 {
 		return "\n no agents found"
@@ -1615,14 +1705,25 @@ func (m model) modelConfigPickerView() string {
 	}
 
 	if kind == "root" {
+		thresholdText := fmt.Sprintf("%d%%", cfg.AutoCompactThresholdPercent)
+		if m.modelConfigEditingPercent {
+			thresholdText = m.modelConfigPercentDraft
+			if thresholdText == "" {
+				thresholdText = "_"
+			}
+		}
 		options = append(options,
 			fmt.Sprintf("Parallel Shell: %s", checkbox(cfg.AllowParallelShell)),
 			fmt.Sprintf("Interactive Shell: %s", checkbox(cfg.AllowInteractiveShell)),
+			fmt.Sprintf("Auto Compact Threshold: %s", thresholdText),
+			fmt.Sprintf("Real-time Context Control (beta): %s %s", checkbox(cfg.RealTimeContextControl), mutedStyle.Render("may significantly reduce cache hit rates")),
 		)
 	} else {
 		options = append(options,
 			mutedStyle.Render("Parallel Shell: n/a"),
 			mutedStyle.Render("Interactive Shell: n/a"),
+			mutedStyle.Render("Auto Compact Threshold: n/a"),
+			mutedStyle.Render("Real-time Context Control (beta): n/a"),
 		)
 	}
 
@@ -1637,7 +1738,7 @@ func (m model) modelConfigPickerView() string {
 	rows = append(rows, "", "Skills:")
 	for i, skill := range m.skillItems {
 		marker := "  "
-		if i+5 == m.modelConfigOptionSelected {
+		if i+7 == m.modelConfigOptionSelected {
 			marker = "> "
 		}
 		checked := "[ ]"

@@ -43,19 +43,21 @@ type APIConfig struct {
 }
 
 type AgentConfig struct {
-	Name                  string   `toml:"name" json:"name"`
-	Provider              string   `toml:"provider" json:"provider"`
-	Model                 string   `toml:"model" json:"model"`
-	Description           string   `toml:"description" json:"description"`
-	SystemPrompt          string   `toml:"system_prompt" json:"system_prompt"`
-	VisibleSkills         []string `toml:"visible_skills" json:"visible_skills"`
-	MaxOutputLines        int      `toml:"max_output_lines" json:"max_output_lines"`
-	ContextWindow         int      `toml:"context_window" json:"context_window"`
-	MaxOutputTokens       int      `toml:"max_output_tokens" json:"max_output_tokens"`
-	AllowParallelShell    bool     `toml:"allow_parallel_shell" json:"allow_parallel_shell"`
-	AllowInteractiveShell bool     `toml:"allow_interactive_shell" json:"allow_interactive_shell"`
-	ThinkingEnabled       bool     `toml:"thinking_enabled" json:"thinking_enabled"`
-	ReasoningEffort       string   `toml:"reasoning_effort" json:"reasoning_effort"`
+	Name                        string   `toml:"name" json:"name"`
+	Provider                    string   `toml:"provider" json:"provider"`
+	Model                       string   `toml:"model" json:"model"`
+	Description                 string   `toml:"description" json:"description"`
+	SystemPrompt                string   `toml:"system_prompt" json:"system_prompt"`
+	VisibleSkills               []string `toml:"visible_skills" json:"visible_skills"`
+	MaxOutputLines              int      `toml:"max_output_lines" json:"max_output_lines"`
+	ContextWindow               int      `toml:"context_window" json:"context_window"`
+	MaxOutputTokens             int      `toml:"max_output_tokens" json:"max_output_tokens"`
+	AutoCompactThresholdPercent int      `toml:"auto_compact_threshold_percent" json:"auto_compact_threshold_percent"`
+	RealTimeContextControl      bool     `toml:"real_time_context_control" json:"real_time_context_control"`
+	AllowParallelShell          bool     `toml:"allow_parallel_shell" json:"allow_parallel_shell"`
+	AllowInteractiveShell       bool     `toml:"allow_interactive_shell" json:"allow_interactive_shell"`
+	ThinkingEnabled             bool     `toml:"thinking_enabled" json:"thinking_enabled"`
+	ReasoningEffort             string   `toml:"reasoning_effort" json:"reasoning_effort"`
 }
 
 type Skill struct {
@@ -217,6 +219,10 @@ func LoadAgent(paths Paths, kind, name string) (AgentConfig, error) {
 	if cfg.MaxOutputTokens <= 0 {
 		cfg.MaxOutputTokens = 384000
 	}
+	if cfg.AutoCompactThresholdPercent <= 0 {
+		cfg.AutoCompactThresholdPercent = 80
+	}
+	cfg.AutoCompactThresholdPercent = clampPercent(cfg.AutoCompactThresholdPercent)
 	cfg.NormalizeShellConfig()
 	cfg.NormalizeThinkingConfig()
 	return cfg, nil
@@ -241,6 +247,7 @@ func SaveAgent(paths Paths, kind, name string, update func(*AgentConfig)) (Agent
 		return cfg, err
 	}
 	update(&cfg)
+	cfg.AutoCompactThresholdPercent = clampPercent(cfg.AutoCompactThresholdPercent)
 	cfg.NormalizeShellConfig()
 	cfg.NormalizeThinkingConfig()
 	if cfg.Name == "" {
@@ -292,6 +299,16 @@ func normalizeReasoningEffort(effort string) string {
 	default:
 		return "high"
 	}
+}
+
+func clampPercent(value int) int {
+	if value < 5 {
+		return 5
+	}
+	if value > 95 {
+		return 95
+	}
+	return value
 }
 
 func uniqueSorted(items []string) []string {
@@ -602,17 +619,19 @@ func defaultAgentConfig(kind, name string) AgentConfig {
 		model = "deepseek-v4-flash"
 	}
 	return AgentConfig{
-		Name:            name,
-		Provider:        provider,
-		Model:           model,
-		Description:     defaultAgentDescription(kind, name),
-		SystemPrompt:    "You are a helpful assistant.",
-		VisibleSkills:   []string{},
-		MaxOutputLines:  2000,
-		ContextWindow:   1024000,
-		MaxOutputTokens: 384000,
-		ThinkingEnabled: false,
-		ReasoningEffort: "max",
+		Name:                        name,
+		Provider:                    provider,
+		Model:                       model,
+		Description:                 defaultAgentDescription(kind, name),
+		SystemPrompt:                "You are a helpful assistant.",
+		VisibleSkills:               []string{},
+		MaxOutputLines:              2000,
+		ContextWindow:               1024000,
+		MaxOutputTokens:             384000,
+		AutoCompactThresholdPercent: 80,
+		RealTimeContextControl:      false,
+		ThinkingEnabled:             false,
+		ReasoningEffort:             "max",
 	}
 }
 
