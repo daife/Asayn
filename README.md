@@ -9,10 +9,10 @@ Asayn means **agent skills are all you need**. It is a Go + Bubble Tea TUI agent
 - Workplace config: `./.Asayn/`.
 - First-run setup: creates `.Asayn/` and `.Asayn/.sessions/`. If the workplace already has `.gitignore`, Asayn adds `.Asayn/` once; it does not run `git init` or create `.gitignore`.
 - Config precedence: workplace files win over global files (except `api_config.toml` which is global-only). Skills are visible from both `./.Asayn/skills` when that folder exists and `~/.Asayn/skills`; duplicate skill names prefer the workplace skill. Workspace setup does not copy global skills.
-- DeepSeek chat client using the OpenAI-compatible `/chat/completions` format.
+- OpenAI-compatible `/chat/completions` client with DeepSeek and SiliconFlow defaults.
 - Thinking mode support with `reasoning_effort` and `thinking.type`.
 - Session history and per-session file change chains.
-- Bubble Tea TUI with slash commands.
+- Bubble Tea TUI with slash commands and a chat input that soft-wraps upward to four rows.
 - Built-in tool schemas only: file reading, grep, directory view, diff-based file changes, shell execution, and sub-agent delegation.
 - Right sidebar sub-agent status; click a sub-agent row to print its current transcript/status.
 
@@ -74,10 +74,11 @@ Make sure `~/.local/bin` is on your `PATH`:
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Configure your API key before first use:
+The first run writes `~/.Asayn/api_config.toml`. Before sending your first model request, edit the provider entry there, or edit the embedded default before building your own binary:
 
-```bash
-export DEEPSEEK_API_KEY="your-api-key"
+```toml
+[providers.DeepSeek]
+api_key = "your-api-key"
 ```
 
 Then run `asayn` from any project directory:
@@ -189,8 +190,9 @@ Shell tools use the platform terminal environment: Windows runs commands through
 - `/retry` retries the last saved user request, useful after an idle timeout.
 - `/rename [name]`
 - `/fork [name]`
+- `/copy_answer` copies the latest assistant answer and writes Markdown/HTML preview files under `.Asayn/`.
 - `/root_agent [name]` (alias: `/model`)
-- `/model_config`
+- `/model_config` opens the interactive model, thinking, shell, and skill picker for root, sub, and special agents.
 - `/compact`
 - `/btw <question>` reserved
 - `/exit`

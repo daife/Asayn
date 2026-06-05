@@ -2727,9 +2727,7 @@ Commands:
 /fork [name]          fork from the current point
 /copy_answer          copy latest Asayn answer and write preview files
 /root_agent [name]    pick or set root agent
-/skills               pick per-agent visible skills with left/right + space
-/shell_config         pick root-agent shell tool mode with left/right + space
-/think_config         pick per-agent thinking mode/effort with left/right + space
+/model_config         pick model, thinking, shell, and skills with left/right + space
 /compact              compress prior context with compact_agent
 /btw <question>       reserved for future side-channel question
 /exit                 exit CLI
@@ -2737,8 +2735,8 @@ Commands:
 Input:
 type / then use up/down to select commands; tab completes
 with no command suggestions, up/down recalls previous inputs
-/resume, /root_agent, and /skills open interactive pickers
-/skills uses left/right to switch targets such as default(root) and default(sub)
+/resume, /root_agent, and /model_config open interactive pickers
+/model_config uses left/right to switch targets such as default(root) and default(sub)
 while Asayn is working, enter queues the typed message
 while Asayn is working, esc cancels the last queued message, or interrupts the current turn if the queue is empty
 `
