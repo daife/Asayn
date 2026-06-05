@@ -268,3 +268,31 @@ Skills are directory-based packages. Asayn discovers only directories that conta
 - `mode="rollback"` restores one or more recorded changes and removes those change records from history.
 
 Use `view_history` to list recent change summaries or view the recorded diff for `change_id` / `change_ids`. Use `file_read` for file contents.
+
+## Tool Parameter Aliases
+
+Tool parameter names are resolved with tolerance for common LLM transcription errors. The model-facing schemas show only canonical parameter names (e.g. `relative_path`), but the executor also accepts aliases at parse time:
+
+| Canonical name      | Also accepted                  |
+|---------------------|--------------------------------|
+| `relative_path`     | `file_path`, `path`           |
+| `query`             | `pattern`, `regex`            |
+| `old_text`          | `old`, `pattern`              |
+| `new_text`          | `new`, `replacement`          |
+| `command`           | `cmd`                         |
+| `instruction`       | `prompt`, `instructions`      |
+| `sub_agent_id`      | `agent_id`, `id`              |
+| `shell_id`          | `id`                          |
+| `input`             | `stdin`, `text`               |
+| `force_binary`      | `binary`, `force`             |
+| `start_line`        | `from_line`                   |
+| `end_line`          | `to_line`                     |
+| `insert_after_line` | `after_line`                  |
+| `replace_all`       | `all`                         |
+| `case_sensitive`    | `case`                        |
+| `wait_seconds`      | `wait`, `timeout`             |
+| `timeout_sec`       | `timeout_seconds`, `timeout`  |
+| `change_id`         | `id`                          |
+| `change_ids`        | `ids`                         |
+
+Tool names also accept common variants: `read_file` maps to `file_read`, and `edit_file` maps to `file_edit`. These aliases are invisible to the model.
