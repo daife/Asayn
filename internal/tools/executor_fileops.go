@@ -214,94 +214,260 @@ func (e *Executor) viewHistory(sess *session.Session, args map[string]any) (stri
 	return e.listChanges(sess, pathFilter, intArg(args, "limit", 0))
 }
 
-// computeDiff produces a focused diff with 2 lines of surrounding context.
+type diffOp struct {
+	kind     byte
+	text     string
+	oldIndex int
+	newIndex int
+}
+
+// computeDiff produces a standard unified diff with focused hunks.
 func (e *Executor) computeDiff(relPath, before, after, mode string) string {
-	beforeLines := strings.Split(before, "\n")
-	afterLines := strings.Split(after, "\n")
-
-	if before == "" {
-		var b strings.Builder
-		b.WriteString(fmt.Sprintf("--- /dev/null\n+++ b/%s\n@@ -0,0 +1,%d @@\n", filepath.ToSlash(relPath), len(afterLines)))
-		for _, l := range afterLines {
-			b.WriteString("+" + l + "\n")
-		}
-		return b.String()
-	}
-
-	firstDiff := -1
-	lastDiff := -1
-	maxLen := len(beforeLines)
-	if len(afterLines) > maxLen {
-		maxLen = len(afterLines)
-	}
-	for i := 0; i < maxLen; i++ {
-		var bl, al string
-		if i < len(beforeLines) {
-			bl = beforeLines[i]
-		}
-		if i < len(afterLines) {
-			al = afterLines[i]
-		}
-		if bl != al {
-			if firstDiff < 0 {
-				firstDiff = i
-			}
-			lastDiff = i
-		}
-	}
-	if firstDiff < 0 {
+	beforeLines, beforeNoNewline := splitDiffLines(before)
+	afterLines, afterNoNewline := splitDiffLines(after)
+	if equalStringSlices(beforeLines, afterLines) && beforeNoNewline == afterNoNewline {
 		return "(no changes)"
 	}
 
-	ctx := 2
-	displayStart := firstDiff - ctx
-	if displayStart < 0 {
-		displayStart = 0
+	ops := buildLineDiff(beforeLines, afterLines)
+	if !hasChangedOps(ops) {
+		ops = newlineOnlyDiff(beforeLines, afterLines)
 	}
-	displayEnd := lastDiff + ctx
-	if displayEnd >= maxLen {
-		displayEnd = maxLen - 1
-	}
-
-	oldStart := displayStart + 1
-	oldCount := displayEnd - displayStart + 1
-	if oldCount > len(beforeLines)-displayStart {
-		oldCount = len(beforeLines) - displayStart
-	}
-	newStart := displayStart + 1
-	newCount := displayEnd - displayStart + 1
-	if newCount > len(afterLines)-displayStart {
-		newCount = len(afterLines) - displayStart
-	}
-
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("--- a/%s\n+++ b/%s\n@@ -%d,%d +%d,%d @@\n",
-		filepath.ToSlash(relPath), filepath.ToSlash(relPath),
-		oldStart, oldCount, newStart, newCount))
-	for i := displayStart; i <= displayEnd; i++ {
-		var bl, al string
-		if i < len(beforeLines) {
-			bl = beforeLines[i]
-		}
-		if i < len(afterLines) {
-			al = afterLines[i]
-		}
-		if bl == al {
-			b.WriteString(" " + bl + "\n")
-		} else {
-			if i < len(beforeLines) {
-				b.WriteString("-" + bl + "\n")
-			}
-			if i < len(afterLines) {
-				b.WriteString("+" + al + "\n")
-			}
-		}
+	oldPath := "a/" + filepath.ToSlash(relPath)
+	if before == "" {
+		oldPath = "/dev/null"
 	}
-	if lastDiff-firstDiff > 20 {
-		b.WriteString(fmt.Sprintf("  ... (%d lines changed in %d-line context)\n",
-			lastDiff-firstDiff+1, displayEnd-displayStart+1))
-	}
+	b.WriteString(fmt.Sprintf("--- %s\n+++ b/%s\n", oldPath, filepath.ToSlash(relPath)))
+	appendUnifiedHunks(&b, ops, len(beforeLines), len(afterLines), beforeNoNewline, afterNoNewline)
 	return b.String()
+}
+
+func splitDiffLines(s string) ([]string, bool) {
+	if s == "" {
+		return nil, false
+	}
+	lines := strings.Split(s, "\n")
+	if strings.HasSuffix(s, "\n") {
+		return lines[:len(lines)-1], false
+	}
+	return lines, true
+}
+
+func equalStringSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func hasChangedOps(ops []diffOp) bool {
+	for _, op := range ops {
+		if op.kind != ' ' {
+			return true
+		}
+	}
+	return false
+}
+
+func newlineOnlyDiff(beforeLines, afterLines []string) []diffOp {
+	if len(beforeLines) == 0 && len(afterLines) == 0 {
+		return nil
+	}
+	line := ""
+	if len(beforeLines) > 0 {
+		line = beforeLines[len(beforeLines)-1]
+	}
+	prefix := make([]diffOp, 0, len(beforeLines)+1)
+	for i := 0; i < len(beforeLines)-1; i++ {
+		prefix = append(prefix, diffOp{kind: ' ', text: beforeLines[i], oldIndex: i, newIndex: i})
+	}
+	prefix = append(prefix, diffOp{kind: '-', text: line, oldIndex: len(beforeLines) - 1, newIndex: -1})
+	if len(afterLines) > 0 {
+		prefix = append(prefix, diffOp{kind: '+', text: afterLines[len(afterLines)-1], oldIndex: -1, newIndex: len(afterLines) - 1})
+	}
+	return prefix
+}
+
+func buildLineDiff(beforeLines, afterLines []string) []diffOp {
+	prefix := 0
+	for prefix < len(beforeLines) && prefix < len(afterLines) && beforeLines[prefix] == afterLines[prefix] {
+		prefix++
+	}
+
+	suffix := 0
+	for suffix < len(beforeLines)-prefix && suffix < len(afterLines)-prefix &&
+		beforeLines[len(beforeLines)-1-suffix] == afterLines[len(afterLines)-1-suffix] {
+		suffix++
+	}
+
+	ops := make([]diffOp, 0, len(beforeLines)+len(afterLines))
+	for i := 0; i < prefix; i++ {
+		ops = append(ops, diffOp{kind: ' ', text: beforeLines[i], oldIndex: i, newIndex: i})
+	}
+
+	oldMid := beforeLines[prefix : len(beforeLines)-suffix]
+	newMid := afterLines[prefix : len(afterLines)-suffix]
+	for _, op := range diffMiddle(oldMid, newMid) {
+		if op.oldIndex >= 0 {
+			op.oldIndex += prefix
+		}
+		if op.newIndex >= 0 {
+			op.newIndex += prefix
+		}
+		ops = append(ops, op)
+	}
+
+	for i := suffix; i > 0; i-- {
+		oldIndex := len(beforeLines) - i
+		newIndex := len(afterLines) - i
+		ops = append(ops, diffOp{kind: ' ', text: beforeLines[oldIndex], oldIndex: oldIndex, newIndex: newIndex})
+	}
+	return ops
+}
+
+func diffMiddle(oldLines, newLines []string) []diffOp {
+	switch {
+	case len(oldLines) == 0:
+		ops := make([]diffOp, 0, len(newLines))
+		for i, line := range newLines {
+			ops = append(ops, diffOp{kind: '+', text: line, oldIndex: -1, newIndex: i})
+		}
+		return ops
+	case len(newLines) == 0:
+		ops := make([]diffOp, 0, len(oldLines))
+		for i, line := range oldLines {
+			ops = append(ops, diffOp{kind: '-', text: line, oldIndex: i, newIndex: -1})
+		}
+		return ops
+	case len(oldLines)*len(newLines) > 4_000_000:
+		ops := make([]diffOp, 0, len(oldLines)+len(newLines))
+		for i, line := range oldLines {
+			ops = append(ops, diffOp{kind: '-', text: line, oldIndex: i, newIndex: -1})
+		}
+		for i, line := range newLines {
+			ops = append(ops, diffOp{kind: '+', text: line, oldIndex: -1, newIndex: i})
+		}
+		return ops
+	}
+
+	dp := make([][]int, len(oldLines)+1)
+	for i := range dp {
+		dp[i] = make([]int, len(newLines)+1)
+	}
+	for i := len(oldLines) - 1; i >= 0; i-- {
+		for j := len(newLines) - 1; j >= 0; j-- {
+			if oldLines[i] == newLines[j] {
+				dp[i][j] = dp[i+1][j+1] + 1
+			} else if dp[i+1][j] >= dp[i][j+1] {
+				dp[i][j] = dp[i+1][j]
+			} else {
+				dp[i][j] = dp[i][j+1]
+			}
+		}
+	}
+
+	ops := make([]diffOp, 0, len(oldLines)+len(newLines))
+	for i, j := 0, 0; i < len(oldLines) || j < len(newLines); {
+		if i < len(oldLines) && j < len(newLines) && oldLines[i] == newLines[j] {
+			ops = append(ops, diffOp{kind: ' ', text: oldLines[i], oldIndex: i, newIndex: j})
+			i++
+			j++
+		} else if j >= len(newLines) || (i < len(oldLines) && dp[i+1][j] >= dp[i][j+1]) {
+			ops = append(ops, diffOp{kind: '-', text: oldLines[i], oldIndex: i, newIndex: -1})
+			i++
+		} else {
+			ops = append(ops, diffOp{kind: '+', text: newLines[j], oldIndex: -1, newIndex: j})
+			j++
+		}
+	}
+	return ops
+}
+
+func appendUnifiedHunks(b *strings.Builder, ops []diffOp, oldLen, newLen int, oldNoNewline, newNoNewline bool) {
+	const context = 3
+
+	for i := 0; i < len(ops); {
+		for i < len(ops) && ops[i].kind == ' ' {
+			i++
+		}
+		if i >= len(ops) {
+			break
+		}
+
+		start := i - context
+		if start < 0 {
+			start = 0
+		}
+
+		lastChange := i
+		for j := i + 1; j < len(ops); j++ {
+			if ops[j].kind == ' ' {
+				continue
+			}
+			if j-lastChange > context*2 {
+				break
+			}
+			lastChange = j
+		}
+		end := lastChange + context
+		if end >= len(ops) {
+			end = len(ops) - 1
+		}
+
+		oldBefore, newBefore := countLinesBefore(ops[:start])
+		oldCount, newCount := countLinesInHunk(ops[start : end+1])
+		oldStart := oldBefore + 1
+		if oldCount == 0 {
+			oldStart = oldBefore
+		}
+		newStart := newBefore + 1
+		if newCount == 0 {
+			newStart = newBefore
+		}
+		if oldLen == 0 {
+			oldStart = 0
+		}
+		if newLen == 0 {
+			newStart = 0
+		}
+
+		b.WriteString(fmt.Sprintf("@@ -%d,%d +%d,%d @@\n", oldStart, oldCount, newStart, newCount))
+		for _, op := range ops[start : end+1] {
+			b.WriteByte(op.kind)
+			b.WriteString(op.text)
+			b.WriteByte('\n')
+			if op.kind != '+' && oldNoNewline && op.oldIndex == oldLen-1 {
+				b.WriteString("\\ No newline at end of file\n")
+			}
+			if op.kind != '-' && newNoNewline && op.newIndex == newLen-1 {
+				b.WriteString("\\ No newline at end of file\n")
+			}
+		}
+		i = end + 1
+	}
+}
+
+func countLinesBefore(ops []diffOp) (int, int) {
+	oldCount, newCount := 0, 0
+	for _, op := range ops {
+		if op.kind != '+' {
+			oldCount++
+		}
+		if op.kind != '-' {
+			newCount++
+		}
+	}
+	return oldCount, newCount
+}
+
+func countLinesInHunk(ops []diffOp) (int, int) {
+	return countLinesBefore(ops)
 }
 
 func (e *Executor) listChanges(sess *session.Session, path string, limit int) (string, error) {
