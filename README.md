@@ -90,6 +90,48 @@ asayn
 
 The first run creates `~/.Asayn/` with global defaults and creates `<project>/.Asayn/` for the current workplace. `api_config.toml` is stored exclusively in `~/.Asayn/` and is never copied to or read from the project directory.
 
+## Windows Installation
+
+If you receive an executable named `asayn.exe`, place it in a directory on your `PATH`.
+
+### Option 1: User-local install (recommended)
+
+Create a local bin directory and add it to your user `PATH`:
+
+```powershell
+mkdir -Force $env:USERPROFILE\.local\bin
+Move-Item asayn.exe $env:USERPROFILE\.local\bin\asayn.exe
+```
+
+Then add it to your `PATH` via **Settings → System → About → Advanced system settings → Environment Variables**, or run:
+
+```powershell
+[Environment]::SetEnvironmentVariable("PATH", $env:PATH + ";$env:USERPROFILE\.local\bin", "User")
+```
+
+After restarting your terminal, `asayn` is available from any directory.
+
+### Option 2: Current-directory use
+
+Simply run `asayn.exe` from any project directory:
+
+```powershell
+.\asayn.exe
+```
+
+### First run
+
+The first run writes `~/.Asayn/api_config.toml` (which resolves to `$env:USERPROFILE\.Asayn\api_config.toml` on Windows). Before sending your first model request, edit the provider entry:
+
+```toml
+[providers.DeepSeek]
+api_key = "your-api-key"
+```
+
+The first run also creates `<project>\.Asayn\` for the current workplace. `api_config.toml` is stored exclusively in `~/.Asayn/` and is never copied to or read from the project directory.
+
+> **Note:** Shell tools on Windows run commands through PowerShell. The terminal environment is included in tool descriptions so the model can choose the right command syntax.
+
 ## Build From Source
 
 ```bash
