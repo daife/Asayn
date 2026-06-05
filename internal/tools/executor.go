@@ -250,37 +250,37 @@ func (e *Executor) Run(ctx context.Context, sess *session.Session, name string, 
 	case "view_history":
 		return e.viewHistory(sess, args)
 	case "shell_run_sync":
-		return e.shells.RunBlocking(ctx, stringArg(args, "command"), intArg(args, "timeout_sec", 60))
+		return e.shells.RunBlocking(ctx, stringArgR(args, "command"), intArgR(args, "timeout_sec", 60))
 	case "shell_run_async":
 		if !e.allowParallelShell {
 			return "", fmt.Errorf("shell_run_async is not available unless parallel shell is enabled")
 		}
-		return e.shells.StartAsync(stringArg(args, "command"), e.allowInteractiveShell)
+		return e.shells.StartAsync(stringArgR(args, "command"), e.allowInteractiveShell)
 	case "shell_async_status":
 		if !e.allowParallelShell {
 			return "", fmt.Errorf("shell_async_status is not available unless parallel shell is enabled")
 		}
-		return e.shells.Status(stringArg(args, "shell_id")), nil
+		return e.shells.Status(stringArgR(args, "shell_id")), nil
 	case "shell_async_kill":
 		if !e.allowParallelShell {
 			return "", fmt.Errorf("shell_async_kill is not available unless parallel shell is enabled")
 		}
-		return e.shells.Kill(stringArg(args, "shell_id"))
+		return e.shells.Kill(stringArgR(args, "shell_id"))
 	case "shell_async_stdin":
 		if !e.allowInteractiveShell {
 			return "", fmt.Errorf("shell_async_stdin is not available unless interactive shell is enabled")
 		}
-		return e.shells.Write(stringArg(args, "shell_id"), stringArg(args, "input"))
+		return e.shells.Write(stringArgR(args, "shell_id"), stringArgR(args, "input"))
 	case "sub_agent_list":
 		return e.subAgents.List(e.paths), nil
 	case "sub_agent_start_async":
-		return e.subAgents.Start(sess, e.store, stringArg(args, "agent"), stringArg(args, "name"), stringArg(args, "instruction")), nil
+		return e.subAgents.Start(sess, e.store, stringArgR(args, "agent"), stringArgR(args, "name"), stringArgR(args, "instruction")), nil
 	case "sub_agent_check":
-		return e.subAgents.Check(stringArg(args, "sub_agent_id")), nil
+		return e.subAgents.Check(stringArgR(args, "sub_agent_id")), nil
 	case "sub_agent_wait_check":
-		return e.subAgents.WaitCheck(ctx, stringArg(args, "sub_agent_id"), intArg(args, "wait_seconds", 0))
+		return e.subAgents.WaitCheck(ctx, stringArgR(args, "sub_agent_id"), intArgR(args, "wait_seconds", 0))
 	case "sub_agent_resume_async":
-		return e.subAgents.ResumeAsync(stringArg(args, "sub_agent_id"), stringArg(args, "instruction")), nil
+		return e.subAgents.ResumeAsync(stringArgR(args, "sub_agent_id"), stringArgR(args, "instruction")), nil
 	default:
 		return "", fmt.Errorf("unknown tool %q", name)
 	}
@@ -548,7 +548,7 @@ func grepTextFile(path, rel string, re *regexp.Regexp, remaining int) ([]string,
 
 func (e *Executor) resolveWorkplacePath(rel string) (string, error) {
 	if rel == "" {
-		return "", fmt.Errorf("path is required")
+		return "", fmt.Errorf("relative_path is required")
 	}
 	clean := filepath.Clean(rel)
 	if filepath.IsAbs(clean) {
@@ -660,6 +660,122 @@ func boolArg(args map[string]any, key string, def bool) bool {
 		return t == "true"
 	default:
 		return def
+	}
+}
+
+// paramAliases maps canonical parameter names (shown in schemas/models) to
+// accepted aliases. Aliases are silently resolved at parse time to reduce
+// LLM transcription errors; the exposed API is unchanged.
+var paramAliases = map[string][]string{
+	"relative_path":     {"file_path", "path"},
+	"change_id":         {"id"},
+	"change_ids":        {"ids"},
+	"sub_agent_id":      {"agent_id", "id"},
+	"shell_id":          {"id"},
+	"query":             {"pattern", "regex"},
+	"case_sensitive":    {"case"},
+	"start_line":        {"from_line"},
+	"end_line":          {"to_line"},
+	"insert_after_line": {"after_line"},
+	"old_text":          {"old", "pattern"},
+	"new_text":          {"new", "replacement"},
+	"replace_all":       {"all"},
+	"force_binary":      {"binary", "force"},
+	"wait_seconds":      {"wait", "timeout"},
+	"timeout_sec":       {"timeout_seconds", "timeout"},
+	"instruction":       {"prompt", "instructions"},
+	"input":             {"stdin", "text"},
+	"command":           {"cmd"},
+}
+
+func resolveArg(args map[string]any, canonical string) any {
+	if v, ok := args[canonical]; ok && v != nil {
+		return v
+	}
+	for _, alias := range paramAliases[canonical] {
+		if v, ok := args[alias]; ok && v != nil {
+			return v
+		}
+	}
+	return nil
+}
+
+func stringArgR(args map[string]any, canonical string) string {
+	v := resolveArg(args, canonical)
+	if v == nil {
+		return ""
+	}
+	switch t := v.(type) {
+	case string:
+		return t
+	case json.Number:
+		return t.String()
+	default:
+		return fmt.Sprint(t)
+	}
+}
+
+func intArgR(args map[string]any, canonical string, def int) int {
+	v := resolveArg(args, canonical)
+	if v == nil {
+		return def
+	}
+	switch t := v.(type) {
+	case float64:
+		return int(t)
+	case int:
+		return t
+	case json.Number:
+		n, _ := strconv.Atoi(t.String())
+		return n
+	case string:
+		n, err := strconv.Atoi(t)
+		if err == nil {
+			return n
+		}
+	}
+	return def
+}
+
+func boolArgR(args map[string]any, canonical string, def bool) bool {
+	v := resolveArg(args, canonical)
+	if v == nil {
+		return def
+	}
+	switch t := v.(type) {
+	case bool:
+		return t
+	case string:
+		return t == "true"
+	default:
+		return def
+	}
+}
+
+func stringSliceArgR(args map[string]any, canonical string) []string {
+	v := resolveArg(args, canonical)
+	if v == nil {
+		return nil
+	}
+	switch t := v.(type) {
+	case []string:
+		return t
+	case []any:
+		out := []string{}
+		for _, item := range t {
+			if item == nil {
+				continue
+			}
+			out = append(out, fmt.Sprint(item))
+		}
+		return out
+	case string:
+		if t == "" {
+			return nil
+		}
+		return []string{t}
+	default:
+		return nil
 	}
 }
 
