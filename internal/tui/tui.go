@@ -294,7 +294,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncInputSize()
 		m.initRenderer(m.log.Width)
 		m.content = renderSessionContent(m.ctx, m.session, m.renderer, m.log.Width)
-		m.log.SetContent(m.wrapContent(m.content))
+		m.refreshLog(false)
 	case tea.KeyMsg:
 		msg = sanitizePasteKeyMsg(msg)
 		if m.resumePicker {
@@ -541,7 +541,7 @@ func (m model) handleMouseClick(x, y int) model {
 		m.recalcLogWidth()
 		m.syncInputSize()
 		if prevWidth != m.log.Width {
-			m.log.SetContent(m.wrapContent(m.content))
+			m.refreshLog(false)
 		}
 		return m
 	}
@@ -622,6 +622,13 @@ func (m *model) appendLog(s string) {
 
 func (m *model) refreshLog(forceBottom bool) {
 	wasBottom := m.log.AtBottom()
+	// Preserve scroll position ratio when not at bottom
+	prevRatio := float64(0)
+	prevTotal := m.log.TotalLineCount()
+	prevHeight := m.log.Height
+	if !wasBottom && !forceBottom && prevTotal > prevHeight {
+		prevRatio = float64(m.log.YOffset) / float64(prevTotal-prevHeight)
+	}
 	if m.subViewID != "" {
 		m.log.SetContent(m.wrapContent(m.subAgentView()))
 	} else {
@@ -629,6 +636,11 @@ func (m *model) refreshLog(forceBottom bool) {
 	}
 	if forceBottom || wasBottom {
 		m.log.GotoBottom()
+	} else if prevRatio > 0 {
+		newTotal := m.log.TotalLineCount()
+		if newTotal > m.log.Height && prevRatio < 1 {
+			m.log.YOffset = int(prevRatio * float64(newTotal-m.log.Height))
+		}
 	}
 }
 
