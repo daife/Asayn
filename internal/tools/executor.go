@@ -112,7 +112,7 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 			},
 			"required": []string{"name"},
 		}),
-		schema("file_edit", "Edit files with line-based operations. "+workspaceRule+" All edits are recorded as reversible changes. find_replace treats old_text as a grep_search-style regex.", map[string]any{
+		schema("file_edit", "Edit files with line-based operations. "+workspaceRule+" All edits are recorded as reversible changes. find_replace treats old_text as a grep_search-style regex. When issuing multiple line-based edits (delete_lines, insert, replace_lines) on the same file in one turn, prefer the batch field: pass an array of mode/path/start_line/end_line/insert_after_line/text objects; they are applied in reverse order against the original file so line numbers stay stable.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"mode":              prop("string", "write, delete_lines, insert, replace_lines, find_replace, or rollback."),
@@ -127,6 +127,7 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 				"replace_all":       prop("boolean", "Replace all matches. Default false. For find_replace mode."),
 				"change_id":         prop("string", "Recorded change ID for rollback."),
 				"change_ids":        prop("array", "Recorded change IDs for rollback."),
+				"batch":             prop("array", "Array of operations to apply in reverse order against the original file. Each element is an object with mode/path/start_line/end_line/insert_after_line/text as needed."),
 			},
 			"required": []string{"mode"},
 		}),

@@ -43,13 +43,10 @@ jobs:
           name: Asayn ${{ github.ref_name }}
           body: |
             ## Changes
+            - Fix: `file_edit` now supports `batch` mode — apply multiple line-based operations in one call against the original file to avoid line drift.
             - Fix: multi-line paste now coalesces into a single message instead of sending each line separately.
             - Fix: `/model_config` settings now persist globally in `~/.Asayn/` instead of being workspace-scoped.
             - Fix: PowerShell on Windows now forces UTF-8 output encoding to prevent UTF-16 garbled text.
-            - Omit prior no-tool-turn `reasoning_content` from later API requests while preserving tool-turn reasoning.
-            - Add configurable auto-compaction threshold in `/model_config` with persisted values from 5% to 95%.
-            - Refine real-time context control beta so older tool results collapse to `hidden`, with only the last hidden entry carrying the outdated-results notice.
-            - Publish prebuilt executable files directly instead of archives.
 
             ## Assets
             - `asayn-linux-amd64`
