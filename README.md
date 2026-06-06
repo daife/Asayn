@@ -234,7 +234,6 @@ Shell tools use the platform terminal environment: Windows runs commands through
 - `/retry` retries the last saved user request, useful after an idle timeout.
 - `/rename [name]`
 - `/fork [name]`
-- `/copy_answer` copies the latest assistant answer and writes Markdown/HTML preview files under `.Asayn/`.
 - `/root_agent [name]` (alias: `/model`)
 - `/model_config` opens the interactive model, thinking, shell, context-control, and skill picker for root, sub, and special agents.
 - `/compact`
@@ -243,7 +242,7 @@ Shell tools use the platform terminal environment: Windows runs commands through
 
 ## Sub-Agents
 
-Root agents can list, start, check, wait-check, and resume sub-agents through the fixed `sub_agent_*` tools. `sub_agent_list` lists configured `sub_agents/*.toml` names and descriptions. `sub_agent_start_async` accepts a `name` from that list; workspace configs override global configs. A sub-agent keeps its own session history and only sees the basic file, search, skill, and history tools; it cannot see `sub_agent_*` or shell tools.
+Root agents can list, start, check, and resume sub-agents through the fixed `sub_agent_*` tools. `sub_agent_list` lists configured `sub_agents/*.toml` names and descriptions. `sub_agent_start_async` accepts a `name` from that list; workspace configs override global configs. A sub-agent keeps its own session history and only sees the basic file, search, skill, and history tools; it cannot see `sub_agent_*` or shell tools.
 
 ## Context Compression
 

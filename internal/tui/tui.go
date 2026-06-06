@@ -4,9 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"html"
-	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -65,6 +62,7 @@ type model struct {
 	modelConfigPercentDraft   string
 	skillItems                []config.Skill
 	subViewID                 string
+	sidebarHidden             bool
 	spinner                   int
 	pendingToolLine           string
 	pendingToolName           string
@@ -170,7 +168,6 @@ var commands = []commandSpec{
 	{Name: "/retry", Description: "retry the last request"},
 	{Name: "/rename", Description: "rename current session"},
 	{Name: "/fork", Description: "fork from the current point"},
-	{Name: "/copy_answer", Description: "export and copy latest answer"},
 	{Name: "/root_agent", Description: "select root agent"},
 	{Name: "/model", Description: "select root agent (alias for /root_agent)"},
 	{Name: "/model_config", Description: "configure agent settings"},
@@ -283,7 +280,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		sidebar := 30
-		if msg.Width < 100 {
+		if msg.Width < 100 || m.sidebarHidden {
 			sidebar = 0
 		}
 		m.log.Width = msg.Width - sidebar - 4
@@ -533,6 +530,11 @@ func (m model) cleanupEmptySession() error {
 }
 
 func (m model) handleMouseClick(x, y int) model {
+	if m.width >= 100 && y == 0 && x >= m.width-5 && x <= m.width {
+		m.sidebarHidden = !m.sidebarHidden
+		m.syncInputSize()
+		return m
+	}
 	if m.width < 100 || m.subViewID != "" {
 		return m
 	}
@@ -562,7 +564,7 @@ func (m model) View() string {
 		return "Asayn"
 	}
 	sidebarWidth := 30
-	hasSidebar := m.width >= 100
+	hasSidebar := m.width >= 100 && !m.sidebarHidden
 
 	mainWidth := m.width
 	if hasSidebar {
@@ -572,8 +574,19 @@ func (m model) View() string {
 		mainWidth = 20
 	}
 
+	// Toggle button for sidebar
+	var headerLine string
+	if m.width >= 100 {
+		btn := "☰"
+		if !m.sidebarHidden {
+			btn = "✕"
+		}
+		headerLine = lipgloss.NewStyle().Width(mainWidth).Align(lipgloss.Right).Render(mutedStyle.Render(btn))
+	}
+
 	body := m.log.View()
 	main := lipgloss.JoinVertical(lipgloss.Left,
+		headerLine,
 		lipgloss.NewStyle().Width(mainWidth).Height(m.log.Height).Render(body),
 		m.input.View(),
 		m.assistView(),
@@ -1331,13 +1344,6 @@ func (m model) handleCommand(raw string) (model, tea.Cmd) {
 		m.session = sess
 		m.ctx.Tools.RestoreSubAgents(sess, sess.SubAgents, m.ctx.SubSessions)
 		m.setCommandOutput("forked current session: " + sess.ID)
-	case "copy_answer":
-		out, err := m.exportLatestAnswer()
-		if err != nil {
-			m.setCommandOutput("error: " + err.Error())
-		} else {
-			m.setCommandOutput(out)
-		}
 	case "root_agent", "model":
 		if arg == "" {
 			return m.startRootAgentPicker()
@@ -2905,7 +2911,6 @@ Commands:
 /resume [session]     pick or resume saved sessions
 /rename [name]        rename current session
 /fork [name]          fork from the current point
-/copy_answer          copy latest Asayn answer and write preview files
 /root_agent [name]    pick or set root agent
 /model_config         pick model, thinking, shell, and skills with left/right + space
 /compact              compress prior context with compact_agent
@@ -2919,72 +2924,5 @@ with no command suggestions, up/down recalls previous inputs
 /model_config uses left/right to switch targets such as default(root) and default(sub)
 while Asayn is working, enter queues the typed message
 while Asayn is working, esc cancels the last queued message, or interrupts the current turn if the queue is empty
-`
-}
-
-func (m model) exportLatestAnswer() (string, error) {
-	answer := latestAssistantAnswer(m.session)
-	if strings.TrimSpace(answer) == "" {
-		return "", fmt.Errorf("no assistant answer to copy")
-	}
-	dir := filepath.Join(m.ctx.Paths.WorkspaceRoot, ".Asayn")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
-	}
-	mdPath := filepath.Join(dir, "latest_answer.md")
-	htmlPath := filepath.Join(dir, "latest_answer.html")
-	if err := os.WriteFile(mdPath, []byte(answer), 0o644); err != nil {
-		return "", err
-	}
-	if err := os.WriteFile(htmlPath, []byte(answerPreviewHTML(answer)), 0o644); err != nil {
-		return "", err
-	}
-	clipboard := "clipboard: unavailable"
-	if err := copyToClipboard(answer); err == nil {
-		clipboard = "clipboard: copied"
-	}
-	return fmt.Sprintf("%s\nmarkdown: %s\npreview: %s", clipboard, mdPath, htmlPath), nil
-}
-
-func latestAssistantAnswer(sess *session.Session) string {
-	if sess == nil {
-		return ""
-	}
-	for i := len(sess.Messages) - 1; i >= 0; i-- {
-		msg := sess.Messages[i]
-		if msg.Role == "assistant" && strings.TrimSpace(msg.Content) != "" {
-			return msg.Content
-		}
-	}
-	return ""
-}
-
-func answerPreviewHTML(markdown string) string {
-	escaped := html.EscapeString(markdown)
-	return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Asayn Latest Answer</title>
-<style>
-body{margin:0;font:15px/1.55 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#1f2933;background:#f7f8fa}
-header{position:sticky;top:0;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 20px;border-bottom:1px solid #d9dee7;background:#fff}
-main{max-width:920px;margin:0 auto;padding:24px 20px 56px}
-button{border:1px solid #1f2933;background:#1f2933;color:#fff;border-radius:6px;padding:8px 12px;font:inherit;cursor:pointer}
-pre{white-space:pre-wrap;word-break:break-word;background:#fff;border:1px solid #d9dee7;border-radius:8px;padding:18px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
-</style>
-</head>
-<body>
-<header><strong>Asayn latest answer</strong><button id="copy">Copy answer</button></header>
-<main><pre id="answer">` + escaped + `</pre></main>
-<script>
-document.getElementById('copy').addEventListener('click', async () => {
-  await navigator.clipboard.writeText(document.getElementById('answer').textContent);
-  document.getElementById('copy').textContent = 'Copied';
-});
-</script>
-</body>
-</html>
 `
 }

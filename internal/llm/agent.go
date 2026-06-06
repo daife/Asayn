@@ -416,13 +416,12 @@ func (a *Agent) visibleSkillSet(sess *session.Session) map[string]bool {
 	}
 	return visible
 }
-
 func toolCallTimeout(name string, args map[string]any) time.Duration {
 	seconds := 60
-	if name == "shell_run_sync" || name == "sub_agent_wait_check" {
+	if name == "shell_run_sync" || name == "delay" {
 		argName := "timeout_sec"
-		if name == "sub_agent_wait_check" {
-			argName = "wait_seconds"
+		if name == "delay" {
+			argName = "seconds"
 		}
 		if raw, ok := args[argName]; ok {
 			switch value := raw.(type) {

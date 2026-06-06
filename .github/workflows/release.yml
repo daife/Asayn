@@ -34,7 +34,6 @@ jobs:
           GOOS=darwin GOARCH=amd64 go build -o "dist/asayn-darwin-amd64" ./cmd/asayn
           GOOS=darwin GOARCH=arm64 go build -o "dist/asayn-darwin-arm64" ./cmd/asayn
           GOOS=windows GOARCH=amd64 go build -o "dist/asayn-windows-amd64.exe" ./cmd/asayn
-
           (cd dist && sha256sum asayn-linux-amd64 asayn-linux-arm64 asayn-darwin-amd64 asayn-darwin-arm64 asayn-windows-amd64.exe > SHA256SUMS.txt)
 
       - name: Publish GitHub release
@@ -43,10 +42,10 @@ jobs:
           name: Asayn ${{ github.ref_name }}
           body: |
             ## Changes
-            - Fix: `file_edit` batch mode is now explicitly exposed in the tool schema and applies multiple line-based operations against original file line numbers.
-            - Fix: bracketed multi-line paste now coalesces into one input without breaking normal Enter-to-send behavior on Windows.
-            - Fix: `/model_config` settings now persist globally in `~/.Asayn/` instead of being workspace-scoped.
-            - Fix: PowerShell on Windows now forces UTF-8 output encoding to prevent UTF-16 garbled text.
+            - Removed `/copy_answer` command and all related logic.
+            - Removed `sub_agent_wait_check` tool; added `delay` tool with `seconds` parameter ("Delay execution. Avoid using unless necessary.").
+            - Renamed `shell_async_status` tool to `shell_async_check`.
+            - Added sidebar toggle button (☰/✕) in the top-right corner of the TUI to show/hide the sidebar.
 
             ## Assets
             - `asayn-linux-amd64`

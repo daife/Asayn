@@ -179,11 +179,11 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 		schema("shell_run_async", fmt.Sprintf("Start a background %s command in %q(workspace).", shellEnv, shellCWD), map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"command": prop("string", shellEnv+" command. Commands run in the workspace root; check background commands with shell_async_status."),
+				"command": prop("string", shellEnv+" command. Commands run in the workspace root; check background commands with shell_async_check."),
 			},
 			"required": []string{"command"},
 		}),
-		schema("shell_async_status", "Check a background "+shellEnv+" command.", map[string]any{
+		schema("shell_async_check", "Check a background "+shellEnv+" command.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"shell_id": prop("string", "Shell ID."),
@@ -230,13 +230,12 @@ func subAgentSchemas() []types.ToolSchema {
 			},
 			"required": []string{"sub_agent_id"},
 		}),
-		schema("sub_agent_wait_check", "Wait, then check a sub-agent only when no useful parallel work remains.", map[string]any{
+		schema("delay", "Delay execution. Avoid using unless necessary.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"sub_agent_id": prop("string", "Sub-agent ID."),
-				"wait_seconds": prop("integer", "Wait seconds."),
+				"seconds": prop("integer", "Delay seconds."),
 			},
-			"required": []string{"sub_agent_id", "wait_seconds"},
+			"required": []string{"seconds"},
 		}),
 		schema("sub_agent_resume_async", "Resume a completed sub-agent with follow-up instructions.", map[string]any{
 			"type": "object",
@@ -273,9 +272,9 @@ func (e *Executor) Run(ctx context.Context, sess *session.Session, name string, 
 			return "", fmt.Errorf("shell_run_async is not available unless parallel shell is enabled")
 		}
 		return e.shells.StartAsync(stringArg(args, "command"), e.allowInteractiveShell)
-	case "shell_async_status":
+	case "shell_async_check":
 		if !e.allowParallelShell {
-			return "", fmt.Errorf("shell_async_status is not available unless parallel shell is enabled")
+			return "", fmt.Errorf("shell_async_check is not available unless parallel shell is enabled")
 		}
 		return e.shells.Status(stringArg(args, "shell_id")), nil
 	case "shell_async_kill":
@@ -294,8 +293,8 @@ func (e *Executor) Run(ctx context.Context, sess *session.Session, name string, 
 		return e.subAgents.Start(sess, e.store, stringArg(args, "name"), stringArg(args, "task_name"), stringArg(args, "instruction")), nil
 	case "sub_agent_check":
 		return e.subAgents.Check(stringArg(args, "sub_agent_id")), nil
-	case "sub_agent_wait_check":
-		return e.subAgents.WaitCheck(ctx, stringArg(args, "sub_agent_id"), intArg(args, "wait_seconds", 0))
+	case "delay":
+		return e.subAgents.Delay(ctx, intArg(args, "seconds", 0))
 	case "sub_agent_resume_async":
 		return e.subAgents.ResumeAsync(stringArg(args, "sub_agent_id"), stringArg(args, "instruction")), nil
 	default:

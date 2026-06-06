@@ -139,20 +139,17 @@ func (m *SubAgentManager) Check(id string) string {
 	return truncate(res, m.limit)
 }
 
-func (m *SubAgentManager) WaitCheck(ctx context.Context, id string, waitSeconds int) (string, error) {
-	if id == "" {
-		return "", fmt.Errorf("sub_agent_id is required")
+func (m *SubAgentManager) Delay(ctx context.Context, seconds int) (string, error) {
+	if seconds < 0 {
+		seconds = 0
 	}
-	if waitSeconds < 0 {
-		waitSeconds = 0
-	}
-	timer := time.NewTimer(time.Duration(waitSeconds) * time.Second)
+	timer := time.NewTimer(time.Duration(seconds) * time.Second)
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
 		return "", ctx.Err()
 	case <-timer.C:
-		return m.Check(id), nil
+		return fmt.Sprintf("delayed %d seconds", seconds), nil
 	}
 }
 
@@ -344,7 +341,7 @@ func (m *SubAgentManager) describeForRoot(task *SubAgentTask) string {
 		lines = append(lines, conversation...)
 	}
 	if task.Status == "running" {
-		lines = append(lines, "", "This sub-agent is still running and may take a while. Continue other useful work first; call sub_agent_wait_check only when no useful parallel work remains.")
+		lines = append(lines, "", "This sub-agent is still running and may take a while. Continue other useful work first; call sub_agent_check when ready.")
 	}
 	return strings.Join(lines, "\n")
 }
