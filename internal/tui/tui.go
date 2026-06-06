@@ -201,6 +201,14 @@ func Run(ctx *app.Context) error {
 	}
 	input := newChatInput()
 	vp := viewport.New(80, 20)
+	vp.KeyMap = viewport.KeyMap{
+		PageDown:     vp.KeyMap.PageDown,
+		PageUp:       vp.KeyMap.PageUp,
+		HalfPageDown: vp.KeyMap.HalfPageDown,
+		HalfPageUp:   vp.KeyMap.HalfPageUp,
+		Down:         vp.KeyMap.Down,
+		Up:           vp.KeyMap.Up,
+	}
 	content := ""
 	vp.SetContent(content)
 
