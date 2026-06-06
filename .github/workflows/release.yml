@@ -42,10 +42,10 @@ jobs:
           name: Asayn ${{ github.ref_name }}
           body: |
             ## Changes
-            - Removed `/copy_answer` command and all related logic.
-            - Removed `sub_agent_wait_check` tool; added `delay` tool with `seconds` parameter ("Delay execution. Avoid using unless necessary.").
-            - Renamed `shell_async_status` tool to `shell_async_check`.
-            - Added sidebar toggle button (☰/✕) in the top-right corner of the TUI to show/hide the sidebar.
+            - Updated `file_edit` guidance to prefer content-based `find_replace` for unique edits.
+            - Kept `file_edit` batch mode based on original file line numbers while rejecting overlapping delete/replace ranges.
+            - Preserved array order for multiple batch inserts at the same line.
+            - Documented batch mode behavior in README.
 
             ## Assets
             - `asayn-linux-amd64`

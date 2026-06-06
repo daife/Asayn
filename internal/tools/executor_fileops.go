@@ -20,6 +20,7 @@ import (
 //	insert        - insert text after a given line
 //	replace_lines - replace a line range with new text
 //	find_replace  - find old_text as a regex and replace with new_text
+//	batch         - apply multiple non-overlapping line-based edits
 //	rollback      - rollback recorded changes
 func (e *Executor) fileEdit(sess *session.Session, args map[string]any) (string, error) {
 	e.mu.Lock()
@@ -196,10 +197,10 @@ func replaceFirstRegexMatch(re *regexp.Regexp, src, repl string, match []int) st
 	return b.String()
 }
 
-// fileEditBatch applies multiple line-based operations to the same file
-// from bottom to top against the original content, so line numbers from the
-// caller's perspective stay stable. It produces a single combined diff and one
-// recorded change.
+// fileEditBatch applies multiple non-overlapping line-based operations to the
+// same file from bottom to top against the original content, so line numbers
+// from the caller's perspective stay stable. It produces a single combined diff
+// and one recorded change.
 func (e *Executor) fileEditBatch(sess *session.Session, args map[string]any) (string, error) {
 	rawOps, ok := args["batch"].([]any)
 	if !ok || len(rawOps) == 0 {
@@ -208,6 +209,9 @@ func (e *Executor) fileEditBatch(sess *session.Session, args map[string]any) (st
 
 	ops, inputPath, err := parseBatchOps(rawOps)
 	if err != nil {
+		return "", err
+	}
+	if err := validateBatchNonOverlappingRanges(ops); err != nil {
 		return "", err
 	}
 	displayPath, err := e.workspaceDisplayPath(inputPath)
@@ -332,6 +336,31 @@ func parseBatchOps(rawOps []any) ([]batchLineOp, string, error) {
 		return nil, "", fmt.Errorf("batch mode requires a path on at least one operation")
 	}
 	return ops, inputPath, nil
+}
+
+func validateBatchNonOverlappingRanges(ops []batchLineOp) error {
+	for i := 0; i < len(ops); i++ {
+		if !ops[i].hasLineRange() {
+			continue
+		}
+		for j := i + 1; j < len(ops); j++ {
+			if !ops[j].hasLineRange() {
+				continue
+			}
+			if rangesOverlap(ops[i].startLine, ops[i].endLine, ops[j].startLine, ops[j].endLine) {
+				return fmt.Errorf("batch ops %d and %d have overlapping line ranges %d-%d and %d-%d; combine them into one replace_lines operation or use find_replace", ops[i].index, ops[j].index, ops[i].startLine, ops[i].endLine, ops[j].startLine, ops[j].endLine)
+			}
+		}
+	}
+	return nil
+}
+
+func (op batchLineOp) hasLineRange() bool {
+	return op.mode == "delete_lines" || op.mode == "replace_lines"
+}
+
+func rangesOverlap(startA, endA, startB, endB int) bool {
+	return startA <= endB && startB <= endA
 }
 
 func applyBatchLineOp(content string, op batchLineOp) (string, error) {

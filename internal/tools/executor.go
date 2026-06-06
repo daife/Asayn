@@ -112,7 +112,7 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 			},
 			"required": []string{"name"},
 		}),
-		schema("file_edit", "Edit files with line-based operations. "+workspaceRule+" All edits are recorded as reversible changes. find_replace treats old_text as a grep_search-style regex. Use mode=\"batch\" for multiple line-based edits in one file: batch operations use original file line numbers and are applied from bottom to top so earlier edits do not shift later ones.", map[string]any{
+		schema("file_edit", "Edit files. "+workspaceRule+" All edits are recorded as reversible changes. Prefer find_replace for unique content-based changes. Use mode=\"batch\" for multiple non-overlapping line-based edits in one file: batch operations use original file line numbers and are applied from bottom to top so earlier edits do not shift later ones.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"mode":              prop("string", "write, delete_lines, insert, replace_lines, find_replace, batch, or rollback."),
@@ -129,7 +129,7 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 				"change_ids":        prop("array", "Recorded change IDs for rollback."),
 				"batch": map[string]any{
 					"type":        "array",
-					"description": "Required for mode=batch. Array of line-based operations for one file. Each operation uses line numbers from the original file; operations are sorted and applied from bottom to top.",
+					"description": "Required for mode=batch. Array of line-based operations for one file. Each operation uses line numbers from the original file; delete_lines/replace_lines ranges must not overlap. Operations are applied from bottom to top; multiple inserts at the same line keep array order in the final file.",
 					"items": map[string]any{
 						"type": "object",
 						"properties": map[string]any{

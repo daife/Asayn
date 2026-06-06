@@ -124,3 +124,61 @@ func TestFileEditBatchRejectsMultiplePaths(t *testing.T) {
 		t.Fatal("expected path mismatch error")
 	}
 }
+
+func TestFileEditBatchRejectsOverlappingDeleteReplaceRanges(t *testing.T) {
+	ops, _, err := parseBatchOps([]any{
+		map[string]any{"mode": "replace_lines", "path": "example.txt", "start_line": 2, "end_line": 4, "text": "replacement"},
+		map[string]any{"mode": "delete_lines", "path": "example.txt", "start_line": 4, "end_line": 5},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateBatchNonOverlappingRanges(ops); err == nil {
+		t.Fatal("expected overlapping range error")
+	}
+}
+
+func TestFileEditBatchAllowsAdjacentDeleteReplaceRanges(t *testing.T) {
+	ops, _, err := parseBatchOps([]any{
+		map[string]any{"mode": "replace_lines", "path": "example.txt", "start_line": 2, "end_line": 3, "text": "replacement"},
+		map[string]any{"mode": "delete_lines", "path": "example.txt", "start_line": 4, "end_line": 5},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateBatchNonOverlappingRanges(ops); err != nil {
+		t.Fatalf("expected adjacent ranges to be allowed, got %v", err)
+	}
+}
+
+func TestFileEditBatchSameAnchorInsertsKeepArrayOrder(t *testing.T) {
+	root := t.TempDir()
+	store := session.NewStore(filepath.Join(root, ".sessions"))
+	sess, err := store.New("test", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "example.txt")
+	if err := os.WriteFile(path, []byte("one\ntwo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e := NewExecutor(config.Paths{WorkspaceRoot: root}, store, 2000, false, false)
+	_, err = e.Run(context.Background(), sess, "file_edit", map[string]any{
+		"mode": "batch",
+		"batch": []any{
+			map[string]any{"mode": "insert", "path": "example.txt", "insert_after_line": 1, "text": "first"},
+			map[string]any{"mode": "insert", "path": "example.txt", "insert_after_line": 1, "text": "second"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "one\nfirst\nsecond\ntwo\n"
+	if string(got) != want {
+		t.Fatalf("unexpected content\nwant:\n%q\ngot:\n%q", want, string(got))
+	}
+}

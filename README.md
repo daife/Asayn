@@ -270,6 +270,7 @@ Skills are directory-based packages. Asayn discovers only directories that conta
 - `mode="write"` creates or overwrites a file.
 - `mode="delete_lines"`, `mode="insert"`, and `mode="replace_lines"` edit by 1-based line numbers.
 - `mode="find_replace"` treats `old_text` as a `grep_search`-style regex and replaces it with `new_text`; use `replace_all=true` when multiple matches are intended.
+- Prefer `mode="find_replace"` for unique content-based edits. Use `mode="batch"` for multiple non-overlapping line-based edits in one file; batch operations use original file line numbers, reject overlapping delete/replace ranges, and keep same-line inserts in array order.
 - `mode="rollback"` restores one or more recorded changes and removes those change records from history.
 
 Use `view_history` to list recent change summaries or view the recorded diff for `change_id` / `change_ids`. Use `file_read` for file contents.
