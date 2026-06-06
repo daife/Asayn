@@ -535,6 +535,7 @@ func (m model) handleMouseClick(x, y int) model {
 		m.sidebarHidden = !m.sidebarHidden
 		m.syncInputSize()
 		return m
+		m.log.SetContent(m.wrapContent(m.content))
 	}
 	if m.width < 100 || m.subViewID != "" {
 		return m
