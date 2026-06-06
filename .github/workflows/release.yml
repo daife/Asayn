@@ -42,10 +42,9 @@ jobs:
           name: Asayn ${{ github.ref_name }}
           body: |
             ## Changes
-            - Updated `file_edit` guidance to prefer content-based `find_replace` for unique edits.
-            - Kept `file_edit` batch mode based on original file line numbers while rejecting overlapping delete/replace ranges.
-            - Preserved array order for multiple batch inserts at the same line.
-            - Documented batch mode behavior in README.
+            - Replaced sidebar toggle glyphs with terminal-safe ASCII symbols.
+            - Wrapped root sidebar lines instead of truncating them with ellipses.
+            - Preserved sub-agent sidebar click mapping after wrapping.
 
             ## Assets
             - `asayn-linux-amd64`

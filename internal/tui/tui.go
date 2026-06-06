@@ -542,13 +542,19 @@ func (m model) handleMouseClick(x, y int) model {
 	if x < sidebarLeft {
 		return m
 	}
-	_, subStart, subCount := m.rootSidebarLines(30)
-	if subCount == 0 {
+	_, subRows := m.rootSidebarLines(30)
+	if len(subRows) == 0 {
 		return m
 	}
-	idx := y - subStart
 	subs := m.ctx.Tools.SubAgentSnapshots()
-	if idx < 0 || idx >= subCount || idx >= len(subs) {
+	idx := -1
+	for rowIdx, row := range subRows {
+		if y == row {
+			idx = rowIdx
+			break
+		}
+	}
+	if idx < 0 || idx >= len(subs) {
 		return m
 	}
 	snap := subs[idx]
@@ -577,11 +583,11 @@ func (m model) View() string {
 	// Toggle button for sidebar
 	var headerLine string
 	if m.width >= 100 {
-		btn := "☰"
+		btn := "<"
 		if !m.sidebarHidden {
-			btn = "✕"
+			btn = ">"
 		}
-		headerLine = lipgloss.NewStyle().Width(mainWidth).Align(lipgloss.Right).Render(mutedStyle.Render(btn))
+		headerLine = lipgloss.NewStyle().Width(mainWidth).Align(lipgloss.Right).Render(sectionStyle.Render(btn))
 	}
 
 	body := m.log.View()
@@ -2280,7 +2286,7 @@ func (m model) sidebar(width int) string {
 	if m.subViewID != "" {
 		return m.subAgentSidebar(width)
 	}
-	lines, _, _ := m.rootSidebarLines(width)
+	lines, _ := m.rootSidebarLines(width)
 	return lipgloss.NewStyle().
 		Width(width).
 		Height(m.height).
@@ -2289,7 +2295,7 @@ func (m model) sidebar(width int) string {
 		Render(strings.Join(lines, "\n"))
 }
 
-func (m model) rootSidebarLines(width int) ([]string, int, int) {
+func (m model) rootSidebarLines(width int) ([]string, []int) {
 	contentWidth := width - 3
 	if contentWidth < 10 {
 		contentWidth = width
@@ -2298,7 +2304,7 @@ func (m model) rootSidebarLines(width int) ([]string, int, int) {
 	if m.thinking {
 		status = spinnerFrame(m.spinner) + " " + status
 	}
-	lines := []string{
+	rawLines := []string{
 		"Asayn",
 		"agent skills are all you need",
 		"",
@@ -2308,32 +2314,32 @@ func (m model) rootSidebarLines(width int) ([]string, int, int) {
 		"",
 		sectionStyle.Render("Root Agent"),
 		"root agent: " + m.session.RootAgent,
-		"description: " + oneLine(m.ctx.Root.Description),
+		"description: " + sidebarSingleLine(m.ctx.Root.Description),
 		"system prompt:",
 	}
-	lines = append(lines, indentedSummary(m.ctx.Root.SystemPrompt, 3)...)
-	lines = append(lines,
+	rawLines = append(rawLines, indentedSummary(m.ctx.Root.SystemPrompt, 3)...)
+	rawLines = append(rawLines,
 		fmt.Sprintf("thinking: %s effort=%s", onOff(m.ctx.Root.ThinkingEnabled), m.ctx.Root.ReasoningEffort),
 		"status: "+status,
 	)
 	if len(m.queuedMessages) > 0 {
-		lines = append(lines, "queued: "+fmt.Sprint(len(m.queuedMessages)))
+		rawLines = append(rawLines, "queued: "+fmt.Sprint(len(m.queuedMessages)))
 	}
-	lines = append(lines, "", sectionStyle.Render("Root Terminals"))
+	rawLines = append(rawLines, "", sectionStyle.Render("Root Terminals"))
 	shells := m.ctx.Tools.ShellSnapshots()
 	if len(shells) == 0 {
-		lines = append(lines, "none")
+		rawLines = append(rawLines, "none")
 	} else {
 		for _, sh := range shells {
 			short := shortID(sh.ID)
-			lines = append(lines, fmt.Sprintf("%s %s %s", statusDot(sh.Status, m.spinner), short, oneLine(sh.Command)))
+			rawLines = append(rawLines, fmt.Sprintf("%s %s %s", statusDot(sh.Status, m.spinner), short, sidebarSingleLine(sh.Command)))
 		}
 	}
-	lines = append(lines, "", sectionStyle.Render("Sub-agents"))
-	subStart := len(lines)
+	rawLines = append(rawLines, "", sectionStyle.Render("Sub-agents"))
 	subs := m.ctx.Tools.SubAgentSnapshots()
+	subAgentRawIndexes := make([]int, 0, len(subs))
 	if len(subs) == 0 {
-		lines = append(lines, "none")
+		rawLines = append(rawLines, "none")
 	} else {
 		for _, sub := range subs {
 			short := sub.ID
@@ -2347,35 +2353,61 @@ func (m model) rootSidebarLines(width int) ([]string, int, int) {
 			if reason := subAgentFailureReason(sub); reason != "" {
 				label += " failed: " + reason
 			}
-			lines = append(lines, fmt.Sprintf("%s %s %s", statusDot(sub.Status, m.spinner), short, label))
+			row := fmt.Sprintf("%s %s %s", statusDot(sub.Status, m.spinner), short, label)
+			rawLines = append(rawLines, row)
+			subAgentRawIndexes = append(subAgentRawIndexes, len(rawLines)-1)
 		}
 	}
 
-	lines = append(lines, "", sectionStyle.Render("Usage Statistics"))
-	lines = append(lines, "Global:")
-	lines = append(lines, fmt.Sprintf("  In: %s  Out: %s", usage.FormatTokens(m.usageStats.TotalInput), usage.FormatTokens(m.usageStats.TotalOutput)))
+	rawLines = append(rawLines, "", sectionStyle.Render("Usage Statistics"))
+	rawLines = append(rawLines, "Global:")
+	rawLines = append(rawLines, fmt.Sprintf("  In: %s  Out: %s", usage.FormatTokens(m.usageStats.TotalInput), usage.FormatTokens(m.usageStats.TotalOutput)))
 	hitRate := 0.0
 	if m.usageStats.TotalInput > 0 {
 		hitRate = float64(m.usageStats.TotalCacheHit) / float64(m.usageStats.TotalInput) * 100
 	}
-	lines = append(lines, fmt.Sprintf("  Hit: %s (%.1f%%)", usage.FormatTokens(m.usageStats.TotalCacheHit), hitRate))
+	rawLines = append(rawLines, fmt.Sprintf("  Hit: %s (%.1f%%)", usage.FormatTokens(m.usageStats.TotalCacheHit), hitRate))
 
-	lines = append(lines, "Current Session:")
-	lines = append(lines, fmt.Sprintf("  In: %s  Out: %s", usage.FormatTokens(m.usageStats.SessionInput), usage.FormatTokens(m.usageStats.SessionOutput)))
+	rawLines = append(rawLines, "Current Session:")
+	rawLines = append(rawLines, fmt.Sprintf("  In: %s  Out: %s", usage.FormatTokens(m.usageStats.SessionInput), usage.FormatTokens(m.usageStats.SessionOutput)))
 	sessHitRate := 0.0
 	if m.usageStats.SessionInput > 0 {
 		sessHitRate = float64(m.usageStats.SessionCacheHit) / float64(m.usageStats.SessionInput) * 100
 	}
-	lines = append(lines, fmt.Sprintf("  Hit: %s (%.1f%%)", usage.FormatTokens(m.usageStats.SessionCacheHit), sessHitRate))
+	rawLines = append(rawLines, fmt.Sprintf("  Hit: %s (%.1f%%)", usage.FormatTokens(m.usageStats.SessionCacheHit), sessHitRate))
 
-	lines = append(lines, "", sectionStyle.Render("Context Window"))
-	lines = append(lines, renderProgressBar(m.latestTotalTokens, m.ctx.Root.ContextWindow, m.ctx.Root.MaxOutputTokens, contentWidth))
-	lines = append(lines, fmt.Sprintf("%s / %s", usage.FormatTokens(int64(m.latestTotalTokens)), usage.FormatTokens(int64(m.ctx.Root.ContextWindow))))
+	rawLines = append(rawLines, "", sectionStyle.Render("Context Window"))
+	rawLines = append(rawLines, renderProgressBar(m.latestTotalTokens, m.ctx.Root.ContextWindow, m.ctx.Root.MaxOutputTokens, contentWidth))
+	rawLines = append(rawLines, fmt.Sprintf("%s / %s", usage.FormatTokens(int64(m.latestTotalTokens)), usage.FormatTokens(int64(m.ctx.Root.ContextWindow))))
 
-	for i := range lines {
-		lines[i] = truncateDisplayLine(lines[i], contentWidth)
+	lines := make([]string, 0, len(rawLines))
+	subRows := make([]int, 0, len(subAgentRawIndexes))
+	nextSubAgent := 0
+	for rawIdx, line := range rawLines {
+		if nextSubAgent < len(subAgentRawIndexes) && rawIdx == subAgentRawIndexes[nextSubAgent] {
+			subRows = append(subRows, len(lines))
+			nextSubAgent++
+		}
+		lines = appendWrappedSidebarLine(lines, line, contentWidth)
 	}
-	return lines, subStart, len(subs)
+	return lines, subRows
+}
+
+func appendWrappedSidebarLine(lines []string, line string, width int) []string {
+	wrapped := wrapANSI(line, width)
+	parts := strings.Split(wrapped, "\n")
+	if len(parts) == 0 {
+		return append(lines, "")
+	}
+	return append(lines, parts...)
+}
+
+func sidebarSingleLine(text string) string {
+	text = strings.TrimSpace(strings.ReplaceAll(text, "\n", " "))
+	if text == "" {
+		return "-"
+	}
+	return text
 }
 
 func renderProgressBar(current, max, reserve, width int) string {
