@@ -295,6 +295,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.content = renderSessionContent(m.ctx, m.session, m.renderer, m.log.Width)
 		m.log.SetContent(m.wrapContent(m.content))
 	case tea.KeyMsg:
+		// When pasting multi-line text without bracketed paste, \r and \n
+		// arrive as separate KeyMsg events (KeyEnter / KeyCtrlJ). Convert
+		// them to spaces so the paste becomes a single line instead of
+		// triggering multiple sends.
+		if msg.Type == tea.KeyEnter || msg.Type == tea.KeyCtrlJ {
+			msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}}
+		}
 		if m.resumePicker {
 			next, cmd, handled := m.handleResumePickerKey(msg)
 			if handled {
