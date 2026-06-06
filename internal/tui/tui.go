@@ -271,8 +271,11 @@ func (m *model) syncInputSize() {
 		}
 		// Preserve scroll position when input area grows/shrinks
 		if prevHeight > 0 && m.log.Height != prevHeight {
+			wasAtBottom := m.log.AtBottom()
 			total := m.log.TotalLineCount()
-			if total > prevHeight && total > m.log.Height {
+			if wasAtBottom {
+				m.log.GotoBottom()
+			} else if total > prevHeight && total > m.log.Height {
 				ratio := float64(m.log.YOffset) / float64(total-prevHeight)
 				if ratio < 0 {
 					ratio = 0
