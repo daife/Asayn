@@ -679,40 +679,63 @@ func (m *model) invalidateWrap() {
 	m.wrappedContent = ""
 }
 
+// invalidateWrapFrom resets the wrap cache starting at byte position pos
+// in the content. Content before pos is assumed unchanged.
+func (m *model) invalidateWrapFrom(pos int) {
+	if pos <= 0 || pos >= m.wrappedLen {
+		m.invalidateWrap()
+		return
+	}
+	// Find last newline before pos in original content to keep cache clean
+	splice := pos
+	for splice > 0 && m.content[splice-1] != '\n' {
+		splice--
+	}
+	m.wrappedLen = splice
+	if m.wrappedLen > 0 {
+		lastNL := strings.LastIndex(m.wrappedContent, "\n")
+		if lastNL >= 0 {
+			m.wrappedContent = m.wrappedContent[:lastNL+1]
+		} else {
+			m.wrappedContent = ""
+		}
+	}
+}
+
 func (m *model) wrapContent(content string) string {
 	width := m.log.Width
 	if width <= 0 {
 		return content
 	}
-	// Incremental wrap: only wrap newly appended portion, reuse cached prefix.
-	// Width change or content truncation invalidates the cache.
 	if width != m.wrapWidth || len(content) < m.wrappedLen {
 		m.wrappedLen = 0
 		m.wrappedContent = ""
 		m.wrapWidth = width
 	}
 	if m.wrappedLen > 0 && len(content) > m.wrappedLen {
+		// Only wrap the newly appended portion.
 		newPart := content[m.wrappedLen:]
+		// Find a safe splice point: last \n in the original content before wrappedLen.
+		// This ensures the new wrap starts at a logical line boundary,
+		// avoiding re-wrapping mid-line content that wrapANSI already soft-broke.
 		splice := m.wrappedLen
-		// Only walk back at most 2000 chars to find a newline boundary
-		limit := splice - 2000
-		if limit < 0 {
-			limit = 0
-		}
-		for splice > limit && content[splice-1] != '\n' {
+		lookback := 2000
+		for lookback > 0 && splice > 0 && content[splice-1] != '\n' {
 			splice--
+			lookback--
 		}
-		if splice <= limit {
-			// No newline nearby — re-wrap from scratch
+		if lookback == 0 || splice == 0 {
+			// No newline found in lookback — full re-wrap
 			m.wrappedLen = 0
 		} else if splice < m.wrappedLen {
-			newPart = content[splice:]
+			// Trim wrappedContent back to the last complete wrapped line
 			lastNL := strings.LastIndex(m.wrappedContent, "\n")
 			if lastNL >= 0 {
 				m.wrappedContent = m.wrappedContent[:lastNL+1]
 			} else {
 				m.wrappedContent = ""
 			}
+			newPart = content[splice:]
 			m.wrappedLen = splice
 		}
 		if m.wrappedLen > 0 {
@@ -1108,6 +1131,7 @@ func (m *model) shouldAutoCompact(totalTokens int) bool {
 
 func (m *model) replacePendingTool(replacement string) {
 	if m.pendingToolStart >= 0 && m.pendingToolStart <= len(m.content) && strings.HasPrefix(m.content[m.pendingToolStart:], m.pendingToolLine) {
+		m.invalidateWrapFrom(m.pendingToolStart)
 		m.content = m.content[:m.pendingToolStart] + replacement + m.content[m.pendingToolStart+len(m.pendingToolLine):]
 		m.pendingToolLine = ""
 		m.pendingToolName = ""
@@ -1117,6 +1141,7 @@ func (m *model) replacePendingTool(replacement string) {
 	}
 	if m.pendingToolLine != "" {
 		if idx := strings.LastIndex(m.content, m.pendingToolLine); idx >= 0 {
+			m.invalidateWrapFrom(idx)
 			m.content = m.content[:idx] + replacement + m.content[idx+len(m.pendingToolLine):]
 			m.pendingToolLine = ""
 			m.pendingToolName = ""
@@ -1184,6 +1209,7 @@ func (m *model) finalizeStreamAnswer(final string) {
 func (m *model) replacePendingThinking(replacement string) {
 	if m.pendingThinkLine != "" {
 		if idx := strings.LastIndex(m.content, m.pendingThinkLine); idx >= 0 {
+			m.invalidateWrapFrom(idx)
 			m.content = m.content[:idx] + replacement + m.content[idx+len(m.pendingThinkLine):]
 			m.pendingThinkLine = replacement
 			m.refreshLog(false)
@@ -1198,6 +1224,7 @@ func (m *model) replacePendingThinking(replacement string) {
 func (m *model) updatePendingThinking(replacement string) {
 	if m.pendingThinkLine != "" {
 		if idx := strings.LastIndex(m.content, m.pendingThinkLine); idx >= 0 {
+			m.invalidateWrapFrom(idx)
 			m.content = m.content[:idx] + replacement + m.content[idx+len(m.pendingThinkLine):]
 			m.pendingThinkLine = replacement
 			m.refreshLog(false)
@@ -1275,6 +1302,7 @@ func (m *model) refreshPendingSpinners() {
 	if m.pendingThinkLine != "" && m.pendingThinkSpin {
 		next := "\n" + mutedStyle.Render(spinnerFrame(m.spinner)+" Thinking...") + "\n"
 		if m.pendingThinkStart >= 0 && m.pendingThinkStart < len(m.content) && strings.HasPrefix(m.content[m.pendingThinkStart:], m.pendingThinkLine) {
+			m.invalidateWrapFrom(m.pendingThinkStart)
 			m.content = m.content[:m.pendingThinkStart] + next + m.content[m.pendingThinkStart+len(m.pendingThinkLine):]
 			m.pendingThinkLine = next
 			changed = true
@@ -1283,6 +1311,7 @@ func (m *model) refreshPendingSpinners() {
 	if m.pendingToolLine != "" && m.pendingToolName != "" {
 		next := "\n" + toolRunStyle.Render(spinnerFrame(m.spinner)+" Tool called") + ": " + m.pendingToolName + "\n"
 		if m.pendingToolStart >= 0 && m.pendingToolStart < len(m.content) && strings.HasPrefix(m.content[m.pendingToolStart:], m.pendingToolLine) {
+			m.invalidateWrapFrom(m.pendingToolStart)
 			m.content = m.content[:m.pendingToolStart] + next + m.content[m.pendingToolStart+len(m.pendingToolLine):]
 			m.pendingToolLine = next
 			changed = true
