@@ -83,6 +83,9 @@ type model struct {
 	activeTimeoutStatus       string
 	sidebarCache              string
 	sidebarCacheKey           string
+	wrappedLen                int    // length of content that has been wrapped
+	wrappedContent            string // cached wrapped result up to wrappedLen
+	wrapWidth                 int    // width used for current wrappedContent cache
 }
 
 type agentMsg struct {
@@ -250,9 +253,24 @@ func (m *model) syncInputSize() {
 	m.input.SetWidth(width)
 
 	if m.height > 0 {
+		prevHeight := m.log.Height
 		m.log.Height = m.height - m.input.Height() - m.assistHeight()
 		if m.log.Height < 3 {
 			m.log.Height = 3
+		}
+		// Preserve scroll position when input area grows/shrinks
+		if prevHeight > 0 && m.log.Height != prevHeight {
+			total := m.log.TotalLineCount()
+			if total > prevHeight && total > m.log.Height {
+				ratio := float64(m.log.YOffset) / float64(total-prevHeight)
+				if ratio < 0 {
+					ratio = 0
+				}
+				if ratio > 1 {
+					ratio = 1
+				}
+				m.log.YOffset = int(ratio * float64(total-m.log.Height))
+			}
 		}
 	}
 }
@@ -295,7 +313,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.recalcLogWidth()
 		m.syncInputSize()
 		m.initRenderer(m.log.Width)
-		m.content = renderSessionContent(m.ctx, m.session, m.renderer, m.log.Width)
+		m.invalidateWrap(); m.content = renderSessionContent(m.ctx, m.session, m.renderer, m.log.Width)
 		m.refreshLog(false)
 	case tea.KeyMsg:
 		msg = sanitizePasteKeyMsg(msg)
@@ -458,7 +476,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !thinkingAlreadyRendered {
 				m.emitFinalThinking()
 			}
-			m.content = renderSessionContent(m.ctx, m.session, m.renderer, m.log.Width)
+			m.invalidateWrap(); m.content = renderSessionContent(m.ctx, m.session, m.renderer, m.log.Width)
 			m.pendingAnswerStart = -1
 			m.streamAnswerText = ""
 			m.refreshLog(false)
@@ -648,13 +666,61 @@ func (m *model) refreshLog(forceBottom bool) {
 	}
 }
 
-func (m model) wrapContent(content string) string {
+func (m *model) invalidateWrap() {
+	m.wrappedLen = 0
+	m.wrappedContent = ""
+}
+
+func (m *model) wrapContent(content string) string {
 	width := m.log.Width
 	if width <= 0 {
 		return content
 	}
-	return wrapANSI(content, width)
+	// Incremental wrap: only wrap newly appended portion, reuse cached prefix.
+	// Width change or content truncation invalidates the cache.
+	if width != m.wrapWidth || len(content) < m.wrappedLen {
+		m.wrappedLen = 0
+		m.wrappedContent = ""
+		m.wrapWidth = width
+	}
+	if m.wrappedLen > 0 && len(content) > m.wrappedLen {
+		newPart := content[m.wrappedLen:]
+		splice := m.wrappedLen
+		// Only walk back at most 2000 chars to find a newline boundary
+		limit := splice - 2000
+		if limit < 0 {
+			limit = 0
+		}
+		for splice > limit && content[splice-1] != '\n' {
+			splice--
+		}
+		if splice <= limit {
+			// No newline nearby — re-wrap from scratch
+			m.wrappedLen = 0
+		} else if splice < m.wrappedLen {
+			newPart = content[splice:]
+			lastNL := strings.LastIndex(m.wrappedContent, "\n")
+			if lastNL >= 0 {
+				m.wrappedContent = m.wrappedContent[:lastNL+1]
+			} else {
+				m.wrappedContent = ""
+			}
+			m.wrappedLen = splice
+		}
+		if m.wrappedLen > 0 {
+			wrappedNew := wrapANSI(newPart, width)
+			m.wrappedContent += wrappedNew
+			m.wrappedLen = len(content)
+		}
+	}
+	if m.wrappedLen == 0 {
+		m.wrappedContent = wrapANSI(content, width)
+		m.wrappedLen = len(content)
+	}
+	return m.wrappedContent
 }
+
+
 
 func (m *model) appendDivider() {
 	m.appendLog(renderDivider(m.log.Width, "") + "\n")
@@ -945,7 +1011,7 @@ func (m *model) appendAgentEvent(event llm.AgentEvent) bool {
 		if !thinkingAlreadyRendered {
 			m.emitFinalThinking()
 		}
-		m.content = renderSessionContent(m.ctx, m.session, m.renderer, m.log.Width)
+		m.invalidateWrap(); m.content = renderSessionContent(m.ctx, m.session, m.renderer, m.log.Width)
 		m.refreshLog(false)
 		m.pendingAnswerStart = -1
 		m.streamAnswerText = ""
@@ -1103,7 +1169,7 @@ func (m *model) finalizeStreamAnswer(final string) {
 	}
 	m.pendingAnswerStart = -1
 	m.streamAnswerText = ""
-	m.content = renderSessionContent(m.ctx, m.session, m.renderer, m.log.Width)
+	m.invalidateWrap(); m.content = renderSessionContent(m.ctx, m.session, m.renderer, m.log.Width)
 	m.refreshLog(false)
 }
 
@@ -1844,7 +1910,7 @@ func (m model) resumeSession(idOrName string) (model, tea.Cmd) {
 	m.historyIndex = -1
 	m.historyDraft = ""
 	m.ctx.Tools.RestoreSubAgents(sess, sess.SubAgents, m.ctx.SubSessions)
-	m.content = renderSessionContent(m.ctx, sess, m.renderer, m.log.Width)
+	m.invalidateWrap(); m.content = renderSessionContent(m.ctx, sess, m.renderer, m.log.Width)
 	m.usageStats, _ = m.ctx.UsageTracker.GetStats(m.session.ID)
 	m.refreshLog(true)
 	m.status = "ready"
