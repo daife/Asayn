@@ -1971,11 +1971,9 @@ func queuedMessageRows(messages []string, width int) []string {
 	if contentWidth < 20 {
 		contentWidth = 20
 	}
-	rows := []string{"queued messages:"}
-	for idx, msg := range messages {
-		rows = append(rows, fmt.Sprintf("%d. %s", idx+1, truncateDisplayLine(oneLine(msg), contentWidth)))
-	}
-	return rows
+	last := messages[len(messages)-1]
+	line := fmt.Sprintf("queued (%d): %s", len(messages), truncateDisplayLine(oneLine(last), contentWidth-15))
+	return []string{line}
 }
 
 func (m model) activeProviderIdleTimeout() time.Duration {
@@ -2305,6 +2303,7 @@ func (m model) rootSidebarLines(width int) ([]string, []int) {
 		status = spinnerFrame(m.spinner) + " " + status
 	}
 	rawLines := []string{
+		"",
 		"Asayn",
 		"agent skills are all you need",
 		"",

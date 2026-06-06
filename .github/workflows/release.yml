@@ -42,9 +42,9 @@ jobs:
           name: Asayn ${{ github.ref_name }}
           body: |
             ## Changes
-            - Sidebar toggle: entire right-edge column now clickable to hide/show sidebar.
-            - Sidebar shows title "Asayn"; Root Agent section simplified to name, model (provider), and status.
-            - Removed system prompt and thinking details from sidebar for cleaner look.
+            - Sidebar toggle: entire right-edge column clickable to hide/show; header padded so title "Asayn" always visible.
+            - Root Agent section simplified: name, model (provider), status.
+            - Queue messages now show only the last entry with count, avoiding multi-line render bugs during agent runs.
             ## Assets
             - `asayn-linux-amd64`
             - `asayn-linux-arm64`
