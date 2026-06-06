@@ -81,7 +81,6 @@ type model struct {
 	lastTurnDuration          time.Duration
 	activeRetryStatus         string
 	activeTimeoutStatus       string
-	contentDirty              bool
 	sidebarCache              string
 	sidebarCacheKey           string
 }
@@ -500,10 +499,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.spinner++
 			m.refreshPendingSpinners()
 		}
-		if m.contentDirty {
-			m.flushContent()
-		}
-		return m, uiTick()
+			return m, uiTick()
 	}
 	var cmd tea.Cmd
 	if key, ok := msg.(tea.KeyMsg); ok && m.historyIndex != -1 && isInputEditingKey(key.String()) {
@@ -626,19 +622,7 @@ func (m *model) appendLog(s string) {
 	m.refreshLog(false)
 }
 
-func (m *model) appendLogLazy(s string) {
-	m.content += s
-	m.contentDirty = true
-}
 
-func (m *model) flushContent() {
-	if !m.contentDirty {
-		return
-	}
-	m.contentDirty = false
-	// During streaming, user is typically at bottom; preserve that
-	m.refreshLog(m.log.AtBottom())
-}
 
 func (m *model) refreshLog(forceBottom bool) {
 	wasBottom := m.log.AtBottom()
@@ -1110,7 +1094,7 @@ func (m *model) appendAnswerDelta(delta string) {
 		m.streamAnswerText = ""
 	}
 	m.streamAnswerText += delta
-	m.appendLogLazy(delta)
+	m.appendLog(delta)
 }
 
 func (m *model) finalizeStreamAnswer(final string) {
@@ -1142,12 +1126,12 @@ func (m *model) updatePendingThinking(replacement string) {
 		if idx := strings.LastIndex(m.content, m.pendingThinkLine); idx >= 0 {
 			m.content = m.content[:idx] + replacement + m.content[idx+len(m.pendingThinkLine):]
 			m.pendingThinkLine = replacement
-			m.contentDirty = true
+			m.refreshLog(false)
 			return
 		}
 	}
 	m.pendingThinkLine = replacement
-	m.appendLogLazy(replacement)
+	m.appendLog(replacement)
 }
 
 func (m *model) clearPendingThinking() {
