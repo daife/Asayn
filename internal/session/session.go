@@ -22,7 +22,6 @@ type Session struct {
 	Messages        []types.ChatMessage `json:"messages"`
 	CompactedBefore int                 `json:"compacted_before,omitempty"`
 	VisibleSkills   map[string]bool     `json:"visible_skills"`
-	Changes         []FileChange        `json:"changes"`
 	SubAgents       []SubAgentRef       `json:"sub_agents"`
 	InputHistory    []string            `json:"input_history"`
 	LastTotalTokens int                 `json:"last_total_tokens,omitempty"`
@@ -36,16 +35,6 @@ type SubAgentRef struct {
 	Status    string    `json:"status"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
-}
-
-type FileChange struct {
-	ID            string    `json:"id"`
-	At            time.Time `json:"at"`
-	Path          string    `json:"path"`
-	Action        string    `json:"action"`
-	BeforeContent string    `json:"before_content"`
-	AfterContent  string    `json:"after_content"`
-	UnifiedDiff   string    `json:"unified_diff"`
 }
 
 type Store struct {
@@ -108,9 +97,6 @@ func HasContent(sess *Session) bool {
 	if sess == nil {
 		return false
 	}
-	if len(sess.Changes) > 0 {
-		return true
-	}
 	if len(sess.SubAgents) > 0 {
 		return true
 	}
@@ -149,7 +135,6 @@ func (s *Store) Fork(src *Session, name string) (*Session, error) {
 	cp.CreatedAt = time.Now()
 	cp.UpdatedAt = cp.CreatedAt
 	cp.Messages = append([]types.ChatMessage(nil), src.Messages...)
-	cp.Changes = append([]FileChange(nil), src.Changes...)
 	cp.SubAgents = append([]SubAgentRef(nil), src.SubAgents...)
 	cp.VisibleSkills = map[string]bool{}
 	for k, v := range src.VisibleSkills {
@@ -214,17 +199,6 @@ func (s *Store) UpdateSubAgent(sess *Session, taskID, sessionID, status string) 
 
 func (s *Store) Rename(sess *Session, name string) error {
 	sess.Name = name
-	return s.Save(sess)
-}
-
-func (s *Store) AddChange(sess *Session, change FileChange) error {
-	if change.ID == "" {
-		change.ID = uuid.NewString()
-	}
-	if change.At.IsZero() {
-		change.At = time.Now()
-	}
-	sess.Changes = append(sess.Changes, change)
 	return s.Save(sess)
 }
 

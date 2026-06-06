@@ -41,17 +41,10 @@ jobs:
         with:
           name: Asayn ${{ github.ref_name }}
           body: |
-            ## Changes
-            - Sidebar toggle: entire right-edge column clickable to hide/show; header padded so title "Asayn" always visible.
-            - Root Agent section simplified: name, model (provider), status.
-            - Queue messages now show only the last entry with count, avoiding multi-line render bugs during agent runs.
-            ## Assets
-            - `asayn-linux-amd64`
-            - `asayn-linux-arm64`
-            - `asayn-darwin-amd64`
-            - `asayn-darwin-arm64`
-            - `asayn-windows-amd64.exe`
-            - `SHA256SUMS.txt`: asset checksums.
+            ## Beta
+            - Removed `file_edit` and `view_history` tools.
+            - File modifications should use `shell_run_sync` with Python.
+            - Sub-agents have `shell_run_sync` (sync only).
           files: |
             dist/asayn-linux-amd64
             dist/asayn-linux-arm64

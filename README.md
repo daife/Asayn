@@ -263,14 +263,6 @@ Skills are directory-based packages. Asayn discovers only directories that conta
 
 `SKILL.md` must start with YAML frontmatter metadata, commonly `name` and `description`, followed by Markdown instructions. At startup and prompt refresh, Asayn exposes only each visible skill's folder and frontmatter metadata to the model; the full raw `SKILL.md` file is loaded only through the `skill_read` tool after the skill is enabled with `/model_config` or listed in the active agent config.
 
-## File Edit Tool
+## File Editing
 
-`file_edit` records reversible file changes and returns a focused unified diff for the change:
-
-- `mode="write"` creates or overwrites a file.
-- `mode="delete_lines"`, `mode="insert"`, and `mode="replace_lines"` edit by 1-based line numbers.
-- `mode="find_replace"` treats `old_text` as a `grep_search`-style regex and replaces it with `new_text`; use `replace_all=true` when multiple matches are intended.
-- Prefer `mode="find_replace"` for unique content-based edits. Use `mode="batch"` for multiple non-overlapping line-based edits in one file; batch operations use original file line numbers, reject overlapping delete/replace ranges, and keep same-line inserts in array order.
-- `mode="rollback"` restores one or more recorded changes and removes those change records from history.
-
-Use `view_history` to list recent change summaries or view the recorded diff for `change_id` / `change_ids`. Use `file_read` for file contents.
+The beta version removes `file_edit` and `view_history` tools. To modify files, use the `shell_run_sync` tool with Python (e.g., `python3 -c '...'` or a heredoc). Sub-agents also have `shell_run_sync` available.

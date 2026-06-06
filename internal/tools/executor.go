@@ -80,7 +80,7 @@ func (e *Executor) SetAgentLimits(maxOutputLines int, allowParallelShell, allowI
 func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 	workspaceRule := "Use workspace-relative paths by default. Absolute paths are accepted only when they stay inside the workspace. Avoid modifying .Asayn/ unless explicitly asked to change Asayn configurations."
 	schemas := []types.ToolSchema{
-		schema("file_read", "Read a file. "+workspaceRule+" Binary files and files without extensions are considered risky and will only show a preview unless force_binary is set.", map[string]any{
+		schema("file_read", "Read a file. "+workspaceRule+" Binary files and files without extensions are considered risky and will only show a preview unless force_binary is set. To modify files, use the shell_run_sync tool with Python (e.g., python3 -c '...' or a heredoc).", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"path":         prop("string", "File path. Prefer a path relative to the workspace."),
@@ -112,52 +112,7 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 			},
 			"required": []string{"name"},
 		}),
-		schema("file_edit", "Edit files. "+workspaceRule+" All edits are recorded as reversible changes. Prefer find_replace for unique content-based changes. Use mode=\"batch\" for multiple non-overlapping line-based edits in one file: batch operations use original file line numbers and are applied from bottom to top so earlier edits do not shift later ones.", map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"mode":              prop("string", "write, delete_lines, insert, replace_lines, find_replace, batch, or rollback."),
-				"path":              prop("string", "File path. Prefer a path relative to the workspace."),
-				"content":           prop("string", "Full file content for write mode."),
-				"start_line":        prop("integer", "First line, 1-based. For delete_lines and replace_lines."),
-				"end_line":          prop("integer", "Last line, 1-based inclusive. For delete_lines and replace_lines."),
-				"insert_after_line": prop("integer", "Line number to insert after. 0 = prepend. For insert mode."),
-				"text":              prop("string", "New text for insert or replace_lines."),
-				"old_text":          prop("string", "Regex pattern using grep_search syntax. For find_replace mode."),
-				"new_text":          prop("string", "Replacement text. For find_replace mode."),
-				"replace_all":       prop("boolean", "Replace all matches. Default false. For find_replace mode."),
-				"change_id":         prop("string", "Recorded change ID for rollback."),
-				"change_ids":        prop("array", "Recorded change IDs for rollback."),
-				"batch": map[string]any{
-					"type":        "array",
-					"description": "Required for mode=batch. Array of line-based operations for one file. Each operation uses line numbers from the original file; delete_lines/replace_lines ranges must not overlap. Operations are applied from bottom to top; multiple inserts at the same line keep array order in the final file.",
-					"items": map[string]any{
-						"type": "object",
-						"properties": map[string]any{
-							"mode":              prop("string", "delete_lines, insert, or replace_lines."),
-							"path":              prop("string", "File path. Required on the first operation; optional later operations must match the first path."),
-							"start_line":        prop("integer", "First line, 1-based. For delete_lines and replace_lines."),
-							"end_line":          prop("integer", "Last line, 1-based inclusive. For delete_lines and replace_lines."),
-							"insert_after_line": prop("integer", "Original line number to insert after. 0 = prepend. For insert mode."),
-							"text":              prop("string", "New text for insert or replace_lines."),
-						},
-						"required": []string{"mode"},
-					},
-				},
-			},
-			"required": []string{"mode"},
-		}),
-		schema("view_history", "View recorded file change history or focused diffs for change IDs. Prefer workspace-relative paths when a path filter is supplied.", map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"path":       prop("string", "Optional file path filter. Prefer a path relative to the workspace."),
-				"change_id":  prop("string", "Recorded change ID to view."),
-				"change_ids": prop("array", "Recorded change IDs to view."),
-				"limit":      prop("integer", "History summary limit. Default 10, max 25."),
-			},
-		}),
-	}
-	if forSubAgent {
-		return schemas
+
 	}
 	shellCWD := e.paths.WorkspaceRoot
 	if shellCWD == "" {
@@ -172,6 +127,9 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 		},
 		"required": []string{"command"},
 	}))
+	if forSubAgent {
+		return schemas
+	}
 	if !e.allowParallelShell {
 		return append(schemas, subAgentSchemas()...)
 	}
@@ -249,7 +207,7 @@ func subAgentSchemas() []types.ToolSchema {
 }
 
 func (e *Executor) Run(ctx context.Context, sess *session.Session, name string, args map[string]any) (string, error) {
-	if e.basicOnly && name != "file_read" && name != "dir_view" && name != "grep_search" && name != "skill_read" && name != "file_edit" && name != "view_history" {
+	if e.basicOnly && name != "file_read" && name != "dir_view" && name != "grep_search" && name != "skill_read" && name != "shell_run_sync" {
 		return "", fmt.Errorf("tool %q is not available to basic-only agents", name)
 	}
 	switch name {
@@ -261,10 +219,6 @@ func (e *Executor) Run(ctx context.Context, sess *session.Session, name string, 
 		return e.searchGrep(args)
 	case "skill_read":
 		return e.readSkill(args)
-	case "file_edit":
-		return e.fileEdit(sess, args)
-	case "view_history":
-		return e.viewHistory(sess, args)
 	case "shell_run_sync":
 		return e.shells.RunBlocking(ctx, stringArg(args, "command"), intArg(args, "timeout_sec", 60))
 	case "shell_run_async":
