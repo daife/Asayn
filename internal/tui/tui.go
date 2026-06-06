@@ -89,6 +89,8 @@ type model struct {
 	wrapWidth                 int
 	wrappedLen                int
 	rawNL                     int
+	wrappedPrefix             string // wrapped content up to last raw newline (stable)
+	wrappedPrefixRawLen       int    // byte position of last raw newline + 1
 }
 
 type agentMsg struct {
@@ -686,6 +688,8 @@ func (m *model) invalidateWrap() {
 	m.wrappedContent = ""
 	m.wrappedLen = 0
 	m.rawNL = 0
+	m.wrappedPrefix = ""
+	m.wrappedPrefixRawLen = 0
 }
 
 func (m *model) invalidateWrapFrom(pos int) {
@@ -693,7 +697,6 @@ func (m *model) invalidateWrapFrom(pos int) {
 		m.invalidateWrap()
 		return
 	}
-	// Count raw newlines up to pos.
 	nl := 0
 	for i := 0; i < pos; i++ {
 		if m.content[i] == '\n' {
@@ -704,7 +707,8 @@ func (m *model) invalidateWrapFrom(pos int) {
 		m.rawNL = nl
 		m.wrappedLines = nl
 		m.wrappedLen = pos
-		// Re-wrap the prefix to get correct wrapped content up to pos.
+		m.wrappedPrefix = ""
+		m.wrappedPrefixRawLen = 0
 		if pos > 0 {
 			m.wrappedContent = wrapANSI(m.content[:pos], m.wrapWidth)
 			m.wrappedLines = linesIn(m.wrappedContent)
@@ -739,6 +743,8 @@ func (m *model) wrapContent(content string) string {
 		m.rawNL = 0
 		m.wrapWidth = width
 		m.wrappedLen = 0
+		m.wrappedPrefix = ""
+		m.wrappedPrefixRawLen = 0
 	}
 
 	// Count raw newlines in current content.
@@ -756,46 +762,36 @@ func (m *model) wrapContent(content string) string {
 		m.rawNL = totalRawNL
 		m.wrappedLen = len(content)
 		m.wrapWidth = width
+		// Set stable prefix (up to last raw newline).
+		lastNL := strings.LastIndex(content, "\n")
+		if lastNL >= 0 {
+			m.wrappedPrefixRawLen = lastNL + 1
+			m.wrappedPrefix = wrapANSI(content[:m.wrappedPrefixRawLen], width)
+		}
 		return m.wrappedContent
 	}
 
-	// Find the byte offset in raw content that corresponds to the
-	// last fully-processed raw line boundary (the rawNL-th newline).
-	nlSeen := 0
-	start := 0
-	for start < len(content) && nlSeen < m.rawNL {
-		if content[start] == '\n' {
-			nlSeen++
-		}
-		start++
-	}
-
 	if totalRawNL > m.rawNL {
-		// New raw lines appeared. Wrap only the new portion and append.
-		newPart := content[start:]
+		// New raw lines appeared. Extend the stable prefix to the
+		// last raw newline, then wrap only the new tail.
+		lastNL := strings.LastIndex(content, "\n")
+		newPrefixRawLen := lastNL + 1
+		prefixTail := content[m.wrappedPrefixRawLen:newPrefixRawLen]
+		m.wrappedPrefix += wrapANSI(prefixTail, width)
+		m.wrappedPrefixRawLen = newPrefixRawLen
+
+		newPart := content[m.wrappedLen:]
 		wrappedNew := wrapANSI(newPart, width)
-		m.wrappedContent += wrappedNew
+		m.wrappedContent = m.wrappedPrefix + wrappedNew
 		m.wrappedLines = linesIn(m.wrappedContent)
 		m.rawNL = totalRawNL
 		m.wrappedLen = len(content)
 		return m.wrappedContent
 	}
 
-	// Same raw line count — mid-line delta or spinner replacement.
-	// Trim wrappedContent back to the rawNL-th wrapped newline.
-	// Since prefix content hasn't changed, wrapped layout is stable.
-	nlSeen = 0
-	trimIdx := 0
-	for trimIdx < len(m.wrappedContent) && nlSeen < m.rawNL {
-		if m.wrappedContent[trimIdx] == '\n' {
-			nlSeen++
-		}
-		trimIdx++
-	}
-	m.wrappedContent = m.wrappedContent[:trimIdx]
-	newPart := content[start:]
-	wrappedNew := wrapANSI(newPart, width)
-	m.wrappedContent += wrappedNew
+	// Same raw line count (mid-line delta). Prefix is stable.
+	tail := content[m.wrappedPrefixRawLen:]
+	m.wrappedContent = m.wrappedPrefix + wrapANSI(tail, width)
 	m.wrappedLines = linesIn(m.wrappedContent)
 	m.wrappedLen = len(content)
 	return m.wrappedContent
