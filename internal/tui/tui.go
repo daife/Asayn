@@ -88,6 +88,7 @@ type model struct {
 	wrappedContent            string
 	wrapWidth                 int
 	wrappedLen                int
+	rawNL                     int
 }
 
 type agentMsg struct {
@@ -681,6 +682,7 @@ func (m *model) invalidateWrap() {
 	m.wrappedLines = 0
 	m.wrappedContent = ""
 	m.wrappedLen = 0
+	m.rawNL = 0
 }
 
 func (m *model) invalidateWrapFrom(pos int) {
@@ -688,87 +690,104 @@ func (m *model) invalidateWrapFrom(pos int) {
 		m.invalidateWrap()
 		return
 	}
+	// Count raw newlines up to pos.
 	nl := 0
 	for i := 0; i < pos; i++ {
 		if m.content[i] == '\n' {
 			nl++
 		}
 	}
-	if nl < m.wrappedLines {
+	if nl < m.rawNL {
+		m.rawNL = nl
 		m.wrappedLines = nl
-		cnt := 0
-		idx := 0
-		for idx < len(m.wrappedContent) && cnt < nl {
-			if m.wrappedContent[idx] == '\n' {
-				cnt++
-			}
-			idx++
-		}
-		m.wrappedContent = m.wrappedContent[:idx]
 		m.wrappedLen = pos
+		// Re-wrap the prefix to get correct wrapped content up to pos.
+		if pos > 0 {
+			m.wrappedContent = wrapANSI(m.content[:pos], m.wrapWidth)
+			m.wrappedLines = linesIn(m.wrappedContent)
+		} else {
+			m.wrappedContent = ""
+			m.wrappedLines = 0
+		}
 	}
 }
+
+func linesIn(s string) int {
+	n := 0
+	for _, b := range []byte(s) {
+		if b == '\n' {
+			n++
+		}
+	}
+	return n
+}
+
 
 func (m *model) wrapContent(content string) string {
 	width := m.log.Width
 	if width <= 0 {
 		return content
 	}
-	// Full re-wrap when width changes or content was truncated
+
+	// Full re-wrap when width changes or content was truncated.
 	if width != m.wrapWidth || len(content) < m.wrappedLen {
 		m.wrappedLines = 0
 		m.wrappedContent = ""
+		m.rawNL = 0
 		m.wrapWidth = width
 		m.wrappedLen = 0
 	}
 
-	// Count lines in current content
-	totalNL := 0
+	// Count raw newlines in current content.
+	totalRawNL := 0
 	for _, b := range []byte(content) {
 		if b == '\n' {
-			totalNL++
+			totalRawNL++
 		}
 	}
 
-	if m.wrappedLines == 0 || totalNL == 0 {
+	// Full wrap if cache is empty.
+	if m.wrappedLines == 0 {
 		m.wrappedContent = wrapANSI(content, width)
-		m.wrappedLines = totalNL
+		m.wrappedLines = linesIn(m.wrappedContent)
+		m.rawNL = totalRawNL
 		m.wrappedLen = len(content)
+		m.wrapWidth = width
 		return m.wrappedContent
 	}
 
-	// Find byte offset of the m.wrappedLines-th newline
-	nlCount := 0
+	// Find the byte offset in raw content that corresponds to the
+	// last fully-processed raw line boundary (the rawNL-th newline).
+	nlSeen := 0
 	start := 0
-	for start < len(content) && nlCount < m.wrappedLines {
+	for start < len(content) && nlSeen < m.rawNL {
 		if content[start] == '\n' {
-			nlCount++
+			nlSeen++
 		}
 		start++
 	}
 
-	if totalNL > m.wrappedLines {
-		// New complete lines appeared — wrap only the new portion
+	if totalRawNL > m.rawNL {
+		// New raw lines appeared. Wrap only the new portion and append.
 		newPart := content[start:]
 		wrappedNew := wrapANSI(newPart, width)
 		m.wrappedContent += wrappedNew
-		m.wrappedLines = totalNL
+		m.wrappedLines = linesIn(m.wrappedContent)
+		m.rawNL = totalRawNL
 		m.wrappedLen = len(content)
-	} else {
-		// Same line count, different content (mid-line delta or spinner replacement).
-		// Trim wrappedContent to last complete line and re-wrap from there.
-		lastNL := strings.LastIndex(m.wrappedContent, "\n")
-		if lastNL >= 0 {
-			m.wrappedContent = m.wrappedContent[:lastNL+1]
-		} else {
-			m.wrappedContent = ""
-		}
-		newPart := content[start:]
-		wrappedNew := wrapANSI(newPart, width)
-		m.wrappedContent += wrappedNew
-		m.wrappedLines = totalNL
-		m.wrappedLen = len(content)
+		return m.wrappedContent
 	}
+
+	// Same raw line count — mid-line delta or spinner replacement.
+	// Count wrapped newlines up to the rawNL-th raw newline boundary.
+	// We do this by re-wrapping content[:start] and counting its lines.
+	prefixWrapped := wrapANSI(content[:start], width)
+	m.wrappedContent = prefixWrapped
+	newPart := content[start:]
+	wrappedNew := wrapANSI(newPart, width)
+	m.wrappedContent += wrappedNew
+	m.wrappedLines = linesIn(m.wrappedContent)
+	m.wrappedLen = len(content)
 	return m.wrappedContent
 }
 
