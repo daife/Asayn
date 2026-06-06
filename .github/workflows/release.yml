@@ -43,8 +43,8 @@ jobs:
           name: Asayn ${{ github.ref_name }}
           body: |
             ## Changes
-            - Fix: `file_edit` now supports `batch` mode — apply multiple line-based operations in one call against the original file to avoid line drift.
-            - Fix: multi-line paste now coalesces into a single message instead of sending each line separately.
+            - Fix: `file_edit` batch mode is now explicitly exposed in the tool schema and applies multiple line-based operations against original file line numbers.
+            - Fix: bracketed multi-line paste now coalesces into one input without breaking normal Enter-to-send behavior on Windows.
             - Fix: `/model_config` settings now persist globally in `~/.Asayn/` instead of being workspace-scoped.
             - Fix: PowerShell on Windows now forces UTF-8 output encoding to prevent UTF-16 garbled text.
 

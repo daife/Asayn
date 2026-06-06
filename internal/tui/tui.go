@@ -295,13 +295,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.content = renderSessionContent(m.ctx, m.session, m.renderer, m.log.Width)
 		m.log.SetContent(m.wrapContent(m.content))
 	case tea.KeyMsg:
-		// When pasting multi-line text without bracketed paste, \r and \n
-		// arrive as separate KeyMsg events (KeyEnter / KeyCtrlJ). Convert
-		// them to spaces so the paste becomes a single line instead of
-		// triggering multiple sends.
-		if msg.Type == tea.KeyEnter || msg.Type == tea.KeyCtrlJ {
-			msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}}
-		}
+		msg = sanitizePasteKeyMsg(msg)
 		if m.resumePicker {
 			next, cmd, handled := m.handleResumePickerKey(msg)
 			if handled {
@@ -515,6 +509,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.log, cmd = m.log.Update(msg)
 	cmds = append(cmds, cmd)
 	return m, tea.Batch(cmds...)
+}
+
+func sanitizePasteKeyMsg(msg tea.KeyMsg) tea.KeyMsg {
+	if !msg.Paste || msg.Type != tea.KeyRunes {
+		return msg
+	}
+	runes := append([]rune(nil), msg.Runes...)
+	for idx, r := range runes {
+		if r == '\r' || r == '\n' {
+			runes[idx] = ' '
+		}
+	}
+	msg.Runes = runes
+	return msg
 }
 
 func (m model) cleanupEmptySession() error {

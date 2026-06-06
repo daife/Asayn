@@ -197,21 +197,19 @@ func replaceFirstRegexMatch(re *regexp.Regexp, src, repl string, match []int) st
 }
 
 // fileEditBatch applies multiple line-based operations to the same file
-// in REVERSE order against the original content, so that line numbers
-// from the caller's perspective stay stable.  It produces a single
-// combined diff and one recorded change.
+// from bottom to top against the original content, so line numbers from the
+// caller's perspective stay stable. It produces a single combined diff and one
+// recorded change.
 func (e *Executor) fileEditBatch(sess *session.Session, args map[string]any) (string, error) {
 	rawOps, ok := args["batch"].([]any)
 	if !ok || len(rawOps) == 0 {
 		return "", fmt.Errorf("batch field must be a non-empty array of op objects for batch mode")
 	}
 
-	// Resolve path from first op (all ops share the same file).
-	first, ok := rawOps[0].(map[string]any)
-	if !ok {
-		return "", fmt.Errorf("each batch element must be an object")
+	ops, inputPath, err := parseBatchOps(rawOps)
+	if err != nil {
+		return "", err
 	}
-	inputPath := stringArg(first, "path")
 	displayPath, err := e.workspaceDisplayPath(inputPath)
 	if err != nil {
 		return "", err
@@ -228,70 +226,18 @@ func (e *Executor) fileEditBatch(sess *session.Session, args map[string]any) (st
 	before := string(beforeBytes)
 	after := before
 
-	// Apply in REVERSE order: last op first, so earlier ops' line numbers
-	// remain valid against the original file.
-	for idx := len(rawOps) - 1; idx >= 0; idx-- {
-		op, ok := rawOps[idx].(map[string]any)
-		if !ok {
-			return "", fmt.Errorf("each batch element must be an object")
+	sort.SliceStable(ops, func(i, j int) bool {
+		if ops[i].anchor == ops[j].anchor {
+			return ops[i].index > ops[j].index
 		}
-		opMode := stringArg(op, "mode")
-		switch opMode {
-		case "delete_lines":
-			start := intArg(op, "start_line", 0)
-			end := intArg(op, "end_line", 0)
-			if start <= 0 || end <= 0 || start > end {
-				return "", fmt.Errorf("batch op %d (delete_lines): start_line and end_line required, start_line <= end_line", idx)
-			}
-			lines := strings.Split(after, "\n")
-			if start > len(lines) || end > len(lines) {
-				return "", fmt.Errorf("batch op %d (delete_lines): line range %d-%d outside file (has %d lines)", idx, start, end, len(lines))
-			}
-			after = strings.Join(append(lines[:start-1], lines[end:]...), "\n")
-		case "insert":
-			insertAfter := intArg(op, "insert_after_line", 0)
-			text := stringArg(op, "text")
-			if text == "" {
-				return "", fmt.Errorf("batch op %d (insert): text is required", idx)
-			}
-			lines := strings.Split(after, "\n")
-			if insertAfter < 0 || insertAfter > len(lines) {
-				return "", fmt.Errorf("batch op %d (insert): insert_after_line %d outside file (has %d lines)", idx, insertAfter, len(lines))
-			}
-			if insertAfter == 0 {
-				after = text + "\n" + after
-			} else {
-				after = strings.Join(lines[:insertAfter], "\n") + "\n" + text + "\n" + strings.Join(lines[insertAfter:], "\n")
-			}
-			after = strings.TrimPrefix(after, "\n")
-		case "replace_lines":
-			start := intArg(op, "start_line", 0)
-			end := intArg(op, "end_line", 0)
-			text := stringArg(op, "text")
-			if start <= 0 || end <= 0 || start > end {
-				return "", fmt.Errorf("batch op %d (replace_lines): start_line and end_line required, start_line <= end_line", idx)
-			}
-			lines := strings.Split(after, "\n")
-			if start > len(lines) || end > len(lines) {
-				return "", fmt.Errorf("batch op %d (replace_lines): line range %d-%d outside file (has %d lines)", idx, start, end, len(lines))
-			}
-			head := strings.Join(lines[:start-1], "\n")
-			if text != "" {
-				if head != "" {
-					head += "\n"
-				}
-				head += text
-			}
-			tail := strings.Join(lines[end:], "\n")
-			if tail != "" {
-				if head != "" {
-					head += "\n"
-				}
-				head += tail
-			}
-			after = head
-		default:
-			return "", fmt.Errorf("batch op %d: unsupported mode %q; batch only supports delete_lines, insert, replace_lines", idx, opMode)
+		return ops[i].anchor > ops[j].anchor
+	})
+
+	for _, op := range ops {
+		var err error
+		after, err = applyBatchLineOp(after, op)
+		if err != nil {
+			return "", err
 		}
 	}
 
@@ -323,6 +269,110 @@ func (e *Executor) fileEditBatch(sess *session.Session, args map[string]any) (st
 	return truncate(fmt.Sprintf("change_id=%s\n%s", change.ID, diff), e.maxOutputLines), nil
 }
 
+type batchLineOp struct {
+	index           int
+	mode            string
+	path            string
+	startLine       int
+	endLine         int
+	insertAfterLine int
+	text            string
+	anchor          int
+}
+
+func parseBatchOps(rawOps []any) ([]batchLineOp, string, error) {
+	ops := make([]batchLineOp, 0, len(rawOps))
+	inputPath := ""
+	for idx, raw := range rawOps {
+		rawOp, ok := raw.(map[string]any)
+		if !ok {
+			return nil, "", fmt.Errorf("batch op %d: each batch element must be an object", idx)
+		}
+		op := batchLineOp{
+			index:           idx,
+			mode:            stringArg(rawOp, "mode"),
+			path:            stringArg(rawOp, "path"),
+			startLine:       intArg(rawOp, "start_line", 0),
+			endLine:         intArg(rawOp, "end_line", 0),
+			insertAfterLine: intArg(rawOp, "insert_after_line", 0),
+			text:            stringArg(rawOp, "text"),
+		}
+		if op.path != "" {
+			if inputPath == "" {
+				inputPath = op.path
+			} else if op.path != inputPath {
+				return nil, "", fmt.Errorf("batch op %d: path %q does not match first path %q", idx, op.path, inputPath)
+			}
+		}
+		switch op.mode {
+		case "delete_lines":
+			if op.startLine <= 0 || op.endLine <= 0 || op.startLine > op.endLine {
+				return nil, "", fmt.Errorf("batch op %d (delete_lines): start_line and end_line required, start_line <= end_line", idx)
+			}
+			op.anchor = op.startLine
+		case "insert":
+			if op.text == "" {
+				return nil, "", fmt.Errorf("batch op %d (insert): text is required", idx)
+			}
+			if op.insertAfterLine < 0 {
+				return nil, "", fmt.Errorf("batch op %d (insert): insert_after_line must be >= 0", idx)
+			}
+			op.anchor = op.insertAfterLine
+		case "replace_lines":
+			if op.startLine <= 0 || op.endLine <= 0 || op.startLine > op.endLine {
+				return nil, "", fmt.Errorf("batch op %d (replace_lines): start_line and end_line required, start_line <= end_line", idx)
+			}
+			op.anchor = op.startLine
+		default:
+			return nil, "", fmt.Errorf("batch op %d: unsupported mode %q; batch only supports delete_lines, insert, replace_lines", idx, op.mode)
+		}
+		ops = append(ops, op)
+	}
+	if inputPath == "" {
+		return nil, "", fmt.Errorf("batch mode requires a path on at least one operation")
+	}
+	return ops, inputPath, nil
+}
+
+func applyBatchLineOp(content string, op batchLineOp) (string, error) {
+	lines := strings.Split(content, "\n")
+	switch op.mode {
+	case "delete_lines":
+		if op.startLine > len(lines) || op.endLine > len(lines) {
+			return "", fmt.Errorf("batch op %d (delete_lines): line range %d-%d outside file (has %d lines)", op.index, op.startLine, op.endLine, len(lines))
+		}
+		return strings.Join(append(lines[:op.startLine-1], lines[op.endLine:]...), "\n"), nil
+	case "insert":
+		if op.insertAfterLine > len(lines) {
+			return "", fmt.Errorf("batch op %d (insert): insert_after_line %d outside file (has %d lines)", op.index, op.insertAfterLine, len(lines))
+		}
+		if op.insertAfterLine == 0 {
+			return strings.TrimPrefix(op.text+"\n"+content, "\n"), nil
+		}
+		return strings.TrimPrefix(strings.Join(lines[:op.insertAfterLine], "\n")+"\n"+op.text+"\n"+strings.Join(lines[op.insertAfterLine:], "\n"), "\n"), nil
+	case "replace_lines":
+		if op.startLine > len(lines) || op.endLine > len(lines) {
+			return "", fmt.Errorf("batch op %d (replace_lines): line range %d-%d outside file (has %d lines)", op.index, op.startLine, op.endLine, len(lines))
+		}
+		head := strings.Join(lines[:op.startLine-1], "\n")
+		if op.text != "" {
+			if head != "" {
+				head += "\n"
+			}
+			head += op.text
+		}
+		tail := strings.Join(lines[op.endLine:], "\n")
+		if tail != "" {
+			if head != "" {
+				head += "\n"
+			}
+			head += tail
+		}
+		return head, nil
+	default:
+		return "", fmt.Errorf("batch op %d: unsupported mode %q", op.index, op.mode)
+	}
+}
 
 func (e *Executor) viewHistory(sess *session.Session, args map[string]any) (string, error) {
 	e.mu.Lock()

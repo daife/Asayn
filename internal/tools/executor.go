@@ -112,10 +112,10 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 			},
 			"required": []string{"name"},
 		}),
-		schema("file_edit", "Edit files with line-based operations. "+workspaceRule+" All edits are recorded as reversible changes. find_replace treats old_text as a grep_search-style regex. When issuing multiple line-based edits (delete_lines, insert, replace_lines) on the same file in one turn, prefer the batch field: pass an array of mode/path/start_line/end_line/insert_after_line/text objects; they are applied in reverse order against the original file so line numbers stay stable.", map[string]any{
+		schema("file_edit", "Edit files with line-based operations. "+workspaceRule+" All edits are recorded as reversible changes. find_replace treats old_text as a grep_search-style regex. Use mode=\"batch\" for multiple line-based edits in one file: batch operations use original file line numbers and are applied from bottom to top so earlier edits do not shift later ones.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"mode":              prop("string", "write, delete_lines, insert, replace_lines, find_replace, or rollback."),
+				"mode":              prop("string", "write, delete_lines, insert, replace_lines, find_replace, batch, or rollback."),
 				"path":              prop("string", "File path. Prefer a path relative to the workspace."),
 				"content":           prop("string", "Full file content for write mode."),
 				"start_line":        prop("integer", "First line, 1-based. For delete_lines and replace_lines."),
@@ -127,7 +127,22 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 				"replace_all":       prop("boolean", "Replace all matches. Default false. For find_replace mode."),
 				"change_id":         prop("string", "Recorded change ID for rollback."),
 				"change_ids":        prop("array", "Recorded change IDs for rollback."),
-				"batch":             prop("array", "Array of operations to apply in reverse order against the original file. Each element is an object with mode/path/start_line/end_line/insert_after_line/text as needed."),
+				"batch": map[string]any{
+					"type":        "array",
+					"description": "Required for mode=batch. Array of line-based operations for one file. Each operation uses line numbers from the original file; operations are sorted and applied from bottom to top.",
+					"items": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"mode":              prop("string", "delete_lines, insert, or replace_lines."),
+							"path":              prop("string", "File path. Required on the first operation; optional later operations must match the first path."),
+							"start_line":        prop("integer", "First line, 1-based. For delete_lines and replace_lines."),
+							"end_line":          prop("integer", "Last line, 1-based inclusive. For delete_lines and replace_lines."),
+							"insert_after_line": prop("integer", "Original line number to insert after. 0 = prepend. For insert mode."),
+							"text":              prop("string", "New text for insert or replace_lines."),
+						},
+						"required": []string{"mode"},
+					},
+				},
 			},
 			"required": []string{"mode"},
 		}),
