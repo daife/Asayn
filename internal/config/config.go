@@ -253,7 +253,7 @@ func SaveAgent(paths Paths, kind, name string, update func(*AgentConfig)) (Agent
 	if cfg.Name == "" {
 		cfg.Name = name
 	}
-	path := paths.WorkspacePath(kind, name+".toml")
+	path := paths.HomePath(kind, name+".toml")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return cfg, err
 	}
