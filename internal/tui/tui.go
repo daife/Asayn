@@ -229,6 +229,17 @@ func (m *model) initRenderer(width int) {
 	m.renderer = r
 }
 
+func (m *model) recalcLogWidth() {
+	sidebar := 30
+	if m.width < 100 || m.sidebarHidden {
+		sidebar = 0
+	}
+	m.log.Width = m.width - sidebar - 4
+	if m.log.Width < 20 {
+		m.log.Width = m.width
+	}
+}
+
 func (m *model) syncInputSize() {
 	width := m.log.Width
 	if width <= 0 {
@@ -279,14 +290,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		sidebar := 30
-		if msg.Width < 100 || m.sidebarHidden {
-			sidebar = 0
-		}
-		m.log.Width = msg.Width - sidebar - 4
-		if m.log.Width < 20 {
-			m.log.Width = msg.Width
-		}
+		m.recalcLogWidth()
 		m.syncInputSize()
 		m.initRenderer(m.log.Width)
 		m.content = renderSessionContent(m.ctx, m.session, m.renderer, m.log.Width)
@@ -533,9 +537,13 @@ func (m model) handleMouseClick(x, y int) model {
 	// Right edge entire column toggles sidebar.
 	if m.width >= 100 && x >= m.width-1 {
 		m.sidebarHidden = !m.sidebarHidden
+		prevWidth := m.log.Width
+		m.recalcLogWidth()
 		m.syncInputSize()
+		if prevWidth != m.log.Width {
+			m.log.SetContent(m.wrapContent(m.content))
+		}
 		return m
-		m.log.SetContent(m.wrapContent(m.content))
 	}
 	if m.width < 100 || m.subViewID != "" {
 		return m
