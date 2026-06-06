@@ -18,6 +18,7 @@ import (
 	"github.com/asayn/asayn/internal/llm/usage"
 	"github.com/asayn/asayn/internal/session"
 	"github.com/asayn/asayn/internal/tools"
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
@@ -202,12 +203,12 @@ func Run(ctx *app.Context) error {
 	input := newChatInput()
 	vp := viewport.New(80, 20)
 	vp.KeyMap = viewport.KeyMap{
-		PageDown:     vp.KeyMap.PageDown,
-		PageUp:       vp.KeyMap.PageUp,
-		HalfPageDown: vp.KeyMap.HalfPageDown,
-		HalfPageUp:   vp.KeyMap.HalfPageUp,
-		Down:         vp.KeyMap.Down,
-		Up:           vp.KeyMap.Up,
+		PageDown:     key.NewBinding(key.WithKeys("pgdown")),
+		PageUp:       key.NewBinding(key.WithKeys("pgup")),
+		HalfPageDown: key.NewBinding(key.WithKeys("ctrl+d")),
+		HalfPageUp:   key.NewBinding(key.WithKeys("ctrl+u")),
+		Down:         key.NewBinding(key.WithKeys("down")),
+		Up:           key.NewBinding(key.WithKeys("up")),
 	}
 	content := ""
 	vp.SetContent(content)
