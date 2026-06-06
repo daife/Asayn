@@ -82,6 +82,8 @@ type model struct {
 	activeRetryStatus         string
 	activeTimeoutStatus       string
 	contentDirty              bool
+	sidebarCache              string
+	sidebarCacheKey           string
 }
 
 type agentMsg struct {
@@ -1078,12 +1080,12 @@ func (m *model) reconcileTransientToolResult() {
 	if !sessionHasRecentToolResult(m.session) {
 		return
 	}
-	m.content = renderSessionContent(m.ctx, m.session, m.renderer, m.log.Width)
+	// Tool result already rendered incrementally via replacePendingTool.
+	// Just clear the transient marker — no full re-render needed.
 	m.transientToolLine = ""
 	m.pendingToolLine = ""
 	m.pendingToolName = ""
 	m.pendingToolStart = -1
-	m.refreshLog(false)
 }
 
 func sessionHasRecentToolResult(sess *session.Session) bool {
@@ -2319,17 +2321,46 @@ func exactCommand(value string) bool {
 	return false
 }
 
-func (m model) sidebar(width int) string {
+func (m *model) sidebar(width int) string {
 	if m.subViewID != "" {
 		return m.subAgentSidebar(width)
 	}
-	lines, _ := m.rootSidebarLines(width)
-	return lipgloss.NewStyle().
-		Width(width).
-		Height(m.height).
-		Border(lipgloss.NormalBorder(), false, false, false, true).
-		PaddingLeft(1).
-		Render(strings.Join(lines, "\n"))
+	key := m.computeSidebarKey()
+	if key != m.sidebarCacheKey || m.sidebarCache == "" {
+		lines, _ := m.rootSidebarLines(width)
+		m.sidebarCache = lipgloss.NewStyle().
+			Width(width).
+			Height(m.height).
+			Border(lipgloss.NormalBorder(), false, false, false, true).
+			PaddingLeft(1).
+			Render(strings.Join(lines, "\n"))
+		m.sidebarCacheKey = key
+	}
+	return m.sidebarCache
+}
+
+func (m *model) computeSidebarKey() string {
+	status := m.status
+	if m.thinking {
+		status = "thinking"
+	}
+	subs := m.ctx.Tools.SubAgentSnapshots()
+	shells := m.ctx.Tools.ShellSnapshots()
+	// Build a compact fingerprint of mutable sidebar state
+	var b strings.Builder
+	b.WriteString(status)
+	b.WriteString(fmt.Sprint(m.spinner % 4))
+	b.WriteString(fmt.Sprint(len(m.queuedMessages)))
+	b.WriteString(fmt.Sprint(m.latestTotalTokens))
+	for _, s := range subs {
+		b.WriteString(s.ID)
+		b.WriteString(s.Status)
+	}
+	for _, sh := range shells {
+		b.WriteString(sh.ID)
+		b.WriteString(sh.Status)
+	}
+	return b.String()
 }
 
 func (m model) rootSidebarLines(width int) ([]string, []int) {
