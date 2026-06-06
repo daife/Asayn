@@ -84,9 +84,6 @@ type model struct {
 	activeTimeoutStatus       string
 	sidebarCache              string
 	sidebarCacheKey           string
-	wrappedLen                int    // length of content that has been wrapped
-	wrappedContent            string // cached wrapped result up to wrappedLen
-	wrapWidth                 int    // width used for current wrappedContent cache
 }
 
 type agentMsg struct {
@@ -676,84 +673,17 @@ func (m *model) refreshLog(forceBottom bool) {
 		}
 	}
 }
+func (m *model) invalidateWrap() {}
 
-func (m *model) invalidateWrap() {
-	m.wrappedLen = 0
-	m.wrappedContent = ""
-}
-
-// invalidateWrapFrom resets the wrap cache starting at byte position pos
-// in the content. Content before pos is assumed unchanged.
-func (m *model) invalidateWrapFrom(pos int) {
-	if pos <= 0 || pos >= m.wrappedLen {
-		m.invalidateWrap()
-		return
-	}
-	// Find last newline before pos in original content to keep cache clean
-	splice := pos
-	for splice > 0 && m.content[splice-1] != '\n' {
-		splice--
-	}
-	m.wrappedLen = splice
-	if m.wrappedLen > 0 {
-		lastNL := strings.LastIndex(m.wrappedContent, "\n")
-		if lastNL >= 0 {
-			m.wrappedContent = m.wrappedContent[:lastNL+1]
-		} else {
-			m.wrappedContent = ""
-		}
-	}
-}
+func (m *model) invalidateWrapFrom(pos int) {}
 
 func (m *model) wrapContent(content string) string {
 	width := m.log.Width
 	if width <= 0 {
 		return content
 	}
-	if width != m.wrapWidth || len(content) < m.wrappedLen {
-		m.wrappedLen = 0
-		m.wrappedContent = ""
-		m.wrapWidth = width
-	}
-	if m.wrappedLen > 0 && len(content) > m.wrappedLen {
-		// Only wrap the newly appended portion.
-		newPart := content[m.wrappedLen:]
-		// Find a safe splice point: last \n in the original content before wrappedLen.
-		// This ensures the new wrap starts at a logical line boundary,
-		// avoiding re-wrapping mid-line content that wrapANSI already soft-broke.
-		splice := m.wrappedLen
-		lookback := 2000
-		for lookback > 0 && splice > 0 && content[splice-1] != '\n' {
-			splice--
-			lookback--
-		}
-		if lookback == 0 || splice == 0 {
-			// No newline found in lookback — full re-wrap
-			m.wrappedLen = 0
-		} else if splice < m.wrappedLen {
-			// Trim wrappedContent back to the last complete wrapped line
-			lastNL := strings.LastIndex(m.wrappedContent, "\n")
-			if lastNL >= 0 {
-				m.wrappedContent = m.wrappedContent[:lastNL+1]
-			} else {
-				m.wrappedContent = ""
-			}
-			newPart = content[splice:]
-			m.wrappedLen = splice
-		}
-		if m.wrappedLen > 0 {
-			wrappedNew := wrapANSI(newPart, width)
-			m.wrappedContent += wrappedNew
-			m.wrappedLen = len(content)
-		}
-	}
-	if m.wrappedLen == 0 {
-		m.wrappedContent = wrapANSI(content, width)
-		m.wrappedLen = len(content)
-	}
-	return m.wrappedContent
+	return wrapANSI(content, width)
 }
-
 
 
 func (m *model) appendDivider() {
