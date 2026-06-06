@@ -35,25 +35,25 @@ func TestSanitizePasteKeyMsgLeavesEnterUntouched(t *testing.T) {
 func TestRootSidebarLinesWrapLongValues(t *testing.T) {
 	m := testModel(t)
 	m.session.ID = "6922f5c1-feea-long-session-id"
-	m.ctx.Root.Description = "General-purpose root agent description that should wrap instead of being truncated."
+	m.ctx.Root.Model = "very-long-model-name-that-should-wrap"
+	m.ctx.Root.Provider = "very-long-provider-name"
 
 	lines, _ := m.rootSidebarLines(30)
 	joined := strings.Join(lines, "\n")
 	if strings.Contains(joined, "…") {
 		t.Fatalf("sidebar should wrap instead of truncating with ellipsis:\n%s", joined)
 	}
-	compact := strings.ReplaceAll(joined, "\n", "")
 	if !strings.Contains(joined, "session id: 6922f5c1-feea-") {
 		t.Fatalf("wrapped sidebar did not preserve long session id:\n%s", joined)
 	}
+	compact := strings.ReplaceAll(joined, "\n", "")
 	if !strings.Contains(compact, "long-session-id") {
 		t.Fatalf("wrapped sidebar lost session id tail:\n%s", joined)
 	}
-	if !strings.Contains(compact, "General-purpose root agent") || !strings.Contains(compact, "instead of being truncated.") {
-		t.Fatalf("wrapped sidebar lost description text:\n%s", joined)
+	if !strings.Contains(compact, "very-long-model-name") || !strings.Contains(compact, "very-long-provider-name") {
+		t.Fatalf("wrapped sidebar lost model/provider text:\n%s", joined)
 	}
 }
-
 func TestSidebarToggleUsesAsciiVisibleGlyphs(t *testing.T) {
 	m := testModel(t)
 	m.width = 120
@@ -63,13 +63,13 @@ func TestSidebarToggleUsesAsciiVisibleGlyphs(t *testing.T) {
 	m.syncInputSize()
 
 	visible := m.View()
-	if !strings.Contains(visible, ">") {
-		t.Fatalf("visible sidebar view missing collapse glyph:\n%s", visible)
+	if !strings.Contains(visible, "sidebar >") {
+		t.Fatalf("visible sidebar view missing collapse hint:\n%s", visible)
 	}
 	m.sidebarHidden = true
 	hidden := m.View()
-	if !strings.Contains(hidden, "<") {
-		t.Fatalf("hidden sidebar view missing expand glyph:\n%s", hidden)
+	if !strings.Contains(hidden, "< sidebar") {
+		t.Fatalf("hidden sidebar view missing expand hint:\n%s", hidden)
 	}
 }
 

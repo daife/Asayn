@@ -42,10 +42,9 @@ jobs:
           name: Asayn ${{ github.ref_name }}
           body: |
             ## Changes
-            - Replaced sidebar toggle glyphs with terminal-safe ASCII symbols.
-            - Wrapped root sidebar lines instead of truncating them with ellipses.
-            - Preserved sub-agent sidebar click mapping after wrapping.
-
+            - Sidebar toggle: entire right-edge column now clickable to hide/show sidebar.
+            - Sidebar shows title "Asayn"; Root Agent section simplified to name, model (provider), and status.
+            - Removed system prompt and thinking details from sidebar for cleaner look.
             ## Assets
             - `asayn-linux-amd64`
             - `asayn-linux-arm64`

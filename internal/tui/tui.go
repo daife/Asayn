@@ -530,7 +530,8 @@ func (m model) cleanupEmptySession() error {
 }
 
 func (m model) handleMouseClick(x, y int) model {
-	if m.width >= 100 && y == 0 && x >= m.width-5 && x <= m.width {
+	// Right edge entire column toggles sidebar.
+	if m.width >= 100 && x >= m.width-1 {
 		m.sidebarHidden = !m.sidebarHidden
 		m.syncInputSize()
 		return m
@@ -579,15 +580,14 @@ func (m model) View() string {
 	if mainWidth < 20 {
 		mainWidth = 20
 	}
-
-	// Toggle button for sidebar
+	// Toggle hint for sidebar
 	var headerLine string
 	if m.width >= 100 {
-		btn := "<"
+		hint := "< sidebar"
 		if !m.sidebarHidden {
-			btn = ">"
+			hint = "sidebar >"
 		}
-		headerLine = lipgloss.NewStyle().Width(mainWidth).Align(lipgloss.Right).Render(sectionStyle.Render(btn))
+		headerLine = lipgloss.NewStyle().Width(mainWidth).Align(lipgloss.Right).Render(mutedStyle.Render(hint))
 	}
 
 	body := m.log.View()
@@ -2313,17 +2313,12 @@ func (m model) rootSidebarLines(width int) ([]string, []int) {
 		"session id: " + m.session.ID,
 		"",
 		sectionStyle.Render("Root Agent"),
-		"root agent: " + m.session.RootAgent,
-		"description: " + sidebarSingleLine(m.ctx.Root.Description),
-		"system prompt:",
+		"name: " + m.session.RootAgent,
+		"model: " + m.ctx.Root.Model + " (" + m.ctx.Root.Provider + ")",
+		"status: " + status,
 	}
-	rawLines = append(rawLines, indentedSummary(m.ctx.Root.SystemPrompt, 3)...)
-	rawLines = append(rawLines,
-		fmt.Sprintf("thinking: %s effort=%s", onOff(m.ctx.Root.ThinkingEnabled), m.ctx.Root.ReasoningEffort),
-		"status: "+status,
-	)
 	if len(m.queuedMessages) > 0 {
-		rawLines = append(rawLines, "queued: "+fmt.Sprint(len(m.queuedMessages)))
+		rawLines = append(rawLines, "queued: " + fmt.Sprint(len(m.queuedMessages)))
 	}
 	rawLines = append(rawLines, "", sectionStyle.Render("Root Terminals"))
 	shells := m.ctx.Tools.ShellSnapshots()
