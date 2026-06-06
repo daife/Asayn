@@ -25,6 +25,7 @@ type Session struct {
 	Changes         []FileChange        `json:"changes"`
 	SubAgents       []SubAgentRef       `json:"sub_agents"`
 	InputHistory    []string            `json:"input_history"`
+	LastTotalTokens int                 `json:"last_total_tokens,omitempty"`
 }
 
 type SubAgentRef struct {

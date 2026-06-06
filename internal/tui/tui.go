@@ -453,6 +453,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// maintaining that conversation's usable context.
 			_ = m.ctx.UsageTracker.Log(m.session.ID, m.session.Name, modelName, msg.usage)
 			m.latestTotalTokens = msg.usage.TotalTokens
+			m.session.LastTotalTokens = msg.usage.TotalTokens
+			_ = m.ctx.Sessions.Save(m.session)
 		}
 		m.usageStats, _ = m.ctx.UsageTracker.GetStats(m.session.ID)
 
@@ -1949,6 +1951,7 @@ func (m model) resumeSession(idOrName string) (model, tea.Cmd) {
 	m.ctx.Tools.RestoreSubAgents(sess, sess.SubAgents, m.ctx.SubSessions)
 	m.invalidateWrap(); m.content = renderSessionContent(m.ctx, sess, m.renderer, m.log.Width)
 	m.usageStats, _ = m.ctx.UsageTracker.GetStats(m.session.ID)
+	m.latestTotalTokens = sess.LastTotalTokens
 	m.refreshLog(true)
 	m.status = "ready"
 	return m, nil
