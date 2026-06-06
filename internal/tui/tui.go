@@ -495,6 +495,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.emitFinalThinking()
 			}
 			m.invalidateWrap()
+			m.content = renderSessionContent(m.ctx, m.session, m.renderer, m.log.Width)
+			m.invalidateWrap()
 			m.pendingAnswerStart = -1
 			m.streamAnswerText = ""
 			m.refreshLog(false)
