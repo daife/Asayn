@@ -779,10 +779,17 @@ func (m *model) wrapContent(content string) string {
 	}
 
 	// Same raw line count — mid-line delta or spinner replacement.
-	// Count wrapped newlines up to the rawNL-th raw newline boundary.
-	// We do this by re-wrapping content[:start] and counting its lines.
-	prefixWrapped := wrapANSI(content[:start], width)
-	m.wrappedContent = prefixWrapped
+	// Trim wrappedContent back to the rawNL-th wrapped newline.
+	// Since prefix content hasn't changed, wrapped layout is stable.
+	nlSeen = 0
+	trimIdx := 0
+	for trimIdx < len(m.wrappedContent) && nlSeen < m.rawNL {
+		if m.wrappedContent[trimIdx] == '\n' {
+			nlSeen++
+		}
+		trimIdx++
+	}
+	m.wrappedContent = m.wrappedContent[:trimIdx]
 	newPart := content[start:]
 	wrappedNew := wrapANSI(newPart, width)
 	m.wrappedContent += wrappedNew
