@@ -84,6 +84,10 @@ type model struct {
 	activeTimeoutStatus       string
 	sidebarCache              string
 	sidebarCacheKey           string
+	wrappedLines              int
+	wrappedContent            string
+	wrapWidth                 int
+	wrappedLen                int
 }
 
 type agentMsg struct {
@@ -673,16 +677,99 @@ func (m *model) refreshLog(forceBottom bool) {
 		}
 	}
 }
-func (m *model) invalidateWrap() {}
+func (m *model) invalidateWrap() {
+	m.wrappedLines = 0
+	m.wrappedContent = ""
+	m.wrappedLen = 0
+}
 
-func (m *model) invalidateWrapFrom(pos int) {}
+func (m *model) invalidateWrapFrom(pos int) {
+	if pos <= 0 || pos >= len(m.content) {
+		m.invalidateWrap()
+		return
+	}
+	nl := 0
+	for i := 0; i < pos; i++ {
+		if m.content[i] == '\n' {
+			nl++
+		}
+	}
+	if nl < m.wrappedLines {
+		m.wrappedLines = nl
+		cnt := 0
+		idx := 0
+		for idx < len(m.wrappedContent) && cnt < nl {
+			if m.wrappedContent[idx] == '\n' {
+				cnt++
+			}
+			idx++
+		}
+		m.wrappedContent = m.wrappedContent[:idx]
+		m.wrappedLen = pos
+	}
+}
 
 func (m *model) wrapContent(content string) string {
 	width := m.log.Width
 	if width <= 0 {
 		return content
 	}
-	return wrapANSI(content, width)
+	// Full re-wrap when width changes or content was truncated
+	if width != m.wrapWidth || len(content) < m.wrappedLen {
+		m.wrappedLines = 0
+		m.wrappedContent = ""
+		m.wrapWidth = width
+		m.wrappedLen = 0
+	}
+
+	// Count lines in current content
+	totalNL := 0
+	for _, b := range []byte(content) {
+		if b == '\n' {
+			totalNL++
+		}
+	}
+
+	if m.wrappedLines == 0 || totalNL == 0 {
+		m.wrappedContent = wrapANSI(content, width)
+		m.wrappedLines = totalNL
+		m.wrappedLen = len(content)
+		return m.wrappedContent
+	}
+
+	// Find byte offset of the m.wrappedLines-th newline
+	nlCount := 0
+	start := 0
+	for start < len(content) && nlCount < m.wrappedLines {
+		if content[start] == '\n' {
+			nlCount++
+		}
+		start++
+	}
+
+	if totalNL > m.wrappedLines {
+		// New complete lines appeared — wrap only the new portion
+		newPart := content[start:]
+		wrappedNew := wrapANSI(newPart, width)
+		m.wrappedContent += wrappedNew
+		m.wrappedLines = totalNL
+		m.wrappedLen = len(content)
+	} else {
+		// Same line count, different content (mid-line delta or spinner replacement).
+		// Trim wrappedContent to last complete line and re-wrap from there.
+		lastNL := strings.LastIndex(m.wrappedContent, "\n")
+		if lastNL >= 0 {
+			m.wrappedContent = m.wrappedContent[:lastNL+1]
+		} else {
+			m.wrappedContent = ""
+		}
+		newPart := content[start:]
+		wrappedNew := wrapANSI(newPart, width)
+		m.wrappedContent += wrappedNew
+		m.wrappedLines = totalNL
+		m.wrappedLen = len(content)
+	}
+	return m.wrappedContent
 }
 
 
