@@ -1200,21 +1200,16 @@ func (m *model) refreshPendingSpinners() {
 	changed := false
 	if m.pendingThinkLine != "" && m.pendingThinkSpin {
 		next := "\n" + mutedStyle.Render(spinnerFrame(m.spinner)+" Thinking...") + "\n"
-		if idx := strings.LastIndex(m.content, m.pendingThinkLine); idx >= 0 {
-			m.content = m.content[:idx] + next + m.content[idx+len(m.pendingThinkLine):]
+		if m.pendingThinkStart >= 0 && m.pendingThinkStart < len(m.content) && strings.HasPrefix(m.content[m.pendingThinkStart:], m.pendingThinkLine) {
+			m.content = m.content[:m.pendingThinkStart] + next + m.content[m.pendingThinkStart+len(m.pendingThinkLine):]
 			m.pendingThinkLine = next
 			changed = true
 		}
 	}
 	if m.pendingToolLine != "" && m.pendingToolName != "" {
 		next := "\n" + toolRunStyle.Render(spinnerFrame(m.spinner)+" Tool called") + ": " + m.pendingToolName + "\n"
-		if m.pendingToolStart >= 0 && m.pendingToolStart <= len(m.content) && strings.HasPrefix(m.content[m.pendingToolStart:], m.pendingToolLine) {
+		if m.pendingToolStart >= 0 && m.pendingToolStart < len(m.content) && strings.HasPrefix(m.content[m.pendingToolStart:], m.pendingToolLine) {
 			m.content = m.content[:m.pendingToolStart] + next + m.content[m.pendingToolStart+len(m.pendingToolLine):]
-			m.pendingToolLine = next
-			changed = true
-		} else if idx := strings.LastIndex(m.content, m.pendingToolLine); idx >= 0 {
-			m.content = m.content[:idx] + next + m.content[idx+len(m.pendingToolLine):]
-			m.pendingToolStart = idx
 			m.pendingToolLine = next
 			changed = true
 		}
