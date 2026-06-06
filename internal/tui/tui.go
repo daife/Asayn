@@ -1211,7 +1211,6 @@ func (m *model) finalizeStreamAnswer(final string) {
 func (m *model) replacePendingThinking(replacement string) {
 	if m.pendingThinkLine != "" {
 		if idx := strings.LastIndex(m.content, m.pendingThinkLine); idx >= 0 {
-			m.invalidateWrapFrom(idx)
 			m.content = m.content[:idx] + replacement + m.content[idx+len(m.pendingThinkLine):]
 			m.pendingThinkLine = replacement
 			m.refreshLog(false)
@@ -1226,7 +1225,6 @@ func (m *model) replacePendingThinking(replacement string) {
 func (m *model) updatePendingThinking(replacement string) {
 	if m.pendingThinkLine != "" {
 		if idx := strings.LastIndex(m.content, m.pendingThinkLine); idx >= 0 {
-			m.invalidateWrapFrom(idx)
 			m.content = m.content[:idx] + replacement + m.content[idx+len(m.pendingThinkLine):]
 			m.pendingThinkLine = replacement
 			m.refreshLog(false)
@@ -1304,7 +1302,6 @@ func (m *model) refreshPendingSpinners() {
 	if m.pendingThinkLine != "" && m.pendingThinkSpin {
 		next := "\n" + mutedStyle.Render(spinnerFrame(m.spinner)+" Thinking...") + "\n"
 		if m.pendingThinkStart >= 0 && m.pendingThinkStart < len(m.content) && strings.HasPrefix(m.content[m.pendingThinkStart:], m.pendingThinkLine) {
-			m.invalidateWrapFrom(m.pendingThinkStart)
 			m.content = m.content[:m.pendingThinkStart] + next + m.content[m.pendingThinkStart+len(m.pendingThinkLine):]
 			m.pendingThinkLine = next
 			changed = true
@@ -1313,7 +1310,6 @@ func (m *model) refreshPendingSpinners() {
 	if m.pendingToolLine != "" && m.pendingToolName != "" {
 		next := "\n" + toolRunStyle.Render(spinnerFrame(m.spinner)+" Tool called") + ": " + m.pendingToolName + "\n"
 		if m.pendingToolStart >= 0 && m.pendingToolStart < len(m.content) && strings.HasPrefix(m.content[m.pendingToolStart:], m.pendingToolLine) {
-			m.invalidateWrapFrom(m.pendingToolStart)
 			m.content = m.content[:m.pendingToolStart] + next + m.content[m.pendingToolStart+len(m.pendingToolLine):]
 			m.pendingToolLine = next
 			changed = true
