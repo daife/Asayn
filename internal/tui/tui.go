@@ -329,7 +329,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.recalcLogWidth()
 		m.syncInputSize()
 		m.initRenderer(m.log.Width)
-		m.invalidateWrap(); m.content = renderSessionContent(m.ctx, m.session, m.renderer, m.log.Width)
+		m.invalidateWrap()
 		m.refreshLog(false)
 	case tea.KeyMsg:
 		msg = sanitizePasteKeyMsg(msg)
@@ -494,7 +494,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !thinkingAlreadyRendered {
 				m.emitFinalThinking()
 			}
-			m.invalidateWrap(); m.content = renderSessionContent(m.ctx, m.session, m.renderer, m.log.Width)
+			m.invalidateWrap()
 			m.pendingAnswerStart = -1
 			m.streamAnswerText = ""
 			m.refreshLog(false)
@@ -1087,7 +1087,7 @@ func (m *model) appendAgentEvent(event llm.AgentEvent) bool {
 		if !thinkingAlreadyRendered {
 			m.emitFinalThinking()
 		}
-		m.invalidateWrap(); m.content = renderSessionContent(m.ctx, m.session, m.renderer, m.log.Width)
+		m.invalidateWrap()
 		m.refreshLog(false)
 		m.pendingAnswerStart = -1
 		m.streamAnswerText = ""
@@ -1247,7 +1247,7 @@ func (m *model) finalizeStreamAnswer(final string) {
 	}
 	m.pendingAnswerStart = -1
 	m.streamAnswerText = ""
-	m.invalidateWrap(); m.content = renderSessionContent(m.ctx, m.session, m.renderer, m.log.Width)
+	m.invalidateWrap()
 	m.refreshLog(false)
 }
 
