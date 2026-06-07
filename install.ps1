@@ -76,7 +76,7 @@ Write-Host "环境变量已自动配置，无需重启终端。" -ForegroundColo
 Write-Host ""
 Write-Host "配置文件位置:"
 Write-Host "  $env:USERPROFILE\.Asayn\api_config.toml"
-Write-Host "  在此文件中配置您的 API 密钥"
+Write-Host "  在此文件中配置您的 API 密钥(首次运行后才会自动生成该目录)"
 Write-Host ""
 Write-Host "使用方法:"
 Write-Host "  cd \path\to\your\project"

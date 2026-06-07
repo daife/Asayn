@@ -81,7 +81,7 @@ echo 环境变量已自动配置，无需重启终端。
 echo.
 echo 配置文件位置:
 echo   %USERPROFILE%\.Asayn\api_config.toml
-echo   在此文件中配置您的 API 密钥
+echo   在此文件中配置您的 API 密钥(首次运行后才会自动生成该目录)
 echo.
 echo 使用方法:
 echo   cd \path\to\your\project
