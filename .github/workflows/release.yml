@@ -27,35 +27,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME}"
-          mkdir -p "dist/asayn-${version}-linux-macos" "dist/asayn-${version}-windows"
+          mkdir -p dist
 
-          GOOS=linux GOARCH=amd64 go build -o "dist/asayn-${version}-linux-macos/asayn-linux-amd64" ./cmd/asayn
-          GOOS=linux GOARCH=arm64 go build -o "dist/asayn-${version}-linux-macos/asayn-linux-arm64" ./cmd/asayn
-          GOOS=darwin GOARCH=amd64 go build -o "dist/asayn-${version}-linux-macos/asayn-darwin-amd64" ./cmd/asayn
-          GOOS=darwin GOARCH=arm64 go build -o "dist/asayn-${version}-linux-macos/asayn-darwin-arm64" ./cmd/asayn
-          GOOS=windows GOARCH=amd64 go build -o "dist/asayn-${version}-windows/asayn-windows-amd64.exe" ./cmd/asayn
+          GOOS=linux GOARCH=amd64 go build -o "dist/asayn-linux-amd64" ./cmd/asayn
+          GOOS=linux GOARCH=arm64 go build -o "dist/asayn-linux-arm64" ./cmd/asayn
+          GOOS=darwin GOARCH=amd64 go build -o "dist/asayn-darwin-amd64" ./cmd/asayn
+          GOOS=darwin GOARCH=arm64 go build -o "dist/asayn-darwin-arm64" ./cmd/asayn
+          GOOS=windows GOARCH=amd64 go build -o "dist/asayn-windows-amd64.exe" ./cmd/asayn
 
-          cat > "dist/asayn-${version}-linux-macos/README.txt" <<'EOF'
-          Asayn prebuilt binaries for Linux and macOS.
-
-          Choose the binary matching your OS and CPU architecture, rename it to "asayn" if desired, then install it somewhere on PATH.
-
-          Examples:
-            install -D -m 0755 asayn-linux-amd64 ~/.local/bin/asayn
-            install -D -m 0755 asayn-linux-arm64 ~/.local/bin/asayn
-            install -D -m 0755 asayn-darwin-arm64 ~/.local/bin/asayn
-          EOF
-
-          cat > "dist/asayn-${version}-windows/README.txt" <<'EOF'
-          Asayn prebuilt binary for Windows amd64.
-
-          Rename asayn-windows-amd64.exe to asayn.exe if desired, then place it in a directory on PATH.
-          EOF
-
-          tar -C dist -czf "dist/asayn-${version}-linux-macos.tar.gz" "asayn-${version}-linux-macos"
-          (cd dist && zip -qr "asayn-${version}-windows.zip" "asayn-${version}-windows")
-          (cd dist && sha256sum "asayn-${version}-linux-macos.tar.gz" "asayn-${version}-windows.zip" > SHA256SUMS.txt)
+          (cd dist && sha256sum asayn-linux-amd64 asayn-linux-arm64 asayn-darwin-amd64 asayn-darwin-arm64 asayn-windows-amd64.exe > SHA256SUMS.txt)
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
@@ -65,12 +45,32 @@ jobs:
             ## Changes
             - 修复模型中途输出回答不渲染的问题
             - 现在每次完整的回答都会立即渲染markdown
+            - 提升用户体验，用户可以实时看到模型的输出
 
             ## Assets
-            - `asayn-${{ github.ref_name }}-linux-macos.tar.gz`: Linux amd64/arm64 和 macOS amd64/arm64 二进制文件
-            - `asayn-${{ github.ref_name }}-windows.zip`: Windows amd64 二进制文件
+            - `asayn-linux-amd64`: Linux amd64 二进制文件
+            - `asayn-linux-arm64`: Linux arm64 二进制文件
+            - `asayn-darwin-amd64`: macOS amd64 二进制文件
+            - `asayn-darwin-arm64`: macOS arm64 二进制文件
+            - `asayn-windows-amd64.exe`: Windows amd64 二进制文件
             - `SHA256SUMS.txt`: 资产校验和
+
+            ## 安装方式
+
+            **Linux/macOS:**
+            ```bash
+            curl -sSL https://raw.githubusercontent.com/daife/Asayn/main/install.sh | bash
+            ```
+
+            **Windows (PowerShell):**
+            ```powershell
+            Invoke-WebRequest -Uri "https://raw.githubusercontent.com/daife/Asayn/main/install.ps1" -OutFile install.ps1
+            .\install.ps1
+            ```
           files: |
-            dist/asayn-${{ github.ref_name }}-linux-macos.tar.gz
-            dist/asayn-${{ github.ref_name }}-windows.zip
+            dist/asayn-linux-amd64
+            dist/asayn-linux-arm64
+            dist/asayn-darwin-amd64
+            dist/asayn-darwin-arm64
+            dist/asayn-windows-amd64.exe
             dist/SHA256SUMS.txt
