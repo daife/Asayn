@@ -2785,7 +2785,11 @@ func renderSessionContent(ctx *app.Context, sess *session.Session, renderer *gla
 				b.WriteString("\n")
 			}
 			for _, call := range msg.ToolCalls {
-				toolLabels[call.ID] = call.Function.Name
+				label := call.Function.Name
+				if call.Function.Arguments != "" {
+					label += "(" + call.Function.Arguments + ")"
+				}
+				toolLabels[call.ID] = label
 			}
 		case "tool":
 			label := toolLabels[msg.ToolCallID]
