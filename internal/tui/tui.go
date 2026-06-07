@@ -1089,6 +1089,7 @@ func (m *model) appendAgentEvent(event llm.AgentEvent) bool {
 		if !thinkingAlreadyRendered {
 			m.emitFinalThinking()
 		}
+		m.finalizeStreamAnswer("")
 		m.invalidateWrap()
 		m.refreshLog(false)
 		m.pendingAnswerStart = -1
