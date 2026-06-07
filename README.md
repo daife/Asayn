@@ -57,6 +57,89 @@ default_Asayn/        # repository defaults embedded into the binary
 
 On first use, Asayn copies missing files from the defaults embedded in the executable into `~/.Asayn/`. Existing user files are not overwritten.
 
+## Quick Install (Recommended)
+
+We provide simple installation scripts for both Linux and Windows that automatically download and install the latest release.
+
+### Linux/macOS
+
+```bash
+curl -sSL https://raw.githubusercontent.com/daife/Asayn/main/install.sh | bash
+```
+
+Or download and run manually:
+
+```bash
+wget https://raw.githubusercontent.com/daife/Asayn/main/install.sh
+chmod +x install.sh
+./install.sh
+```
+
+### Windows (PowerShell)
+
+Open PowerShell as Administrator and run:
+
+```powershell
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/daife/Asayn/main/install.ps1" -OutFile install.ps1
+.\install.ps1
+```
+
+Or use the batch script:
+
+```cmd
+curl -o install.bat https://raw.githubusercontent.com/daife/Asayn/main/install.bat
+install.bat
+```
+
+The scripts will:
+1. Check for existing `~/.Asayn` folder and ask if you want to clean it
+2. Download the latest release for your platform
+3. Install to `~/.local/bin` (Linux) or `%USERPROFILE%\.local\bin` (Windows)
+4. Add the install directory to your PATH
+5. Show you where to edit the configuration file
+
+## Quick Install (Recommended)
+
+We provide simple installation scripts for both Linux and Windows that automatically download and install the latest release.
+
+### Linux/macOS
+
+```bash
+curl -sSL https://raw.githubusercontent.com/daife/Asayn/main/install.sh | bash
+```
+
+Or download and run manually:
+
+```bash
+wget https://raw.githubusercontent.com/daife/Asayn/main/install.sh
+chmod +x install.sh
+./install.sh
+```
+
+### Windows (PowerShell)
+
+Open PowerShell as Administrator and run:
+
+```powershell
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/daife/Asayn/main/install.ps1" -OutFile install.ps1
+.install.ps1
+```
+
+Or use the batch script:
+
+```cmd
+https://raw.githubusercontent.com/daife/Asayn/main/install.bat
+install.bat
+```
+
+The scripts will:
+1. Check for existing `~/.Asayn` folder and ask if you want to clean it
+2. Download the latest release for your platform
+3. Install to `~/.local/bin` (Linux) or `%USERPROFILE%\.local\bin` (Windows)
+4. Add the install directory to your PATH
+5. Show you where to edit the configuration file
+
+
 ## Binary Distribution
 
 Asayn is distributed as a single executable file. No repository checkout or `default_Asayn/` directory is needed at runtime because the default config files are embedded into the binary.

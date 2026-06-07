@@ -1,57 +1,68 @@
-name: Release
+name: Build and Release
 
 on:
   push:
     tags:
-      - "v*"
+      - 'v*'
 
 permissions:
   contents: write
 
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: [linux, darwin, windows]
+        goarch: [amd64, arm64]
+        exclude:
+          - goarch: arm64
+            goos: windows
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v3
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v4
         with:
-          go-version-file: go.mod
+          go-version: '1.21'
 
-      - name: Test
-        run: go test ./...
-
-      - name: Build release assets
-        shell: bash
+      - name: Build
         run: |
-          set -euo pipefail
-          mkdir -p dist
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            EXT=".exe"
+          else
+            EXT=""
+          fi
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -o "asayn-${{ matrix.goos }}-${{ matrix.goarch }}${EXT}" ./cmd/asayn
 
-          GOOS=linux GOARCH=amd64 go build -o "dist/asayn-linux-amd64" ./cmd/asayn
-          GOOS=linux GOARCH=arm64 go build -o "dist/asayn-linux-arm64" ./cmd/asayn
-          GOOS=darwin GOARCH=amd64 go build -o "dist/asayn-darwin-amd64" ./cmd/asayn
-          GOOS=darwin GOARCH=arm64 go build -o "dist/asayn-darwin-arm64" ./cmd/asayn
-          GOOS=windows GOARCH=amd64 go build -o "dist/asayn-windows-amd64.exe" ./cmd/asayn
-          (cd dist && sha256sum asayn-linux-amd64 asayn-linux-arm64 asayn-darwin-amd64 asayn-darwin-arm64 asayn-windows-amd64.exe > SHA256SUMS.txt)
-
-      - name: Publish GitHub release
-        uses: softprops/action-gh-release@v2
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
         with:
-          name: Asayn ${{ github.ref_name }}
-          body: |
-            ## Beta
-            - Simplified tool call rendering: shows tool name + args while running (yellow spinner), turns green on success or red on failure. No longer renders verbose tool output inline.
-            - Added XiaomiMIMO provider (mimo-v2.5-pro, mimo-v2.5) - 1M context, 128K max output.
-            - Fixed `/model_config` model switching not persisting for root/special agents when workspace agent configs exist.
-            - Removed `file_edit` and `view_history` tools.
-            - File modifications should use `shell_run_sync` with Python.
-            - Sub-agents have `shell_run_sync` (sync only).
+          name: asayn-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: asayn-${{ matrix.goos }}-${{ matrix.goarch }}*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: artifacts
+
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          find . -name "asayn-*" -type f -exec sha256sum {} \; > ../SHA256SUMS.txt
+          cd ..
+          mv SHA256SUMS.txt artifacts/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
           files: |
-            dist/asayn-linux-amd64
-            dist/asayn-linux-arm64
-            dist/asayn-darwin-amd64
-            dist/asayn-darwin-arm64
-            dist/asayn-windows-amd64.exe
-            dist/SHA256SUMS.txt
+            artifacts/**/*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
