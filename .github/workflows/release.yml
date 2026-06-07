@@ -42,6 +42,7 @@ jobs:
           name: Asayn ${{ github.ref_name }}
           body: |
             ## Beta
+            - Added XiaomiMIMO provider (mimo-v2.5-pro, mimo-v2.5) - 1M context, 128K max output.
             - Removed `file_edit` and `view_history` tools.
             - File modifications should use `shell_run_sync` with Python.
             - Sub-agents have `shell_run_sync` (sync only).

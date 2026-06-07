@@ -605,6 +605,19 @@ func defaultAPIConfig() APIConfig {
 					"deepseek-v4-flash": {ContextWindow: 1024000, MaxOutputTokens: 384000},
 				},
 			},
+			"XiaomiMIMO": {
+				BaseURL:        "https://token-plan-cn.xiaomimimo.com/v1",
+				APIKey:         "your_api_key",
+				TimeoutSeconds: 120,
+				AllowedModels: []string{
+					"mimo-v2.5-pro",
+					"mimo-v2.5",
+				},
+				ModelLimits: map[string]ModelLimits{
+					"mimo-v2.5-pro": {ContextWindow: 1024000, MaxOutputTokens: 131072},
+					"mimo-v2.5":     {ContextWindow: 1024000, MaxOutputTokens: 131072},
+				},
+			},
 		},
 	}
 }
