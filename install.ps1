@@ -50,21 +50,29 @@ try {
     exit 1
 }
 
-# 添加到 PATH
+# 添加到 PATH（当前会话和永久性）
 $currentPath = [Environment]::GetEnvironmentVariable("PATH", "User")
 if ($currentPath -notlike "*$installDir*") {
     Write-Host "正在添加 $installDir 到 PATH..." -ForegroundColor Yellow
+    
+    # 更新当前会话的 PATH
+    $env:PATH = "$env:PATH;$installDir"
+    
+    # 更新永久性 PATH（用户级别）
     $newPath = "$currentPath;$installDir"
     [Environment]::SetEnvironmentVariable("PATH", $newPath, "User")
-    $env:PATH = "$env:PATH;$installDir"
+    
+    # 刷新环境变量（让当前终端立即生效）
+    $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
+    
+    Write-Host "PATH 已更新，当前终端已生效。" -ForegroundColor Green
 }
 
 Write-Host ""
 Write-Host "=== 安装完成 ===" -ForegroundColor Cyan
 Write-Host "Asayn 已安装到: $installDir\asayn.exe"
 Write-Host ""
-Write-Host "请重启终端或运行以下命令使 PATH 生效:"
-Write-Host "  `$env:PATH = `"`$env:PATH;$installDir`""
+Write-Host "环境变量已自动配置，无需重启终端。" -ForegroundColor Green
 Write-Host ""
 Write-Host "配置文件位置:"
 Write-Host "  $env:USERPROFILE\.Asayn\api_config.toml"

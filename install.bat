@@ -54,20 +54,30 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM 添加到 PATH
+REM 添加到 PATH（当前会话和永久性）
 set "currentPath=%PATH%"
 if not "!currentPath!"=="!currentPath:%installDir%=!" (
     echo %installDir% 已在 PATH 中。
 ) else (
     echo 正在添加 %installDir% 到 PATH...
+    
+    REM 更新当前会话的 PATH
+    set "PATH=%PATH%;%installDir%"
+    
+    REM 更新永久性 PATH（用户级别）
     setx PATH "%PATH%;%installDir%"
+    
+    REM 刷新环境变量
+    set "PATH=%PATH%"
+    
+    echo PATH 已更新，当前终端已生效。
 )
 
 echo.
 echo === 安装完成 ===
 echo Asayn 已安装到: %installDir%\asayn.exe
 echo.
-echo 请重启终端使 PATH 生效。
+echo 环境变量已自动配置，无需重启终端。
 echo.
 echo 配置文件位置:
 echo   %USERPROFILE%\.Asayn\api_config.toml

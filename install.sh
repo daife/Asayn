@@ -59,19 +59,42 @@ curl -L -o "$INSTALL_DIR/asayn" "$DOWNLOAD_URL"
 # 设置可执行权限
 chmod +x "$INSTALL_DIR/asayn"
 
-# 检查 PATH
+# 检查并更新 PATH（当前会话和永久性）
 if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
     echo "正在添加 $INSTALL_DIR 到 PATH..."
-    echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> "$HOME/.bashrc"
-    export PATH="$HOME/.local/bin:$PATH"
+    
+    # 更新当前会话的 PATH
+    export PATH="$INSTALL_DIR:$PATH"
+    
+    # 检查 shell 配置文件并添加 PATH
+    if [ -f "$HOME/.bashrc" ]; then
+        # 检查是否已经添加过
+        if ! grep -q "export PATH=\"\$HOME/.local/bin:\$PATH\"" "$HOME/.bashrc"; then
+            echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> "$HOME/.bashrc"
+            echo "已添加到 ~/.bashrc"
+        fi
+    fi
+    
+    if [ -f "$HOME/.zshrc" ]; then
+        # 检查是否已经添加过
+        if ! grep -q "export PATH=\"\$HOME/.local/bin:\$PATH\"" "$HOME/.zshrc"; then
+            echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> "$HOME/.zshrc"
+            echo "已添加到 ~/.zshrc"
+        fi
+    fi
+    
+    # 刷新环境变量
+    source "$HOME/.bashrc" 2>/dev/null || true
+    source "$HOME/.zshrc" 2>/dev/null || true
+    
+    echo "PATH 已更新，当前终端已生效。" -e "\033[32m"
 fi
 
 echo ""
 echo "=== 安装完成 ==="
 echo "Asayn 已安装到: $INSTALL_DIR/asayn"
 echo ""
-echo "请运行以下命令使 PATH 生效:"
-echo "  source ~/.bashrc"
+echo "环境变量已自动配置，无需重启终端。" -e "\033[32m"
 echo ""
 echo "配置文件位置:"
 echo "  ~/.Asayn/api_config.toml"
