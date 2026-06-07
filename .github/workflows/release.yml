@@ -1,68 +1,76 @@
-name: Build and Release
+name: Release
 
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 permissions:
   contents: write
 
 jobs:
-  build:
+  release:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        goos: [linux, darwin, windows]
-        goarch: [amd64, arm64]
-        exclude:
-          - goarch: arm64
-            goos: windows
-
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version-file: go.mod
 
-      - name: Build
+      - name: Test
+        run: go test ./...
+
+      - name: Build release assets
+        shell: bash
         run: |
-          if [ "${{ matrix.goos }}" = "windows" ]; then
-            EXT=".exe"
-          else
-            EXT=""
-          fi
-          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -o "asayn-${{ matrix.goos }}-${{ matrix.goarch }}${EXT}" ./cmd/asayn
+          set -euo pipefail
+          version="${GITHUB_REF_NAME}"
+          mkdir -p "dist/asayn-${version}-linux-macos" "dist/asayn-${version}-windows"
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v3
+          GOOS=linux GOARCH=amd64 go build -o "dist/asayn-${version}-linux-macos/asayn-linux-amd64" ./cmd/asayn
+          GOOS=linux GOARCH=arm64 go build -o "dist/asayn-${version}-linux-macos/asayn-linux-arm64" ./cmd/asayn
+          GOOS=darwin GOARCH=amd64 go build -o "dist/asayn-${version}-linux-macos/asayn-darwin-amd64" ./cmd/asayn
+          GOOS=darwin GOARCH=arm64 go build -o "dist/asayn-${version}-linux-macos/asayn-darwin-arm64" ./cmd/asayn
+          GOOS=windows GOARCH=amd64 go build -o "dist/asayn-${version}-windows/asayn-windows-amd64.exe" ./cmd/asayn
+
+          cat > "dist/asayn-${version}-linux-macos/README.txt" <<'EOF'
+          Asayn prebuilt binaries for Linux and macOS.
+
+          Choose the binary matching your OS and CPU architecture, rename it to "asayn" if desired, then install it somewhere on PATH.
+
+          Examples:
+            install -D -m 0755 asayn-linux-amd64 ~/.local/bin/asayn
+            install -D -m 0755 asayn-linux-arm64 ~/.local/bin/asayn
+            install -D -m 0755 asayn-darwin-arm64 ~/.local/bin/asayn
+          EOF
+
+          cat > "dist/asayn-${version}-windows/README.txt" <<'EOF'
+          Asayn prebuilt binary for Windows amd64.
+
+          Rename asayn-windows-amd64.exe to asayn.exe if desired, then place it in a directory on PATH.
+          EOF
+
+          tar -C dist -czf "dist/asayn-${version}-linux-macos.tar.gz" "asayn-${version}-linux-macos"
+          (cd dist && zip -qr "asayn-${version}-windows.zip" "asayn-${version}-windows")
+          (cd dist && sha256sum "asayn-${version}-linux-macos.tar.gz" "asayn-${version}-windows.zip" > SHA256SUMS.txt)
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
         with:
-          name: asayn-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: asayn-${{ matrix.goos }}-${{ matrix.goarch }}*
+          name: Asayn ${{ github.ref_name }}
+          body: |
+            ## Changes
+            - 修复模型中途输出回答不渲染的问题
+            - 现在每次完整的回答都会立即渲染markdown
 
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v3
-        with:
-          path: artifacts
-
-      - name: Generate checksums
-        run: |
-          cd artifacts
-          find . -name "asayn-*" -type f -exec sha256sum {} \; > ../SHA256SUMS.txt
-          cd ..
-          mv SHA256SUMS.txt artifacts/
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
+            ## Assets
+            - `asayn-${{ github.ref_name }}-linux-macos.tar.gz`: Linux amd64/arm64 和 macOS amd64/arm64 二进制文件
+            - `asayn-${{ github.ref_name }}-windows.zip`: Windows amd64 二进制文件
+            - `SHA256SUMS.txt`: 资产校验和
           files: |
-            artifacts/**/*
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            dist/asayn-${{ github.ref_name }}-linux-macos.tar.gz
+            dist/asayn-${{ github.ref_name }}-windows.zip
+            dist/SHA256SUMS.txt
