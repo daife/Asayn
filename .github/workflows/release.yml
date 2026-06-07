@@ -1,0 +1,68 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: [linux, darwin, windows]
+        goarch: [amd64, arm64]
+        exclude:
+          - goarch: arm64
+            goos: windows
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+
+      - name: Build
+        run: |
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            EXT=".exe"
+          else
+            EXT=""
+          fi
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -o "asayn-${{ matrix.goos }}-${{ matrix.goarch }}${EXT}" ./cmd/asayn
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: asayn-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: asayn-${{ matrix.goos }}-${{ matrix.goarch }}*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: artifacts
+
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          find . -name "asayn-*" -type f -exec sha256sum {} \; > ../SHA256SUMS.txt
+          cd ..
+          mv SHA256SUMS.txt artifacts/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            artifacts/**/*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
