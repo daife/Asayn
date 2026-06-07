@@ -2,90 +2,20 @@
 
 Asayn means **agent skills are all you need**. It is a Go + Bubble Tea TUI agent scaffold inspired by Claude Code, designed to run on Linux and Windows.
 
-## What This MVP Includes
-
-- Workspaces: running `asayn` in any directory treats that directory as the workspace.
-- Global config: `~/.Asayn/`.
-- Workspace config: `./.Asayn/`.
-- First-run setup: creates `.Asayn/` and `.Asayn/.sessions/`. If the workspace already has `.gitignore`, Asayn adds `.Asayn/` once; it does not run `git init` or create `.gitignore`.
-- Config precedence: workspace files win over global files (except `api_config.toml` which is global-only). Skills are visible from both `./.Asayn/skills` when that folder exists and `~/.Asayn/skills`; duplicate skill names prefer the workspace skill. Workspace setup does not copy global skills.
-- OpenAI-compatible `/chat/completions` client with DeepSeek and SiliconFlow defaults.
-- Thinking mode support with `reasoning_effort` and `thinking.type`.
-- Session history and per-session file change chains.
-- Bubble Tea TUI with slash commands and a chat input that soft-wraps upward to four rows.
-- Built-in tool schemas only: file reading, grep, directory view, diff-based file changes, shell execution, and sub-agent delegation. Fixed tool usage rules live in each tool description sent to the API.
-- Right sidebar sub-agent status; click a sub-agent row to print its current transcript/status.
-
-DeepSeek reference behavior used here:
-
-- Multi-round chat is stateless; every API call sends the accumulated `messages`.
-- Thinking mode can use `reasoning_effort` plus `thinking`.
-- When tool calls happen, assistant messages, including `reasoning_content`, are kept in the session history so they can be sent back on later turns.
-
-## Layout
-
-```text
-default_Asayn/        # repository defaults embedded into the binary
-  api_config.toml
-  root_agents/
-  sub_agents/
-  special_agents/
-  skills/
-
-~/.Asayn/
-  api_config.toml
-  root_agents/
-    default.toml
-  sub_agents/
-    default.toml
-  special_agents/
-    compact_agent.toml
-  skills/
-    example-skill/
-      SKILL.md
-
-<workspace>/.Asayn/
-  root_agents/
-  sub_agents/
-  special_agents/
-  skills/        # optional local skill directories; not created or copied by default
-  .sessions/
-    root_agents/
-    sub_agents/
-    special_agents/
-```
-
-On first use, Asayn copies missing files from the defaults embedded in the executable into `~/.Asayn/`. Existing user files are not overwritten.
-
 ## Quick Install (Recommended)
 
-We provide simple installation scripts for both Linux and Windows that automatically download and install the latest release.
-
 ### Linux/macOS
-
 ```bash
 curl -sSL https://raw.githubusercontent.com/daife/Asayn/main/install.sh | bash
 ```
 
-Or download and run manually:
-
-```bash
-wget https://raw.githubusercontent.com/daife/Asayn/main/install.sh
-chmod +x install.sh
-./install.sh
-```
-
 ### Windows (PowerShell)
-
-Open PowerShell as Administrator and run:
-
 ```powershell
 Invoke-WebRequest -Uri "https://raw.githubusercontent.com/daife/Asayn/main/install.ps1" -OutFile install.ps1
 .\install.ps1
 ```
 
 Or use the batch script:
-
 ```cmd
 curl -o install.bat https://raw.githubusercontent.com/daife/Asayn/main/install.bat
 install.bat
@@ -98,3 +28,68 @@ The scripts will:
 4. Add the install directory to your PATH
 5. Show you where to edit the configuration file
 
+## Key Features
+
+- **Workspaces**: Running `asayn` in any directory treats that directory as the workspace
+- **Global config**: `~/.Asayn/` (API keys, agents, skills)
+- **Workspace config**: `./.Asayn/` (project-specific settings)
+- **OpenAI-compatible**: Works with DeepSeek, SiliconFlow, and other OpenAI-compatible APIs
+- **Thinking mode**: Support for `reasoning_effort` and `thinking.type`
+- **TUI**: Bubble Tea terminal interface with slash commands
+- **Sub-agents**: Delegate tasks to specialized agents
+- **Skills**: Directory-based skill packages
+
+## Layout
+
+```
+~/.Asayn/
+  api_config.toml
+  root_agents/
+  sub_agents/
+  special_agents/
+  skills/
+
+<workspace>/.Asayn/
+  root_agents/
+  sub_agents/
+  special_agents/
+  skills/
+```
+
+## API Configuration
+
+Edit `~/.Asayn/api_config.toml` to configure your API providers:
+
+```toml
+[providers.DeepSeek]
+api_key = "your-api-key"
+```
+
+## Usage
+
+```bash
+cd /path/to/your/project
+asayn
+```
+
+First run creates `~/.Asayn/` with global defaults and `<project>/.Asayn/` for the current workspace.
+
+## Commands
+
+- `/help` - Show help
+- `/new [name]` - New session
+- `/resume [session]` - Resume session
+- `/model` - Switch model
+- `/compact` - Compress context
+- `/exit` - Exit
+
+## Build From Source
+
+```bash
+go build -o asayn ./cmd/asayn
+```
+
+For Windows:
+```bash
+GOOS=windows GOARCH=amd64 go build -o asayn.exe ./cmd/asayn
+```
