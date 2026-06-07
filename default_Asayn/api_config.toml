@@ -38,7 +38,7 @@ context_window = 1024000
 max_output_tokens = 384000
 
 [providers.XiaomiMIMO]
-url = "https://token-plan-cn.xiaomimimo.com/v1"
+url = "https://api.xiaomimimo.com/v1"
 api_key = "your_api_key"
 timeout_seconds = 120
 allowed_models = [

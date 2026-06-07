@@ -614,7 +614,7 @@ func defaultAPIConfig() APIConfig {
 				},
 			},
 			"XiaomiMIMO": {
-				BaseURL:        "https://token-plan-cn.xiaomimimo.com/v1",
+				BaseURL:        "https://api.xiaomimimo.com/v1",
 				APIKey:         "your_api_key",
 				TimeoutSeconds: 120,
 				AllowedModels: []string{
