@@ -1119,17 +1119,17 @@ func (m *model) appendAgentEvent(event llm.AgentEvent) bool {
 		m.finalizePendingThinking()
 		m.finalizeStreamAnswer("")
 		m.streamAnswerText = ""
-		line := "\n" + toolRunStyle.Render(spinnerFrame(m.spinner)+" Tool called") + ": " + event.Text + "\n"
+		line := "\n" + toolRunStyle.Render(spinnerFrame(m.spinner)+" ● "+event.Text) + "\n"
 		m.pendingToolLine = line
 		m.pendingToolName = event.Text
 		m.pendingToolStart = len(m.content)
 		m.appendLog(line)
 	case "tool_result":
-		replacement := "\n" + successStyle.Render("● Tool result") + ": " + mutedStyle.Render(m.pendingToolName) + minorResult(event.Text, 8) + "\n"
+		replacement := "\n" + successStyle.Render("● "+m.pendingToolName) + "\n"
 		m.replacePendingTool(replacement)
 		m.transientToolLine = replacement
 	case "tool_error":
-		replacement := "\n" + errorStyle.Render("● Tool failed") + ": " + mutedStyle.Render(m.pendingToolName) + minorResult(event.Text, 10) + "\n"
+		replacement := "\n" + errorStyle.Render("● "+m.pendingToolName) + "\n"
 		m.replacePendingTool(replacement)
 		m.transientToolLine = replacement
 	default:
@@ -1353,7 +1353,7 @@ func (m *model) refreshPendingSpinners() {
 		}
 	}
 	if m.pendingToolLine != "" && m.pendingToolName != "" {
-		next := "\n" + toolRunStyle.Render(spinnerFrame(m.spinner)+" Tool called") + ": " + m.pendingToolName + "\n"
+		next := "\n" + toolRunStyle.Render(spinnerFrame(m.spinner)+" ● "+m.pendingToolName) + "\n"
 		if m.pendingToolStart >= 0 && m.pendingToolStart < len(m.content) && strings.HasPrefix(m.content[m.pendingToolStart:], m.pendingToolLine) {
 			m.content = m.content[:m.pendingToolStart] + next + m.content[m.pendingToolStart+len(m.pendingToolLine):]
 			m.pendingToolLine = next
@@ -2785,11 +2785,7 @@ func renderSessionContent(ctx *app.Context, sess *session.Session, renderer *gla
 				b.WriteString("\n")
 			}
 			for _, call := range msg.ToolCalls {
-				label := call.Function.Name
-				if call.Function.Arguments != "" {
-					label += "(" + call.Function.Arguments + ")"
-				}
-				toolLabels[call.ID] = label
+				toolLabels[call.ID] = call.Function.Name
 			}
 		case "tool":
 			label := toolLabels[msg.ToolCallID]
@@ -2798,16 +2794,10 @@ func renderSessionContent(ctx *app.Context, sess *session.Session, renderer *gla
 			}
 			b.WriteString("\n")
 			if strings.HasPrefix(strings.TrimSpace(msg.Content), "tool error:") {
-				b.WriteString(errorStyle.Render("● Tool failed"))
+				b.WriteString(errorStyle.Render("● "+label))
 			} else {
-				b.WriteString(successStyle.Render("● Tool result"))
+				b.WriteString(successStyle.Render("● "+label))
 			}
-			if label != "" {
-				b.WriteString(": ")
-				b.WriteString(mutedStyle.Render(label))
-			}
-			b.WriteString("\n")
-			b.WriteString(minorResult(msg.Content, 8))
 			b.WriteString("\n")
 		}
 	}
