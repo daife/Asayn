@@ -77,11 +77,17 @@ First run creates `~/.Asayn/` with global defaults and `<project>/.Asayn/` for t
 ## Commands
 
 - `/help` - Show help
-- `/new [name]` - New session
-- `/resume [session]` - Resume session
-- `/model` - Switch model
-- `/compact` - Compress context
-- `/exit` - Exit
+- `/new [name]` - Start a new session
+- `/resume [session]` - Resume a saved session
+- `/retry` - Retry the last request
+- `/rename` - Rename current session
+- `/fork` - Fork from the current point
+- `/root_agent` - Select root agent
+- `/model` - Select root agent (alias for /root_agent)
+- `/model_config` - Configure agent settings
+- `/compact` - Compress conversation context
+- `/btw` - Reserved side-channel question
+- `/exit` - Exit CLI
 
 ## Build From Source
 
