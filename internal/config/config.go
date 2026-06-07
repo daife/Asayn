@@ -253,7 +253,15 @@ func SaveAgent(paths Paths, kind, name string, update func(*AgentConfig)) (Agent
 	if cfg.Name == "" {
 		cfg.Name = name
 	}
-	path := paths.HomePath(kind, name+".toml")
+	// Save to the same location LoadAgent loaded from:
+	// workspace config takes priority over home config.
+	path := firstExisting(
+		paths.WorkspacePath(kind, name+".toml"),
+		paths.HomePath(kind, name+".toml"),
+	)
+	if path == "" {
+		path = paths.HomePath(kind, name+".toml")
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return cfg, err
 	}
