@@ -69,6 +69,7 @@ func (m *ShellManager) RunBlocking(ctx context.Context, command string, timeoutS
 	if timeoutSec <= 0 {
 		timeoutSec = 60
 	}
+	before := snapFiles(m.workdir)
 	run, err := m.start(command, false)
 	if err != nil {
 		return "", err
@@ -81,7 +82,12 @@ func (m *ShellManager) RunBlocking(ctx context.Context, command string, timeoutS
 		if err := run.Err(); err != nil {
 			return truncate(out, m.limit), fmt.Errorf("command failed: %w", err)
 		}
-		return truncate(out, m.limit), nil
+		out = truncate(out, m.limit)
+		after := snapFiles(m.workdir)
+		if diff := computeFileDiff(before, after); diff != "" {
+			out += diff
+		}
+		return out, nil
 	case <-waitCtx.Done():
 		m.killRun(run)
 		out := run.output.String()
@@ -89,7 +95,8 @@ func (m *ShellManager) RunBlocking(ctx context.Context, command string, timeoutS
 			out += "\n"
 		}
 		out += fmt.Sprintf("<TIMEOUT after %d seconds>", timeoutSec)
-		return truncate(out, m.limit), nil
+		out = truncate(out, m.limit)
+		return out, nil
 	}
 }
 
