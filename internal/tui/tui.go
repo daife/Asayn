@@ -2807,6 +2807,9 @@ func renderSessionContent(ctx *app.Context, sess *session.Session, renderer *gla
 				b.WriteString(successStyle.Render("● "+label))
 			}
 			b.WriteString("\n")
+			if diffBlock := extractDiffBlock(msg.Content); diffBlock != "" {
+				b.WriteString(styleDiffBlock(diffBlock) + "\n")
+			}
 		}
 	}
 	return b.String()
