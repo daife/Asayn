@@ -43,9 +43,11 @@ jobs:
           name: Asayn ${{ github.ref_name }}
           body: |
             ## Changes
-            - 修复模型中途输出回答不渲染的问题
-            - 现在每次完整的回答都会立即渲染markdown
-            - 提升用户体验，用户可以实时看到模型的输出
+            - 修复模型中途输出回答不渲染的问题：现在每次完整的回答都会立即渲染markdown
+            - 精简工具描述：workspaceRule 从冗长路径指引缩短为 "Support paths inside workspace only"
+            - 将 .Asayn/ 保护提示和文件修改指南从工具描述移入 system_prompt，减少冗余
+            - shell_run_sync 描述大幅精简
+            - sub_agent_check 描述和 running 提示优化，鼓励先做其他有用工作
 
             ## Assets
             - `asayn-linux-amd64`: Linux amd64 二进制文件

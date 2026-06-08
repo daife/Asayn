@@ -78,9 +78,9 @@ func (e *Executor) SetAgentLimits(maxOutputLines int, allowParallelShell, allowI
 }
 
 func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
-	workspaceRule := "Use workspace-relative paths by default. Absolute paths are accepted only when they stay inside the workspace. Avoid modifying .Asayn/ unless explicitly asked to change Asayn configurations."
+	workspaceRule := "Support paths inside workspace only."
 	schemas := []types.ToolSchema{
-		schema("file_read", "Read a file. "+workspaceRule+" Binary files and files without extensions are considered risky and will only show a preview unless force_binary is set. To modify files, use the shell_run_sync tool with Python (e.g., python3 -c '...' or a heredoc). All tool calls execute sequentially; batch multiple calls in one response for efficiency.", map[string]any{
+		schema("file_read", "Read a file. "+workspaceRule+" Binary files and files without extensions are considered risky and will only show a preview unless force_binary is set.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"path":         prop("string", "File path. Prefer a path relative to the workspace."),
@@ -119,7 +119,7 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 		shellCWD = "workspace"
 	}
 	shellEnv := ShellEnvironmentName()
-	schemas = append(schemas, schema("shell_run_sync", fmt.Sprintf("Run a blocking non-interactive %s command in %q(workspace). Commands run in the workspace root. All tool calls execute sequentially; you may include multiple tool calls in a single response and they will run in order (e.g. call shell tools to modify and verify file).", shellEnv, shellCWD), map[string]any{
+	schemas = append(schemas, schema("shell_run_sync", fmt.Sprintf("Run a blocking non-interactive %s command in %q(workspace).", shellEnv, shellCWD), map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"command":     prop("string", shellEnv+" command."),
@@ -181,7 +181,7 @@ func subAgentSchemas() []types.ToolSchema {
 			},
 			"required": []string{"instruction"},
 		}),
-		schema("sub_agent_check", "Check a sub-agent. When a ready_for_check result is read, the task is marked completed.", map[string]any{
+		schema("sub_agent_check", "Check sub-agent status. Sub-agent work may take a while, so usually do other useful work before check.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"sub_agent_id": prop("string", "Sub-agent ID."),

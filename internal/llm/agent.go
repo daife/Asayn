@@ -339,7 +339,7 @@ func (a *Agent) systemPrompt(sess *session.Session) string {
 	prompt := a.root.SystemPrompt
 	skills, err := config.ListSkills(a.paths)
 	if err != nil || len(skills) == 0 {
-		return prompt
+		return prompt + "\n\nWorkspace rules:\n- Avoid modifying .Asayn/ unless explicitly asked to change Asayn configurations.\n- Write or modify files via shell tools with Python heredocs, sed, cat, etc. Multiple tool calls per response are recommended."
 	}
 	visible := a.visibleSkillSet(sess)
 	blocks := []string{}
@@ -350,9 +350,9 @@ func (a *Agent) systemPrompt(sess *session.Session) string {
 		blocks = append(blocks, fmt.Sprintf("<skill folder=%q metadata=%q />", skill.Folder, formatSkillMetadata(skill.Metadata)))
 	}
 	if len(blocks) == 0 {
-		return prompt + "\n\nNo skills visible."
+		return prompt + "\n\nNo skills visible.\n\nWorkspace rules:\n- Avoid modifying .Asayn/ unless explicitly asked to change Asayn configurations.\n- Write or modify files via shell tools with Python heredocs, sed, cat, etc. Multiple tool calls per response are recommended."
 	}
-	return prompt + "\n\nVisible skills (use skill_read before applying):\n" + strings.Join(blocks, "\n")
+	return prompt + "\n\nVisible skills (use skill_read before applying):\n" + strings.Join(blocks, "\n") + "\n\nWorkspace rules:\n- Avoid modifying .Asayn/ unless explicitly asked to change Asayn configurations.\n- Write or modify files via shell tools with Python heredocs, sed, cat, etc. Multiple tool calls per response are recommended."
 }
 
 func formatSkillMetadata(metadata map[string]string) string {
