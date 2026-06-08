@@ -10,9 +10,6 @@ import (
 
 const (
 	diffContextLines = 3
-	maxDiffLines     = 80
-	maxDiffFiles     = 10
-	snapFileLimit    = 5000 // max files to snapshot
 )
 
 // fileSnapshot stores enough to detect content changes.
@@ -36,7 +33,6 @@ func hasAsaynComponent(rel string) bool {
 
 func snapFiles(root string) []fileSnapshot {
 	var snaps []fileSnapshot
-	count := 0
 	_ = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -69,10 +65,6 @@ func snapFiles(root string) []fileSnapshot {
 		}
 		if isBinary(probe) {
 			return nil
-		}
-		count++
-		if count > snapFileLimit {
-			return filepath.SkipAll
 		}
 		snaps = append(snaps, fileSnapshot{Path: rel, Content: string(data)})
 		return nil
@@ -130,18 +122,8 @@ func computeFileDiff(before, after []fileSnapshot) string {
 
 	var out strings.Builder
 	out.WriteString("\n---\nFile changes:\n")
-	totalLines := 0
-	fileCount := 0
 
 	for _, ch := range changes {
-		if fileCount >= maxDiffFiles {
-			out.WriteString(fmt.Sprintf("... (%d more changed files not shown)\n", len(changes)-fileCount))
-			break
-		}
-		if totalLines >= maxDiffLines {
-			out.WriteString("... (diff truncated)\n")
-			break
-		}
 
 		if ch.New {
 			out.WriteString(fmt.Sprintf("diff --git a/%s b/%s\n", ch.Path, ch.Path))
@@ -150,7 +132,6 @@ func computeFileDiff(before, after []fileSnapshot) string {
 			out.WriteString(fmt.Sprintf("@@ -0,0 +1,%d @@\n", len(lines)))
 			for _, l := range lines {
 				out.WriteString("+" + l + "\n")
-				totalLines++
 			}
 		} else if ch.Del {
 			out.WriteString(fmt.Sprintf("diff --git a/%s b/%s\n", ch.Path, ch.Path))
@@ -159,14 +140,11 @@ func computeFileDiff(before, after []fileSnapshot) string {
 			out.WriteString(fmt.Sprintf("@@ -1,%d +0,0 @@\n", len(lines)))
 			for _, l := range lines {
 				out.WriteString("-" + l + "\n")
-				totalLines++
 			}
 		} else {
 			diff := unifiedDiff(ch.Path, ch.Before, ch.After)
 			out.WriteString(diff)
-			totalLines += strings.Count(diff, "\n")
 		}
-		fileCount++
 	}
 	return out.String()
 }
