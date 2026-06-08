@@ -1129,6 +1129,9 @@ func (m *model) appendAgentEvent(event llm.AgentEvent) bool {
 		replacement := "\n" + successStyle.Render("● "+m.pendingToolName) + "\n"
 		m.replacePendingTool(replacement)
 		m.transientToolLine = replacement
+		if diffBlock := extractDiffBlock(event.Text); diffBlock != "" {
+			m.appendLog(styleDiffBlock(diffBlock) + "\n")
+		}
 	case "tool_error":
 		replacement := "\n" + errorStyle.Render("● "+m.pendingToolName) + "\n"
 		m.replacePendingTool(replacement)
@@ -2980,6 +2983,48 @@ func styleTranscriptLine(line string) string {
 	default:
 		return line
 	}
+}
+
+// extractDiffBlock returns the "File changes:" diff block from tool output, if present.
+func extractDiffBlock(text string) string {
+	idx := strings.Index(text, "\n---\nFile changes:\n")
+	if idx < 0 {
+		return ""
+	}
+	return text[idx+1:] // skip leading newline, keep "---\nFile changes:\n..."
+}
+
+// styleDiffBlock applies ANSI colors to a unified-diff-style block:
+// green for additions (+), red for deletions (-), gray for context/meta.
+func styleDiffBlock(block string) string {
+	addStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#4caf50"))
+	delStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#f44336"))
+	metaStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
+	ctxStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#aaaaaa"))
+
+	var out strings.Builder
+	lines := strings.Split(block, "\n")
+	for _, line := range lines {
+		switch {
+		case line == "":
+			out.WriteString("\n")
+		case strings.HasPrefix(line, "---"):
+			out.WriteString(metaStyle.Render(line) + "\n")
+		case strings.HasPrefix(line, "diff --git"):
+			out.WriteString(metaStyle.Render(line) + "\n")
+		case strings.HasPrefix(line, "@@"):
+			out.WriteString(metaStyle.Render(line) + "\n")
+		case strings.HasPrefix(line, "new file"), strings.HasPrefix(line, "deleted file"):
+			out.WriteString(metaStyle.Render(line) + "\n")
+		case strings.HasPrefix(line, "+"):
+			out.WriteString(addStyle.Render(line) + "\n")
+		case strings.HasPrefix(line, "-"):
+			out.WriteString(delStyle.Render(line) + "\n")
+		default:
+			out.WriteString(ctxStyle.Render(line) + "\n")
+		}
+	}
+	return out.String()
 }
 
 func minorBlock(title, text string, maxLines int) string {
