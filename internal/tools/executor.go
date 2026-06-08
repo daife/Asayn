@@ -78,9 +78,8 @@ func (e *Executor) SetAgentLimits(maxOutputLines int, allowParallelShell, allowI
 }
 
 func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
-	workspaceRule := "Support paths inside workspace only."
 	schemas := []types.ToolSchema{
-		schema("file_read", "Read a file. "+workspaceRule+" Binary files and files without extensions are considered risky and will only show a preview unless force_binary is set.", map[string]any{
+		schema("file_read", "Read a file. Support paths inside workspace only. Binary files and files without extensions are considered risky and will only show a preview unless force_binary is set.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"path":         prop("string", "File path. Prefer a path relative to the workspace."),
@@ -90,7 +89,7 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 			},
 			"required": []string{"path"},
 		}),
-		schema("dir_view", "List a directory. "+workspaceRule, map[string]any{
+		schema("dir_view", "List a directory. Support paths inside workspace only.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"path": prop("string", "Directory path. Prefer a path relative to the workspace."),
