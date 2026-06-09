@@ -460,8 +460,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Compact runs are billed to the same root session because they are part of
 			// maintaining that conversation's usable context.
 			_ = m.ctx.UsageTracker.Log(m.session.ID, m.session.Name, modelName, msg.usage)
-			m.latestTotalTokens = msg.usage.TotalTokens
-			m.session.LastTotalTokens = msg.usage.TotalTokens
+			if runKind == "compact" {
+				m.latestTotalTokens = msg.usage.CompletionTokens
+				m.session.LastTotalTokens = msg.usage.CompletionTokens
+			} else {
+				m.latestTotalTokens = msg.usage.TotalTokens
+				m.session.LastTotalTokens = msg.usage.TotalTokens
+			}
 			_ = m.ctx.Sessions.Save(m.session)
 		}
 		m.usageStats, _ = m.ctx.UsageTracker.GetStats(m.session.ID)

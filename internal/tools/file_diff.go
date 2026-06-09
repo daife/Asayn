@@ -10,6 +10,9 @@ import (
 
 const (
 	diffContextLines = 3
+	snapFileLimit    = 5000
+	maxDiffLines     = 80
+	maxDiffFiles     = 10
 )
 
 // fileSnapshot stores enough to detect content changes.
@@ -20,17 +23,7 @@ type fileSnapshot struct {
 }
 
 // snapFiles walks the workspace, skipping .Asayn/ and binary/risky files.
-// hasAsaynComponent checks if any path component is .Asayn
-func hasAsaynComponent(rel string) bool {
-	parts := strings.Split(filepath.ToSlash(rel), "/")
-	for _, p := range parts {
-		if p == ".Asayn" {
-			return true
-		}
-	}
-	return false
-}
-
+// Stops scanning after snapFileLimit files.
 func snapFiles(root string) []fileSnapshot {
 	var snaps []fileSnapshot
 	_ = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
@@ -56,6 +49,9 @@ func snapFiles(root string) []fileSnapshot {
 		data, err := os.ReadFile(p)
 		if err != nil {
 			snaps = append(snaps, fileSnapshot{Path: rel, Missing: true})
+			if len(snaps) >= snapFileLimit {
+				return filepath.SkipAll
+			}
 			return nil
 		}
 		// Quick binary probe
@@ -67,13 +63,28 @@ func snapFiles(root string) []fileSnapshot {
 			return nil
 		}
 		snaps = append(snaps, fileSnapshot{Path: rel, Content: string(data)})
+		if len(snaps) >= snapFileLimit {
+			return filepath.SkipAll
+		}
 		return nil
 	})
 	sort.Slice(snaps, func(i, j int) bool { return snaps[i].Path < snaps[j].Path })
 	return snaps
 }
 
+// hasAsaynComponent checks if any path component is .Asayn
+func hasAsaynComponent(rel string) bool {
+	parts := strings.Split(filepath.ToSlash(rel), "/")
+	for _, p := range parts {
+		if p == ".Asayn" {
+			return true
+		}
+	}
+	return false
+}
+
 // computeFileDiff returns a unified-diff-style string showing file changes.
+// Limits output to maxDiffFiles and maxDiffLines.
 func computeFileDiff(before, after []fileSnapshot) string {
 	beforeMap := make(map[string]string)
 	beforeExists := make(map[string]bool)
@@ -120,10 +131,21 @@ func computeFileDiff(before, after []fileSnapshot) string {
 
 	sort.Slice(changes, func(i, j int) bool { return changes[i].Path < changes[j].Path })
 
+	// Limit number of files in diff output
+	if len(changes) > maxDiffFiles {
+		changes = changes[:maxDiffFiles]
+	}
+
 	var out strings.Builder
 	out.WriteString("\n---\nFile changes:\n")
 
 	for _, ch := range changes {
+		// Check line budget before writing this file's diff
+		currentLines := strings.Count(out.String(), "\n")
+		if currentLines >= maxDiffLines {
+			out.WriteString("... (truncated)\n")
+			break
+		}
 
 		if ch.New {
 			out.WriteString(fmt.Sprintf("diff --git a/%s b/%s\n", ch.Path, ch.Path))
@@ -132,6 +154,10 @@ func computeFileDiff(before, after []fileSnapshot) string {
 			out.WriteString(fmt.Sprintf("@@ -0,0 +1,%d @@\n", len(lines)))
 			for _, l := range lines {
 				out.WriteString("+" + l + "\n")
+				if strings.Count(out.String(), "\n") >= maxDiffLines {
+					out.WriteString("... (truncated)\n")
+					break
+				}
 			}
 		} else if ch.Del {
 			out.WriteString(fmt.Sprintf("diff --git a/%s b/%s\n", ch.Path, ch.Path))
@@ -140,10 +166,20 @@ func computeFileDiff(before, after []fileSnapshot) string {
 			out.WriteString(fmt.Sprintf("@@ -1,%d +0,0 @@\n", len(lines)))
 			for _, l := range lines {
 				out.WriteString("-" + l + "\n")
+				if strings.Count(out.String(), "\n") >= maxDiffLines {
+					out.WriteString("... (truncated)\n")
+					break
+				}
 			}
 		} else {
 			diff := unifiedDiff(ch.Path, ch.Before, ch.After)
-			out.WriteString(diff)
+			for _, l := range strings.Split(diff, "\n") {
+				out.WriteString(l + "\n")
+				if strings.Count(out.String(), "\n") >= maxDiffLines {
+					out.WriteString("... (truncated)\n")
+					break
+				}
+			}
 		}
 	}
 	return out.String()
