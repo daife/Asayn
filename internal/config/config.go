@@ -210,8 +210,8 @@ func LoadAgent(paths Paths, kind, name string) (AgentConfig, error) {
 	if cfg.SystemPrompt == "" {
 		cfg.SystemPrompt = "You are a helpful assistant."
 	}
-	if cfg.MaxOutputLines < 0 {
-		cfg.MaxOutputLines = 0
+	if cfg.MaxOutputLines <= 0 {
+		cfg.MaxOutputLines = 2000
 	}
 	if cfg.ContextWindow <= 0 {
 		cfg.ContextWindow = 1024000
@@ -646,7 +646,7 @@ func defaultAgentConfig(kind, name string) AgentConfig {
 		Description:                 defaultAgentDescription(kind, name),
 		SystemPrompt:                "You are a helpful assistant.",
 		VisibleSkills:               []string{},
-		MaxOutputLines:              0,
+		MaxOutputLines:              2000,
 		ContextWindow:               1024000,
 		MaxOutputTokens:             384000,
 		AutoCompactThresholdPercent: 80,

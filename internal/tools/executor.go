@@ -33,8 +33,8 @@ type Executor struct {
 }
 
 func NewExecutor(paths config.Paths, store *session.Store, maxOutputLines int, allowParallelShell, allowInteractiveShell bool) *Executor {
-	if maxOutputLines < 0 {
-		maxOutputLines = 0
+	if maxOutputLines <= 0 {
+		maxOutputLines = 2000
 	}
 	if allowInteractiveShell {
 		allowParallelShell = true
