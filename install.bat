@@ -83,6 +83,25 @@ echo 配置文件位置:
 echo   %USERPROFILE%\.Asayn\api_config.toml
 echo   在此文件中配置您的 API 密钥(首次运行后才会自动生成该目录)
 echo.
+
+
+echo.
+set /p "migrateClaude=是否迁移 Claude Code 的 skills 和 MCP 配置？(y/N): "
+if /i "%migrateClaude%"=="y" (
+    if exist "%~dp0install.ps1" (
+        powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1" -MigrateOnly
+    ) else (
+        echo 未找到同目录 install.ps1，正在下载迁移辅助脚本...
+        set "asaynMigPs1=%TEMP%\asayn-install-migrate.ps1"
+        powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/daife/Asayn/main/install.ps1' -OutFile (Join-Path $env:TEMP 'asayn-install-migrate.ps1')"
+        if exist "%TEMP%\asayn-install-migrate.ps1" (
+            powershell -NoProfile -ExecutionPolicy Bypass -File "%TEMP%\asayn-install-migrate.ps1" -MigrateOnly
+        ) else (
+            echo 下载迁移辅助脚本失败。请使用 install.ps1 进行迁移。
+        )
+    )
+)
+
 echo 使用方法:
 echo   cd \path\to\your\project
 echo   asayn

@@ -26,7 +26,13 @@ The scripts will:
 2. Download the latest release for your platform
 3. Install to `~/.local/bin` (Linux) or `%USERPROFILE%\.local\bin` (Windows)
 4. Add the install directory to your PATH
-5. Show you where to edit the configuration file
+5. Optionally migrate Claude Code skills and MCP server configs without overwriting existing Asayn entries
+6. Show you where to edit the configuration file
+
+
+### Optional Claude Code Migration
+
+After installing, the scripts can scan common Claude Code locations such as `~/.claude/skills`, `~/.claude.json`, `~/.claude/`, project `.claude/`, and project `.mcp.json`. The installer shows each discovered skill and MCP server as an individual numbered option. Existing Asayn skill folders or MCP server names are marked as duplicates and are not overwritten. Selected skills are copied to `~/.Asayn/skills/`; selected MCP servers are written as separate JSON files under `~/.Asayn/mcp/`.
 
 ## Key Features
 
