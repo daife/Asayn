@@ -92,24 +92,15 @@ function Get-ClaudeSkillCandidates {
     return $items | Sort-Object Name, Source
 }
 
-function Add-McpServersFromObject {
+function Add-McpServersFromRoot {
     param($Object, [string]$Source, [System.Collections.Generic.List[object]]$Out)
-    if ($null -eq $Object) { return }
-    if ($Object -is [System.Array]) {
-        foreach ($item in $Object) { Add-McpServersFromObject $item $Source $Out }
-        return
-    }
-    if ($Object -is [pscustomobject]) {
-        $props = $Object.PSObject.Properties
-        $mcpProp = $props | Where-Object { $_.Name -eq "mcpServers" } | Select-Object -First 1
-        if ($mcpProp -and $mcpProp.Value -is [pscustomobject]) {
-            foreach ($srv in $mcpProp.Value.PSObject.Properties) {
-                if ($srv.Value -is [pscustomobject]) {
-                    $Out.Add([pscustomobject]@{ Name = [string]$srv.Name; Config = $srv.Value; Source = $Source })
-                }
-            }
+    if ($null -eq $Object -or $Object -isnot [pscustomobject]) { return }
+    $mcpProp = $Object.PSObject.Properties | Where-Object { $_.Name -eq "mcpServers" } | Select-Object -First 1
+    if ($null -eq $mcpProp -or $null -eq $mcpProp.Value -or $mcpProp.Value -isnot [pscustomobject]) { return }
+    foreach ($srv in $mcpProp.Value.PSObject.Properties) {
+        if ($srv.Value -is [pscustomobject]) {
+            $Out.Add([pscustomobject]@{ Name = [string]$srv.Name; Config = $srv.Value; Source = $Source })
         }
-        foreach ($p in $props) { if ($null -ne $p.Value) { Add-McpServersFromObject $p.Value $Source $Out } }
     }
 }
 
@@ -162,7 +153,7 @@ function Get-ClaudeMcpCandidates {
     $raw = New-Object 'System.Collections.Generic.List[object]'
     foreach ($file in $jsonFiles) {
         try { $data = Get-Content -LiteralPath $file -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop } catch { continue }
-        try { Add-McpServersFromObject $data $file $raw } catch { continue }
+        Add-McpServersFromRoot $data $file $raw
     }
 
     $existing = Get-AsaynExistingMcpNames $AsaynMcpDir
