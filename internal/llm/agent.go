@@ -377,56 +377,6 @@ func (a *Agent) systemPrompt(sess *session.Session) string {
 		}
 	}
 
-	// Build active context block
-	ctxBlock := ""
-	subSnapshots := a.tools.SubAgentSnapshots()
-	shellSnapshots := a.tools.ShellSnapshots()
-	mcpStatusLines := a.tools.MCPStatusLines()
-	ctxRows := []string{}
-	if len(subSnapshots) > 0 {
-		subRows := []string{}
-		for _, sub := range subSnapshots {
-			if sub.Status == "completed" {
-				continue
-			}
-			if sub.Status == "ready_for_check" {
-				ctxRows = append(ctxRows, fmt.Sprintf("[%s] is ready for check", sub.ID))
-				continue
-			}
-			subRows = append(subRows, fmt.Sprintf("- sub_agent %s: %s (%s)", sub.ID, sub.Status, sub.Name))
-		}
-		if len(subRows) > 0 {
-			ctxRows = append(ctxRows, "Active sub-agents:")
-			ctxRows = append(ctxRows, subRows...)
-		}
-	}
-	if len(shellSnapshots) > 0 {
-		shellRows := []string{}
-		for _, sh := range shellSnapshots {
-			if sh.Status != "running" {
-				continue
-			}
-			shellRows = append(shellRows, fmt.Sprintf("- shell %s: %s (pid %d) %s", sh.ID, sh.Status, sh.PID, sh.Command))
-		}
-		if len(shellRows) > 0 {
-			if len(ctxRows) > 0 {
-				ctxRows = append(ctxRows, "")
-			}
-			ctxRows = append(ctxRows, "Active terminals:")
-			ctxRows = append(ctxRows, shellRows...)
-		}
-	}
-	if len(mcpStatusLines) > 0 {
-		if len(ctxRows) > 0 {
-			ctxRows = append(ctxRows, "")
-		}
-		ctxRows = append(ctxRows, "Active MCP servers:")
-		ctxRows = append(ctxRows, mcpStatusLines...)
-	}
-	if len(ctxRows) > 0 {
-		ctxBlock = "[Active Context]\n" + strings.Join(ctxRows, "\n")
-	}
-
 	// Assemble final prompt
 	parts := []string{prompt}
 	if skillsBlock != "" {
@@ -436,9 +386,6 @@ func (a *Agent) systemPrompt(sess *session.Session) string {
 		parts = append(parts, mcpBlock)
 	}
 	parts = append(parts, "Workspace rules:\n- Avoid modifying .Asayn/ unless explicitly asked to change Asayn configurations.\n- Write or modify files via shell_run_sync with Python heredocs, sed, cat, etc. Multiple tool calls per response are recommended.")
-	if ctxBlock != "" {
-		parts = append(parts, ctxBlock)
-	}
 	return strings.Join(parts, "\n\n")
 }
 
