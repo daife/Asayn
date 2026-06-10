@@ -109,7 +109,7 @@ function Add-McpServersFromObject {
                 }
             }
         }
-        foreach ($p in $props) { Add-McpServersFromObject $p.Value $Source $Out }
+        foreach ($p in $props) { if ($null -ne $p.Value) { Add-McpServersFromObject $p.Value $Source $Out } }
     }
 }
 
@@ -162,7 +162,7 @@ function Get-ClaudeMcpCandidates {
     $raw = New-Object 'System.Collections.Generic.List[object]'
     foreach ($file in $jsonFiles) {
         try { $data = Get-Content -LiteralPath $file -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop } catch { continue }
-        Add-McpServersFromObject $data $file $raw
+        try { Add-McpServersFromObject $data $file $raw } catch { continue }
     }
 
     $existing = Get-AsaynExistingMcpNames $AsaynMcpDir
