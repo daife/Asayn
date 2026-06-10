@@ -2318,10 +2318,10 @@ func (m model) resumePickerView() string {
 }
 
 func (m model) commandSuggestions() []commandSpec {
-	return commandSuggestionsFor(m.input.Value())
+	return commandSuggestionsFor(m.input.Value(), m.skillItems, m.mcpItems)
 }
 
-func commandSuggestionsFor(raw string) []commandSpec {
+func commandSuggestionsFor(raw string, skills []config.Skill, mcpServers []config.MCPServerInfo) []commandSpec {
 	value := strings.TrimSpace(raw)
 	if !strings.HasPrefix(value, "/") || strings.Contains(value, " ") || strings.Contains(value, "\t") {
 		return nil
@@ -2334,6 +2334,20 @@ func commandSuggestionsFor(raw string) []commandSpec {
 	for _, item := range commands {
 		if score, ok := fuzzyCommandScore(item.Name, value); ok {
 			scored = append(scored, scoredCommand{item: item, score: score})
+		}
+	}
+	// Also match visible skills
+	for _, skill := range skills {
+		name := "/" + skill.Name
+		if score, ok := fuzzyCommandScore(name, value); ok {
+			scored = append(scored, scoredCommand{item: commandSpec{Name: name, Description: skill.Description}, score: score})
+		}
+	}
+	// Also match visible MCP servers
+	for _, mcp := range mcpServers {
+		name := "/" + mcp.Name
+		if score, ok := fuzzyCommandScore(name, value); ok {
+			scored = append(scored, scoredCommand{item: commandSpec{Name: name, Description: mcp.Description}, score: score})
 		}
 	}
 	sort.SliceStable(scored, func(i, j int) bool {
@@ -2494,7 +2508,7 @@ func (m model) selectedCommandForEnter(value string) (string, bool) {
 	if strings.Contains(value, " ") || strings.Contains(value, "\t") || exactCommand(value) {
 		return "", false
 	}
-	suggestions := commandSuggestionsFor(value)
+	suggestions := commandSuggestionsFor(value, m.skillItems, m.mcpItems)
 	if len(suggestions) == 0 {
 		return "", false
 	}
