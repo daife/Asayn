@@ -78,7 +78,8 @@ function Get-ClaudeSkillCandidates {
             $name = Get-AsaynSkillNameFromFile $_.FullName
             if ([string]::IsNullOrWhiteSpace($name)) { $name = $_.Directory.Name }
             $target = Join-Path $AsaynSkillsDir $_.Directory.Name
-            $dup = (Test-Path $target) -or $existing.Contains($name) -or $existing.Contains($_.Directory.Name)
+            $nameSafe = if ($name) { $name } else { "" }
+            $dup = (Test-Path $target) -or $existing.Contains($nameSafe) -or $existing.Contains($_.Directory.Name)
             $items += [pscustomobject]@{
                 Kind = "skill"
                 Name = $name
@@ -162,7 +163,8 @@ function Get-ClaudeMcpCandidates {
         if ($byName.ContainsKey($item.Name)) { continue }
         $safe = Get-AsaynSafeFileName $item.Name
         $target = Join-Path $AsaynMcpDir ($safe + ".json")
-        $dup = $existing.Contains($item.Name) -or (Test-Path $target)
+        $nameSafe = if ($item.Name) { $item.Name } else { "" }
+        $dup = $existing.Contains($nameSafe) -or (Test-Path $target)
         $byName[$item.Name] = [pscustomobject]@{
             Kind = "mcp"
             Name = $item.Name
@@ -271,7 +273,8 @@ function Invoke-AsaynClaudeMigration {
                 $migrated += "skill $($item.Name) -> $($item.Target)"
             } else {
                 $existing = Get-AsaynExistingMcpNames $asaynMcp
-                if ($existing.Contains($item.Name)) { $skipped += "mcp $($item.Name)：同名配置已存在"; continue }
+                $nameSafe = if ($item.Name) { $item.Name } else { "" }
+                if ($existing.Contains($nameSafe)) { $skipped += "mcp $($item.Name)：同名配置已存在"; continue }
                 $base = Get-AsaynSafeFileName $item.Name
                 $target = Join-Path $asaynMcp ($base + ".json")
                 $suffix = 1

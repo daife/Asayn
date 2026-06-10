@@ -107,6 +107,7 @@ def discover_skills():
             seen.add(key)
             name = parse_skill_name(sf) or folder.name
             target = asayn_skills / folder.name
+            name = name or ""
             duplicate = target.exists() or name in existing or folder.name in existing
             found.append({
                 "kind": "skill",
@@ -192,6 +193,7 @@ def discover_mcp():
     for name, cfg, source in raw:
         if name in by_name:
             continue
+        name = name or ""
         duplicate = name in existing or (asayn_mcp / (safe_filename(name) + ".json")).exists()
         by_name[name] = {
             "kind": "mcp",
@@ -279,7 +281,7 @@ for i in sorted(selected):
             migrated.append(f"skill {item['name']} -> {target}")
         else:
             name = item["name"]
-            if name in existing_asayn_mcp_names():
+            if name and name in existing_asayn_mcp_names():
                 skipped.append(f"mcp {name}：同名配置已存在")
                 continue
             base = safe_filename(name)
