@@ -62,6 +62,7 @@ type model struct {
 	modelConfigEditingPercent bool
 	modelConfigPercentDraft   string
 	skillItems                []config.Skill
+	mcpItems                  []config.MCPServerInfo
 	subViewID                 string
 	sidebarHidden             bool
 	spinner                   int
@@ -542,7 +543,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.spinner++
 			m.refreshPendingSpinners()
 		}
-			return m, uiTick()
+		return m, uiTick()
 	}
 	var cmd tea.Cmd
 	if key, ok := msg.(tea.KeyMsg); ok && m.historyIndex != -1 && isInputEditingKey(key.String()) {
@@ -665,8 +666,6 @@ func (m *model) appendLog(s string) {
 	m.refreshLog(false)
 }
 
-
-
 func (m *model) refreshLog(forceBottom bool) {
 	wasBottom := m.log.AtBottom()
 	// Preserve scroll position ratio when not at bottom
@@ -736,7 +735,6 @@ func linesIn(s string) int {
 	return n
 }
 
-
 func (m *model) wrapContent(content string) string {
 	width := m.log.Width
 	if width <= 0 {
@@ -803,7 +801,6 @@ func (m *model) wrapContent(content string) string {
 	m.wrappedLen = len(content)
 	return m.wrappedContent
 }
-
 
 func (m *model) appendDivider() {
 	m.appendLog(renderDivider(m.log.Width, "") + "\n")
@@ -945,6 +942,14 @@ func (m model) activeWorkContext() string {
 		}
 		rows = append(rows, "Active terminals:")
 		rows = append(rows, shellRows...)
+	}
+	mcpRows := m.ctx.Tools.MCPStatusLines()
+	if len(mcpRows) > 0 {
+		if len(rows) > 0 {
+			rows = append(rows, "")
+		}
+		rows = append(rows, "Active MCP servers:")
+		rows = append(rows, mcpRows...)
 	}
 	if len(rows) == 0 {
 		return ""
@@ -1578,6 +1583,7 @@ func (m model) applyRootAgent(name string) model {
 
 	m.ctx.Root = root
 	m.ctx.Tools.SetAgentLimits(root.MaxOutputLines, root.AllowParallelShell, root.AllowInteractiveShell)
+	m.ctx.Tools.SetVisibleMCP(root.VisibleMCP)
 	m.ctx.Agent = llm.NewAgent(m.ctx.API, root, m.ctx.Paths, m.ctx.Tools)
 	m.session.RootAgent = root.Name
 	m.ctx.Agent.RefreshSystemPrompt(m.session)
@@ -1623,6 +1629,12 @@ func (m model) startModelConfigPicker() (model, tea.Cmd) {
 		return m, nil
 	}
 	m.skillItems = skills
+	mcpItems, err := config.ListMCPServerInfos(m.ctx.Paths)
+	if err != nil {
+		m.setCommandOutput("error: " + err.Error())
+		return m, nil
+	}
+	m.mcpItems = mcpItems
 
 	m.modelConfigModels = nil
 	providers := m.ctx.API.Providers
@@ -1687,14 +1699,14 @@ func (m model) handleModelConfigPickerKey(msg tea.KeyMsg) (model, tea.Cmd, bool)
 		return m, nil, true
 	case "up":
 		m.modelConfigOptionSelected--
-		maxOptions := 7 + len(m.skillItems)
+		maxOptions := 7 + len(m.skillItems) + len(m.mcpItems)
 		if m.modelConfigOptionSelected < 0 {
 			m.modelConfigOptionSelected = maxOptions - 1
 		}
 		return m, nil, true
 	case "down":
 		m.modelConfigOptionSelected++
-		maxOptions := 7 + len(m.skillItems)
+		maxOptions := 7 + len(m.skillItems) + len(m.mcpItems)
 		if m.modelConfigOptionSelected >= maxOptions {
 			m.modelConfigOptionSelected = 0
 		}
@@ -1813,10 +1825,10 @@ func (m model) handleModelConfigAction() model {
 			if configKind == config.RootAgentKind {
 				cfg.RealTimeContextControl = !cfg.RealTimeContextControl
 			}
-		default: // Skills
-			skillIdx := m.modelConfigOptionSelected - 7
-			if skillIdx >= 0 && skillIdx < len(m.skillItems) {
-				skillName := m.skillItems[skillIdx].Name
+		default: // Skills and MCP servers
+			idx := m.modelConfigOptionSelected - 7
+			if idx >= 0 && idx < len(m.skillItems) {
+				skillName := m.skillItems[idx].Name
 				found := -1
 				for i, s := range cfg.VisibleSkills {
 					if s == skillName {
@@ -1830,6 +1842,24 @@ func (m model) handleModelConfigAction() model {
 					cfg.VisibleSkills = append(cfg.VisibleSkills, skillName)
 				}
 				sort.Strings(cfg.VisibleSkills)
+				return
+			}
+			mcpIdx := idx - len(m.skillItems)
+			if mcpIdx >= 0 && mcpIdx < len(m.mcpItems) {
+				mcpName := m.mcpItems[mcpIdx].Name
+				found := -1
+				for i, s := range cfg.VisibleMCP {
+					if s == mcpName {
+						found = i
+						break
+					}
+				}
+				if found >= 0 {
+					cfg.VisibleMCP = append(cfg.VisibleMCP[:found], cfg.VisibleMCP[found+1:]...)
+				} else {
+					cfg.VisibleMCP = append(cfg.VisibleMCP, mcpName)
+				}
+				sort.Strings(cfg.VisibleMCP)
 			}
 		}
 	}
@@ -1843,6 +1873,7 @@ func (m model) handleModelConfigAction() model {
 	if configKind == config.RootAgentKind && newCfg.Name == m.session.RootAgent {
 		m.ctx.Root = newCfg
 		m.ctx.Tools.SetAgentLimits(newCfg.MaxOutputLines, newCfg.AllowParallelShell, newCfg.AllowInteractiveShell)
+		m.ctx.Tools.SetVisibleMCP(newCfg.VisibleMCP)
 		m.ctx.Agent = llm.NewAgent(m.ctx.API, newCfg, m.ctx.Paths, m.ctx.Tools)
 		m.ctx.Agent.RefreshSystemPrompt(m.session)
 	}
@@ -1869,6 +1900,7 @@ func (m model) saveModelConfigThreshold(value int) model {
 	if newCfg.Name == m.session.RootAgent {
 		m.ctx.Root = newCfg
 		m.ctx.Tools.SetAgentLimits(newCfg.MaxOutputLines, newCfg.AllowParallelShell, newCfg.AllowInteractiveShell)
+		m.ctx.Tools.SetVisibleMCP(newCfg.VisibleMCP)
 		m.ctx.Agent = llm.NewAgent(m.ctx.API, newCfg, m.ctx.Paths, m.ctx.Tools)
 		m.ctx.Agent.RefreshSystemPrompt(m.session)
 	}
@@ -1953,6 +1985,22 @@ func (m model) modelConfigPickerView() string {
 		rows = append(rows, fmt.Sprintf("%s%s %-15s %s", marker, checked, skill.Name, mutedStyle.Render(skill.Description)))
 	}
 
+	rows = append(rows, "", "MCP Servers:")
+	for i, item := range m.mcpItems {
+		marker := "  "
+		if i+7+len(m.skillItems) == m.modelConfigOptionSelected {
+			marker = "> "
+		}
+		checked := "[ ]"
+		for _, s := range cfg.VisibleMCP {
+			if s == item.Name {
+				checked = "[x]"
+				break
+			}
+		}
+		rows = append(rows, fmt.Sprintf("%s%s %-15s %s", marker, checked, item.Name, mutedStyle.Render(item.Description)))
+	}
+
 	return "\n" + lipgloss.NewStyle().
 		Width(m.log.Width).
 		Foreground(lipgloss.Color("8")).
@@ -1999,7 +2047,8 @@ func (m model) resumeSession(idOrName string) (model, tea.Cmd) {
 	m.historyIndex = -1
 	m.historyDraft = ""
 	m.ctx.Tools.RestoreSubAgents(sess, sess.SubAgents, m.ctx.SubSessions)
-	m.invalidateWrap(); m.content = renderSessionContent(m.ctx, sess, m.renderer, m.log.Width)
+	m.invalidateWrap()
+	m.content = renderSessionContent(m.ctx, sess, m.renderer, m.log.Width)
 	m.usageStats, _ = m.ctx.UsageTracker.GetStats(m.session.ID)
 	m.latestTotalTokens = sess.LastTotalTokens
 	m.refreshLog(true)
@@ -2522,7 +2571,7 @@ func (m model) rootSidebarLines(width int) ([]string, []int) {
 		"status: " + status,
 	}
 	if len(m.queuedMessages) > 0 {
-		rawLines = append(rawLines, "queued: " + fmt.Sprint(len(m.queuedMessages)))
+		rawLines = append(rawLines, "queued: "+fmt.Sprint(len(m.queuedMessages)))
 	}
 	rawLines = append(rawLines, "", sectionStyle.Render("Root Terminals"))
 	shells := m.ctx.Tools.ShellSnapshots()
@@ -2807,9 +2856,9 @@ func renderSessionContent(ctx *app.Context, sess *session.Session, renderer *gla
 			}
 			b.WriteString("\n")
 			if strings.HasPrefix(strings.TrimSpace(msg.Content), "tool error:") {
-				b.WriteString(errorStyle.Render("● "+label))
+				b.WriteString(errorStyle.Render("● " + label))
 			} else {
-				b.WriteString(successStyle.Render("● "+label))
+				b.WriteString(successStyle.Render("● " + label))
 			}
 			b.WriteString("\n")
 			if diffBlock := extractDiffBlock(msg.Content); diffBlock != "" {

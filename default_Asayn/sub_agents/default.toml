@@ -4,6 +4,7 @@ model = "deepseek-v4-flash"
 description = "General-purpose sub-agent with basic file, search, skill, and history tools."
 system_prompt = "You are a helpful assistant. Work as a focused sub-agent with basic tools. Research, inspect, edit when needed, and report concise findings to the root agent."
 visible_skills = []
+visible_mcp = []
 max_output_lines = 2000
 allow_interactive_shell = false
 thinking_enabled = false

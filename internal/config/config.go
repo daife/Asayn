@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -49,6 +50,7 @@ type AgentConfig struct {
 	Description                 string   `toml:"description" json:"description"`
 	SystemPrompt                string   `toml:"system_prompt" json:"system_prompt"`
 	VisibleSkills               []string `toml:"visible_skills" json:"visible_skills"`
+	VisibleMCP                  []string `toml:"visible_mcp" json:"visible_mcp"`
 	MaxOutputLines              int      `toml:"max_output_lines" json:"max_output_lines"`
 	ContextWindow               int      `toml:"context_window" json:"context_window"`
 	MaxOutputTokens             int      `toml:"max_output_tokens" json:"max_output_tokens"`
@@ -75,6 +77,34 @@ type AgentInfo struct {
 	Name        string
 	Description string
 	Source      string
+}
+
+const MCPConfigKind = "mcp"
+
+type MCPServerConfig struct {
+	Type    string            `json:"type" toml:"type"`
+	Command string            `json:"command" toml:"command"`
+	Args    []string          `json:"args" toml:"args"`
+	Env     map[string]string `json:"env" toml:"env"`
+	URL     string            `json:"url" toml:"url"`
+	Headers map[string]string `json:"headers" toml:"headers"`
+}
+
+type MCPServer struct {
+	Name   string
+	Source string
+	Path   string
+	Config MCPServerConfig
+}
+
+type MCPServerInfo struct {
+	Name        string
+	Description string
+	Source      string
+}
+
+type mcpConfigFile struct {
+	MCPServers map[string]MCPServerConfig `json:"mcpServers"`
 }
 
 func Bootstrap(cwd string) (Paths, error) {
@@ -278,6 +308,12 @@ func SaveAgentVisibleSkills(paths Paths, kind, name string, visibleSkills []stri
 	})
 }
 
+func SaveAgentVisibleMCP(paths Paths, kind, name string, visibleMCP []string) (AgentConfig, error) {
+	return SaveAgent(paths, kind, name, func(c *AgentConfig) {
+		c.VisibleMCP = uniqueSorted(visibleMCP)
+	})
+}
+
 func SaveRootAgentShellConfig(paths Paths, name string, allowParallel, allowInteractive bool) (AgentConfig, error) {
 	return SaveAgent(paths, RootAgentKind, name, func(c *AgentConfig) {
 		c.AllowParallelShell = allowParallel
@@ -372,6 +408,93 @@ func ListAgentInfos(paths Paths, kind string) ([]AgentInfo, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
+}
+
+func ListMCPServers(paths Paths) ([]MCPServer, error) {
+	seen := map[string]MCPServer{}
+	for _, base := range []struct {
+		root, source string
+	}{
+		{paths.HomePath(MCPConfigKind), "~/.Asayn/mcp"},
+		{paths.WorkspacePath(MCPConfigKind), "[workspace]/.Asayn/mcp"},
+	} {
+		entries, err := os.ReadDir(base.root)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		for _, ent := range entries {
+			if ent.IsDir() || strings.ToLower(filepath.Ext(ent.Name())) != ".json" {
+				continue
+			}
+			path := filepath.Join(base.root, ent.Name())
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return nil, err
+			}
+			var file mcpConfigFile
+			if err := json.Unmarshal(data, &file); err != nil {
+				return nil, fmt.Errorf("read %s: %w", path, err)
+			}
+			for name, cfg := range file.MCPServers {
+				name = strings.TrimSpace(name)
+				if name == "" {
+					continue
+				}
+				if cfg.Type == "" {
+					cfg.Type = "stdio"
+				}
+				seen[name] = MCPServer{Name: name, Source: base.source, Path: path, Config: cfg}
+			}
+		}
+	}
+	out := make([]MCPServer, 0, len(seen))
+	for _, server := range seen {
+		out = append(out, server)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
+func ListMCPServerInfos(paths Paths) ([]MCPServerInfo, error) {
+	servers, err := ListMCPServers(paths)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]MCPServerInfo, 0, len(servers))
+	for _, srv := range servers {
+		desc := srv.Config.Type
+		switch strings.ToLower(srv.Config.Type) {
+		case "", "stdio":
+			cmd := strings.TrimSpace(strings.Join(append([]string{srv.Config.Command}, srv.Config.Args...), " "))
+			if cmd != "" {
+				desc = "stdio: " + cmd
+			} else {
+				desc = "stdio"
+			}
+		case "streamable_http", "http":
+			if srv.Config.URL != "" {
+				desc = srv.Config.Type + ": " + srv.Config.URL
+			}
+		}
+		out = append(out, MCPServerInfo{Name: srv.Name, Description: desc, Source: srv.Source})
+	}
+	return out, nil
+}
+
+func LoadMCPServer(paths Paths, name string) (MCPServer, error) {
+	servers, err := ListMCPServers(paths)
+	if err != nil {
+		return MCPServer{}, err
+	}
+	for _, srv := range servers {
+		if srv.Name == name {
+			return srv, nil
+		}
+	}
+	return MCPServer{}, fmt.Errorf("mcp server %q not found", name)
 }
 
 func ListAgents(paths Paths, kind string) ([]string, error) {
@@ -646,6 +769,7 @@ func defaultAgentConfig(kind, name string) AgentConfig {
 		Description:                 defaultAgentDescription(kind, name),
 		SystemPrompt:                "You are a helpful assistant.",
 		VisibleSkills:               []string{},
+		VisibleMCP:                  []string{},
 		MaxOutputLines:              2000,
 		ContextWindow:               1024000,
 		MaxOutputTokens:             384000,

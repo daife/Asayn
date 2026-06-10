@@ -46,6 +46,7 @@ func Bootstrap(cwd string) (*Context, error) {
 	store := session.NewStore(paths.RootAgentSessionsDir())
 	subStore := session.NewStore(paths.SubAgentSessionsDir())
 	executor := tools.NewExecutor(paths, store, root.MaxOutputLines, root.AllowParallelShell, root.AllowInteractiveShell)
+	executor.SetVisibleMCP(root.VisibleMCP)
 	agent := llm.NewAgent(api, root, paths, executor)
 	usageTracker := usage.NewTracker(paths)
 
@@ -78,6 +79,8 @@ func Bootstrap(cwd string) (*Context, error) {
 			bind(subSess.ID)
 		}
 		subExec := tools.NewBasicExecutor(paths, subStore, subCfg.MaxOutputLines)
+		subExec.SetVisibleMCP(subCfg.VisibleMCP)
+		defer subExec.Shutdown()
 		sub := llm.NewSubAgent(api, subCfg, paths, subExec)
 		sub.RefreshSystemPrompt(subSess)
 		answer, use, err := sub.AskWithEvents(parent, subSess, instruction, nil)

@@ -29,6 +29,7 @@ type Executor struct {
 	basicOnly             bool
 	shells                *ShellManager
 	subAgents             *SubAgentManager
+	mcp                   *MCPManager
 	mu                    sync.Mutex
 }
 
@@ -48,6 +49,7 @@ func NewExecutor(paths config.Paths, store *session.Store, maxOutputLines int, a
 	}
 	exec.shells = NewShellManager(paths.WorkspaceRoot, maxOutputLines)
 	exec.subAgents = NewSubAgentManager(maxOutputLines)
+	exec.mcp = NewMCPManager(paths, maxOutputLines)
 	return exec
 }
 
@@ -59,6 +61,12 @@ func NewBasicExecutor(paths config.Paths, store *session.Store, maxOutputLines i
 
 func (e *Executor) SetSubAgentRunner(runner SubAgentRunner) {
 	e.subAgents.SetRunner(runner)
+}
+
+func (e *Executor) SetVisibleMCP(visibleMCP []string) {
+	if e.mcp != nil {
+		e.mcp.SetVisible(visibleMCP)
+	}
 }
 
 func (e *Executor) SetAgentLimits(maxOutputLines int, allowParallelShell, allowInteractiveShell bool) {
@@ -75,6 +83,9 @@ func (e *Executor) SetAgentLimits(maxOutputLines int, allowParallelShell, allowI
 	e.mu.Unlock()
 	e.shells.SetLimit(maxOutputLines)
 	e.subAgents.SetLimit(maxOutputLines)
+	if e.mcp != nil {
+		e.mcp.SetLimit(maxOutputLines)
+	}
 }
 
 func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
@@ -111,7 +122,6 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 			},
 			"required": []string{"name"},
 		}),
-
 	}
 	shellCWD := e.paths.WorkspaceRoot
 	if shellCWD == "" {
@@ -126,6 +136,9 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 		},
 		"required": []string{"command"},
 	}))
+	if e.mcp != nil {
+		schemas = append(schemas, e.mcp.Schemas()...)
+	}
 	if forSubAgent {
 		return schemas
 	}
@@ -206,6 +219,9 @@ func subAgentSchemas() []types.ToolSchema {
 }
 
 func (e *Executor) Run(ctx context.Context, sess *session.Session, name string, args map[string]any) (string, error) {
+	if e.mcp != nil && e.mcp.HasTool(name) {
+		return e.mcp.Call(ctx, name, args)
+	}
 	if e.basicOnly && name != "file_read" && name != "dir_view" && name != "grep_search" && name != "skill_read" && name != "shell_run_sync" {
 		return "", fmt.Errorf("tool %q is not available to basic-only agents", name)
 	}
@@ -289,6 +305,16 @@ func (e *Executor) RestoreSubAgents(parent *session.Session, refs []session.SubA
 func (e *Executor) Shutdown() {
 	e.subAgents.StopAll()
 	e.shells.KillAll()
+	if e.mcp != nil {
+		e.mcp.Shutdown()
+	}
+}
+
+func (e *Executor) MCPStatusLines() []string {
+	if e.mcp == nil {
+		return nil
+	}
+	return e.mcp.StatusLines()
 }
 
 var riskyExtensions = map[string]bool{

@@ -38,6 +38,7 @@ The scripts will:
 - **TUI**: Bubble Tea terminal interface with slash commands
 - **Sub-agents**: Delegate tasks to specialized agents
 - **Skills**: Directory-based skill packages
+- **MCP**: stdio MCP server configs in `~/.Asayn/mcp` or `<workspace>/.Asayn/mcp`, with per-agent visibility toggles in `/model_config`
 
 ## Layout
 
@@ -48,12 +49,14 @@ The scripts will:
   sub_agents/
   special_agents/
   skills/
+  mcp/
 
 <workspace>/.Asayn/
   root_agents/
   sub_agents/
   special_agents/
   skills/
+  mcp/
 ```
 
 ## API Configuration
@@ -72,7 +75,7 @@ cd /path/to/your/project
 asayn
 ```
 
-First run creates `~/.Asayn/` with global defaults and `<project>/.Asayn/` for the current workspace.
+First run creates `~/.Asayn/` with global defaults and `<project>/.Asayn/` for the current workspace. MCP configs are copied from `default_Asayn/mcp` on first run; enable individual MCP servers per agent in `/model_config`.
 
 ## Commands
 
