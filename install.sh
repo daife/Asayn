@@ -121,17 +121,14 @@ def discover_skills():
     return found
 
 def collect_mcp_servers(obj, source, out):
-    if isinstance(obj, dict):
-        servers = obj.get("mcpServers")
-        if isinstance(servers, dict):
-            for name, cfg in servers.items():
-                if isinstance(cfg, dict):
-                    out.append((str(name), cfg, source))
-        for v in obj.values():
-            collect_mcp_servers(v, source, out)
-    elif isinstance(obj, list):
-        for v in obj:
-            collect_mcp_servers(v, source, out)
+    if not isinstance(obj, dict):
+        return
+    servers = obj.get("mcpServers")
+    if not isinstance(servers, dict):
+        return
+    for name, cfg in servers.items():
+        if isinstance(cfg, dict):
+            out.append((str(name), cfg, source))
 
 def existing_asayn_mcp_names():
     names = set()
