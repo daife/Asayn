@@ -848,3 +848,12 @@ func expandMCPValue(value, workspace string) string {
 	}
 	return value
 }
+
+func (m *MCPManager) VisibleNames() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]string, len(m.visible))
+	copy(out, m.visible)
+	sort.Strings(out)
+	return out
+}

@@ -337,22 +337,109 @@ func (a *Agent) RefreshSystemPrompt(sess *session.Session) {
 
 func (a *Agent) systemPrompt(sess *session.Session) string {
 	prompt := a.root.SystemPrompt
+
+	// Build visible skills block
+	skillsBlock := ""
 	skills, err := config.ListSkills(a.paths)
-	if err != nil || len(skills) == 0 {
-		return prompt + "\n\nWorkspace rules:\n- Avoid modifying .Asayn/ unless explicitly asked to change Asayn configurations.\n- Write or modify files via shell_run_sync with Python heredocs, sed, cat, etc. Multiple tool calls per response are recommended."
-	}
-	visible := a.visibleSkillSet(sess)
-	blocks := []string{}
-	for _, skill := range skills {
-		if !visible[skill.Name] {
-			continue
+	if err == nil && len(skills) > 0 {
+		visible := a.visibleSkillSet(sess)
+		blocks := []string{}
+		for _, skill := range skills {
+			if !visible[skill.Name] {
+				continue
+			}
+			blocks = append(blocks, fmt.Sprintf("<skill folder=%q metadata=%q />", skill.Folder, formatSkillMetadata(skill.Metadata)))
 		}
-		blocks = append(blocks, fmt.Sprintf("<skill folder=%q metadata=%q />", skill.Folder, formatSkillMetadata(skill.Metadata)))
+		if len(blocks) > 0 {
+			skillsBlock = "Visible skills (use skill_read before applying):\n" + strings.Join(blocks, "\n")
+		}
 	}
-	if len(blocks) == 0 {
-		return prompt + "\n\nNo skills visible.\n\nWorkspace rules:\n- Avoid modifying .Asayn/ unless explicitly asked to change Asayn configurations.\n- Write or modify files via shell_run_sync with Python heredocs, sed, cat, etc. Multiple tool calls per response are recommended."
+
+	// Build visible MCP servers block
+	mcpBlock := ""
+	visibleMCP := a.tools.VisibleMCPNames()
+	if len(visibleMCP) > 0 {
+		infos, err := config.ListMCPServerInfos(a.paths)
+		if err == nil {
+			mcpSet := map[string]bool{}
+			for _, name := range visibleMCP {
+				mcpSet[name] = true
+			}
+			lines := []string{}
+			for _, info := range infos {
+				if mcpSet[info.Name] {
+					lines = append(lines, fmt.Sprintf("- %s: %s", info.Name, info.Description))
+				}
+			}
+			if len(lines) > 0 {
+				mcpBlock = "Visible MCP servers (tools available):\n" + strings.Join(lines, "\n")
+			}
+		}
 	}
-	return prompt + "\n\nVisible skills (use skill_read before applying):\n" + strings.Join(blocks, "\n") + "\n\nWorkspace rules:\n- Avoid modifying .Asayn/ unless explicitly asked to change Asayn configurations.\n- Write or modify files via shell_run_sync with Python heredocs, sed, cat, etc. Multiple tool calls per response are recommended."
+
+	// Build active context block
+	ctxBlock := ""
+	subSnapshots := a.tools.SubAgentSnapshots()
+	shellSnapshots := a.tools.ShellSnapshots()
+	mcpStatusLines := a.tools.MCPStatusLines()
+	ctxRows := []string{}
+	if len(subSnapshots) > 0 {
+		subRows := []string{}
+		for _, sub := range subSnapshots {
+			if sub.Status == "completed" {
+				continue
+			}
+			if sub.Status == "ready_for_check" {
+				ctxRows = append(ctxRows, fmt.Sprintf("[%s] is ready for check", sub.ID))
+				continue
+			}
+			subRows = append(subRows, fmt.Sprintf("- sub_agent %s: %s (%s)", sub.ID, sub.Status, sub.Name))
+		}
+		if len(subRows) > 0 {
+			ctxRows = append(ctxRows, "Active sub-agents:")
+			ctxRows = append(ctxRows, subRows...)
+		}
+	}
+	if len(shellSnapshots) > 0 {
+		shellRows := []string{}
+		for _, sh := range shellSnapshots {
+			if sh.Status != "running" {
+				continue
+			}
+			shellRows = append(shellRows, fmt.Sprintf("- shell %s: %s (pid %d) %s", sh.ID, sh.Status, sh.PID, sh.Command))
+		}
+		if len(shellRows) > 0 {
+			if len(ctxRows) > 0 {
+				ctxRows = append(ctxRows, "")
+			}
+			ctxRows = append(ctxRows, "Active terminals:")
+			ctxRows = append(ctxRows, shellRows...)
+		}
+	}
+	if len(mcpStatusLines) > 0 {
+		if len(ctxRows) > 0 {
+			ctxRows = append(ctxRows, "")
+		}
+		ctxRows = append(ctxRows, "Active MCP servers:")
+		ctxRows = append(ctxRows, mcpStatusLines...)
+	}
+	if len(ctxRows) > 0 {
+		ctxBlock = "[Active Context]\n" + strings.Join(ctxRows, "\n")
+	}
+
+	// Assemble final prompt
+	parts := []string{prompt}
+	if skillsBlock != "" {
+		parts = append(parts, skillsBlock)
+	}
+	if mcpBlock != "" {
+		parts = append(parts, mcpBlock)
+	}
+	parts = append(parts, "Workspace rules:\n- Avoid modifying .Asayn/ unless explicitly asked to change Asayn configurations.\n- Write or modify files via shell_run_sync with Python heredocs, sed, cat, etc. Multiple tool calls per response are recommended.")
+	if ctxBlock != "" {
+		parts = append(parts, ctxBlock)
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 func formatSkillMetadata(metadata map[string]string) string {

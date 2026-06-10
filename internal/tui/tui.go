@@ -409,6 +409,29 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if strings.HasPrefix(value, "/") {
+				// Check if it's a skill/MCP slash command first
+				prompt, isSkillMCP := m.parseSkillMCPCommand(value)
+				// Only try handleCommand for real commands (no arguments or known commands)
+				parts := strings.Fields(value)
+				cmdName := strings.TrimPrefix(parts[0], "/")
+				isKnownCommand := false
+				for _, c := range commands {
+					if strings.TrimPrefix(c.Name, "/") == cmdName {
+						isKnownCommand = true
+						break
+					}
+				}
+				if isSkillMCP && !isKnownCommand {
+					// Treat as agent turn with skill/MCP recommendation
+					if m.thinking {
+						m.addInputHistory(value)
+						m.queuedMessages = append(m.queuedMessages, prompt)
+						m.status = m.agentRunningStatus()
+						m.syncInputSize()
+						return m, nil
+					}
+					return m.startAgentTurn(prompt, true)
+				}
 				if replacement, ok := m.selectedCommandForEnter(value); ok {
 					value = replacement
 				}
@@ -814,8 +837,14 @@ func (m model) startAgentTurn(value string, recordHistory bool) (model, tea.Cmd)
 	if recordHistory {
 		m.addInputHistory(value)
 	}
-	prompt := m.withActiveWorkContext(value)
-	m.appendLog("\n" + userStyle.Render("You") + ":\n" + prompt + "\n")
+	prompt, ok := m.parseSkillMCPCommand(value)
+	if ok {
+		m.appendLog("\n" + userStyle.Render("You") + ":\n" + value + "\n")
+		m.appendLog("\n" + mutedStyle.Render("● using " + prompt) + "\n")
+	} else {
+		prompt = value
+		m.appendLog("\n" + userStyle.Render("You") + ":\n" + prompt + "\n")
+	}
 	m.log.GotoBottom()
 	m.thinking = true
 	m.activeRunKind = "agent"
@@ -904,58 +933,34 @@ func (m model) startCompactTurn() (model, tea.Cmd) {
 	return m, tea.Batch(cmd, pollAgentEvents(events))
 }
 
-func (m model) withActiveWorkContext(value string) string {
-	status := m.activeWorkContext()
-	if status == "" {
-		return value
+func (m model) parseSkillMCPCommand(value string) (string, bool) {
+	if !strings.HasPrefix(value, "/") {
+		return value, false
 	}
-	return value + "\n\n" + status
+	parts := strings.Fields(value)
+	if len(parts) < 2 {
+		return value, false
+	}
+	name := strings.TrimPrefix(parts[0], "/")
+	rest := strings.TrimSpace(strings.TrimPrefix(value, parts[0]))
+
+	// Check if it's a visible skill
+	for _, s := range m.skillItems {
+		if s.Name == name {
+			return fmt.Sprintf("%s\n\nRecommend skill %q", rest, name), true
+		}
+	}
+
+	// Check if it's a visible MCP server
+	for _, mcp := range m.mcpItems {
+		if mcp.Name == name {
+			return fmt.Sprintf("%s\n\nRecommend MCP server %q", rest, name), true
+		}
+	}
+
+	return value, false
 }
 
-func (m model) activeWorkContext() string {
-	rows := []string{}
-	subRows := []string{}
-	for _, sub := range m.ctx.Tools.SubAgentSnapshots() {
-		if sub.Status == "completed" {
-			continue
-		}
-		if sub.Status == "ready_for_check" {
-			rows = append(rows, fmt.Sprintf("[%s] is ready for check", sub.ID))
-			continue
-		}
-		subRows = append(subRows, fmt.Sprintf("- sub_agent %s: %s (%s)", sub.ID, sub.Status, sub.Name))
-	}
-	if len(subRows) > 0 {
-		rows = append(rows, "Active sub-agents:")
-		rows = append(rows, subRows...)
-	}
-	shellRows := []string{}
-	for _, sh := range m.ctx.Tools.ShellSnapshots() {
-		if sh.Status != "running" {
-			continue
-		}
-		shellRows = append(shellRows, fmt.Sprintf("- shell %s: %s (pid %d) %s", sh.ID, sh.Status, sh.PID, sh.Command))
-	}
-	if len(shellRows) > 0 {
-		if len(rows) > 0 {
-			rows = append(rows, "")
-		}
-		rows = append(rows, "Active terminals:")
-		rows = append(rows, shellRows...)
-	}
-	mcpRows := m.ctx.Tools.MCPStatusLines()
-	if len(mcpRows) > 0 {
-		if len(rows) > 0 {
-			rows = append(rows, "")
-		}
-		rows = append(rows, "Active MCP servers:")
-		rows = append(rows, mcpRows...)
-	}
-	if len(rows) == 0 {
-		return ""
-	}
-	return "[Active Context]\n" + strings.Join(rows, "\n")
-}
 
 func (m model) handleInterrupt() model {
 	if len(m.queuedMessages) > 0 {

@@ -745,3 +745,10 @@ func safePreview(data []byte, limit int) string {
 	}
 	return b.String()
 }
+
+func (e *Executor) VisibleMCPNames() []string {
+	if e.mcp == nil {
+		return nil
+	}
+	return e.mcp.VisibleNames()
+}
