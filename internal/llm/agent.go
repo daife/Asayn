@@ -351,7 +351,7 @@ func (a *Agent) systemPrompt(sess *session.Session) string {
 			blocks = append(blocks, fmt.Sprintf("<skill folder=%q metadata=%q />", skill.Folder, formatSkillMetadata(skill.Metadata)))
 		}
 		if len(blocks) > 0 {
-			skillsBlock = "Visible skills (use skill_read before applying):\n" + strings.Join(blocks, "\n")
+			skillsBlock = "Available skills (use skill_read before applying):\n" + strings.Join(blocks, "\n")
 		}
 	}
 
@@ -372,7 +372,7 @@ func (a *Agent) systemPrompt(sess *session.Session) string {
 				}
 			}
 			if len(lines) > 0 {
-				mcpBlock = "Visible MCP servers (tools available):\n" + strings.Join(lines, "\n")
+				mcpBlock = "Available MCP servers (tools available):\n" + strings.Join(lines, "\n")
 			}
 		}
 	}
