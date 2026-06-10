@@ -379,13 +379,13 @@ func (a *Agent) systemPrompt(sess *session.Session) string {
 
 	// Assemble final prompt
 	parts := []string{prompt}
+	parts = append(parts, "Rules:\n- Avoid modifying .Asayn/ unless explicitly asked to change Asayn configurations.\n- Write or modify files via shell_run_sync with Python heredocs, sed, cat, etc. MULTIPLE TOOL CALLS PER RESPONSE ARE RECOMMENDED.")
 	if skillsBlock != "" {
 		parts = append(parts, skillsBlock)
 	}
 	if mcpBlock != "" {
 		parts = append(parts, mcpBlock)
 	}
-	parts = append(parts, "Workspace rules:\n- Avoid modifying .Asayn/ unless explicitly asked to change Asayn configurations.\n- Write or modify files via shell_run_sync with Python heredocs, sed, cat, etc. Multiple tool calls per response are recommended.")
 	return strings.Join(parts, "\n\n")
 }
 
