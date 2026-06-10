@@ -49,6 +49,8 @@ function Get-AsaynExistingSkillNames {
 
 function Get-ClaudeSkillCandidates {
     param([string]$AsaynSkillsDir)
+    if ([string]::IsNullOrWhiteSpace($AsaynSkillsDir)) { return @() }
+    New-Item -ItemType Directory -Path $AsaynSkillsDir -Force | Out-Null
     $roots = New-Object 'System.Collections.Generic.List[string]'
     if ($env:CLAUDE_CONFIG_DIR) {
         $roots.Add((Join-Path $env:CLAUDE_CONFIG_DIR "skills"))
@@ -114,6 +116,8 @@ function Add-McpServersFromObject {
 function Get-AsaynExistingMcpNames {
     param([string]$AsaynMcpDir)
     $names = New-Object 'System.Collections.Generic.HashSet[string]'
+    if ([string]::IsNullOrWhiteSpace($AsaynMcpDir)) { return $names }
+    New-Item -ItemType Directory -Path $AsaynMcpDir -Force | Out-Null
     $roots = @($AsaynMcpDir, (Join-Path (Get-Location).Path ".Asayn\mcp"))
     foreach ($root in $roots) {
         if (!(Test-Path $root)) { continue }
