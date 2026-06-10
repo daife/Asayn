@@ -38,7 +38,7 @@ The scripts will:
 - **TUI**: Bubble Tea terminal interface with slash commands
 - **Sub-agents**: Delegate tasks to specialized agents
 - **Skills**: Directory-based skill packages
-- **MCP**: stdio MCP server configs in `~/.Asayn/mcp` or `<workspace>/.Asayn/mcp`, with per-agent visibility toggles in `/model_config`
+- **MCP**: stdio and streamable_http MCP server configs in `~/.Asayn/mcp` or `<workspace>/.Asayn/mcp`, with per-agent visibility toggles in `/model_config`
 
 ## Layout
 
@@ -59,6 +59,30 @@ The scripts will:
   mcp/
 ```
 
+
+## MCP Configuration
+
+MCP server configs live in JSON files under `~/.Asayn/mcp/` or `<workspace>/.Asayn/mcp/`. Enable each server per agent from `/model_config`.
+
+```json
+{
+  "mcpServers": {
+    "codegraph": {
+      "type": "stdio",
+      "command": "codegraph",
+      "args": ["serve", "--mcp"]
+    },
+    "remote-docs": {
+      "type": "streamable_http",
+      "url": "https://example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${MCP_TOKEN}"
+      }
+    }
+  }
+}
+```
+
 ## API Configuration
 
 Edit `~/.Asayn/api_config.toml` to configure your API providers:
@@ -75,7 +99,7 @@ cd /path/to/your/project
 asayn
 ```
 
-First run creates `~/.Asayn/` with global defaults and `<project>/.Asayn/` for the current workspace. MCP configs are copied from `default_Asayn/mcp` on first run; enable individual MCP servers per agent in `/model_config`.
+First run creates `~/.Asayn/` with global defaults and `<project>/.Asayn/` for the current workspace. MCP configs are copied from `default_Asayn/mcp` on first run; enable individual MCP servers per agent in `/model_config`. Supported transports are `stdio`, `streamable_http`, and the `http` alias.
 
 ## Commands
 

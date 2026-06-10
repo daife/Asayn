@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,6 +36,12 @@ type MCPManager struct {
 	toolMap map[string]mcpToolRef
 }
 
+type mcpClient interface {
+	listTools(ctx context.Context) ([]mcpTool, error)
+	callTool(ctx context.Context, name string, args map[string]any) (mcpCallResult, error)
+	stop()
+}
+
 type mcpToolRef struct {
 	Server string
 	Tool   string
@@ -42,7 +50,7 @@ type mcpToolRef struct {
 type mcpServerRuntime struct {
 	info      config.MCPServer
 	signature string
-	client    *stdioMCPClient
+	client    mcpClient
 	tools     []mcpTool
 	err       string
 }
@@ -62,6 +70,18 @@ type mcpToolsListResult struct {
 type mcpCallResult struct {
 	Content []map[string]any `json:"content"`
 	IsError bool             `json:"isError"`
+}
+
+type mcpRPCResponse struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      int64           `json:"id"`
+	Result  json.RawMessage `json:"result"`
+	Error   *mcpRPCError    `json:"error"`
+}
+
+type mcpRPCError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
 }
 
 func NewMCPManager(paths config.Paths, limit int) *MCPManager {
@@ -175,6 +195,7 @@ func (m *MCPManager) Schemas() []types.ToolSchema {
 }
 
 func (m *MCPManager) HasTool(publicName string) bool {
+	m.Reload()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	_, ok := m.toolMap[publicName]
@@ -224,6 +245,7 @@ func (m *MCPManager) Shutdown() {
 }
 
 func (m *MCPManager) StatusLines() []string {
+	m.Reload()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	lines := []string{}
@@ -258,31 +280,55 @@ func (m *MCPManager) rebuildToolMapLocked() {
 }
 
 func (rt *mcpServerRuntime) start(paths config.Paths) {
-	if strings.ToLower(rt.info.Config.Type) != "" && strings.ToLower(rt.info.Config.Type) != "stdio" {
-		rt.err = fmt.Sprintf("transport %q is not supported yet", rt.info.Config.Type)
-		return
+	typeName := strings.ToLower(strings.TrimSpace(rt.info.Config.TransportName()))
+	switch typeName {
+	case "", "stdio":
+		if strings.TrimSpace(rt.info.Config.Command) == "" {
+			rt.err = "stdio command is empty"
+			return
+		}
+		client := newStdioMCPClient(rt.info, paths.WorkspaceRoot)
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := client.start(ctx); err != nil {
+			rt.err = err.Error()
+			client.stop()
+			return
+		}
+		tools, err := client.listTools(ctx)
+		if err != nil {
+			rt.err = err.Error()
+			client.stop()
+			return
+		}
+		rt.client = client
+		rt.tools = tools
+		rt.err = ""
+	case "streamable_http", "http":
+		if strings.TrimSpace(rt.info.Config.URL) == "" {
+			rt.err = "streamable_http url is empty"
+			return
+		}
+		client := newHTTPMCPClient(rt.info, paths.WorkspaceRoot)
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := client.start(ctx); err != nil {
+			rt.err = err.Error()
+			client.stop()
+			return
+		}
+		tools, err := client.listTools(ctx)
+		if err != nil {
+			rt.err = err.Error()
+			client.stop()
+			return
+		}
+		rt.client = client
+		rt.tools = tools
+		rt.err = ""
+	default:
+		rt.err = fmt.Sprintf("transport %q is not supported", rt.info.Config.TransportName())
 	}
-	if strings.TrimSpace(rt.info.Config.Command) == "" {
-		rt.err = "stdio command is empty"
-		return
-	}
-	client := newStdioMCPClient(rt.info, paths.WorkspaceRoot)
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	if err := client.start(ctx); err != nil {
-		rt.err = err.Error()
-		client.stop()
-		return
-	}
-	tools, err := client.listTools(ctx)
-	if err != nil {
-		rt.err = err.Error()
-		client.stop()
-		return
-	}
-	rt.client = client
-	rt.tools = tools
-	rt.err = ""
 }
 
 func (rt *mcpServerRuntime) stop() {
@@ -347,6 +393,8 @@ func formatMCPCallResult(result mcpCallResult) string {
 	return out
 }
 
+// stdio transport ---------------------------------------------------------
+
 type stdioMCPClient struct {
 	info      config.MCPServer
 	workdir   string
@@ -361,18 +409,6 @@ type stdioMCPClient struct {
 	writeLock sync.Mutex
 }
 
-type mcpRPCResponse struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      int64           `json:"id"`
-	Result  json.RawMessage `json:"result"`
-	Error   *mcpRPCError    `json:"error"`
-}
-
-type mcpRPCError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-}
-
 func newStdioMCPClient(info config.MCPServer, workdir string) *stdioMCPClient {
 	return &stdioMCPClient{info: info, workdir: workdir, pending: map[int64]chan mcpRPCResponse{}, readDone: make(chan struct{})}
 }
@@ -382,7 +418,7 @@ func (c *stdioMCPClient) start(ctx context.Context) error {
 	cmd.Dir = c.workdir
 	cmd.Env = os.Environ()
 	for k, v := range c.info.Config.Env {
-		cmd.Env = append(cmd.Env, k+"="+expandMCPEnv(v, c.workdir))
+		cmd.Env = append(cmd.Env, k+"="+expandMCPValue(v, c.workdir))
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -407,14 +443,7 @@ func (c *stdioMCPClient) start(ctx context.Context) error {
 }
 
 func (c *stdioMCPClient) initialize(ctx context.Context) error {
-	params := map[string]any{
-		"protocolVersion": mcpProtocolVersion,
-		"capabilities":    map[string]any{},
-		"clientInfo": map[string]string{
-			"name":    "asayn",
-			"version": "0.3.4",
-		},
-	}
+	params := mcpInitializeParams()
 	if _, err := c.request(ctx, "initialize", params); err != nil {
 		return err
 	}
@@ -566,9 +595,252 @@ func (c *stdioMCPClient) stop() {
 	c.closePending("mcp server stopped")
 }
 
-func expandMCPEnv(value, workspace string) string {
+// streamable HTTP transport ----------------------------------------------
+
+type httpMCPClient struct {
+	info      config.MCPServer
+	workdir   string
+	client    *http.Client
+	sessionID string
+	nextID    int64
+	mu        sync.Mutex
+	closed    bool
+}
+
+func newHTTPMCPClient(info config.MCPServer, workdir string) *httpMCPClient {
+	return &httpMCPClient{
+		info:    info,
+		workdir: workdir,
+		client:  &http.Client{Timeout: 0},
+	}
+}
+
+func (c *httpMCPClient) start(ctx context.Context) error {
+	if _, err := c.request(ctx, "initialize", mcpInitializeParams()); err != nil {
+		return err
+	}
+	return c.notify(ctx, "notifications/initialized", nil)
+}
+
+func (c *httpMCPClient) listTools(ctx context.Context) ([]mcpTool, error) {
+	data, err := c.request(ctx, "tools/list", map[string]any{})
+	if err != nil {
+		return nil, err
+	}
+	var result mcpToolsListResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, err
+	}
+	return result.Tools, nil
+}
+
+func (c *httpMCPClient) callTool(ctx context.Context, name string, args map[string]any) (mcpCallResult, error) {
+	data, err := c.request(ctx, "tools/call", map[string]any{"name": name, "arguments": args})
+	if err != nil {
+		return mcpCallResult{}, err
+	}
+	var result mcpCallResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return mcpCallResult{}, err
+	}
+	return result, nil
+}
+
+func (c *httpMCPClient) request(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	id := atomic.AddInt64(&c.nextID, 1)
+	msg := map[string]any{"jsonrpc": "2.0", "id": id, "method": method}
+	if params != nil {
+		msg["params"] = params
+	}
+	resp, err := c.doPOST(ctx, msg)
+	if err != nil {
+		return nil, err
+	}
+	if resp.Error != nil {
+		return nil, fmt.Errorf("mcp %s: %s", method, resp.Error.Message)
+	}
+	return resp.Result, nil
+}
+
+func (c *httpMCPClient) notify(ctx context.Context, method string, params any) error {
+	msg := map[string]any{"jsonrpc": "2.0", "method": method}
+	if params != nil {
+		msg["params"] = params
+	}
+	_, err := c.doPOST(ctx, msg)
+	return err
+}
+
+func (c *httpMCPClient) doPOST(ctx context.Context, msg map[string]any) (mcpRPCResponse, error) {
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return mcpRPCResponse{}, fmt.Errorf("mcp http client is closed")
+	}
+	sessionID := c.sessionID
+	c.mu.Unlock()
+
+	b, err := json.Marshal(msg)
+	if err != nil {
+		return mcpRPCResponse{}, err
+	}
+	url := expandMCPValue(c.info.Config.URL, c.workdir)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(b))
+	if err != nil {
+		return mcpRPCResponse{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	req.Header.Set("MCP-Protocol-Version", mcpProtocolVersion)
+	if sessionID != "" {
+		req.Header.Set("MCP-Session-Id", sessionID)
+	}
+	for k, v := range c.info.Config.Headers {
+		k = strings.TrimSpace(k)
+		if k == "" {
+			continue
+		}
+		req.Header.Set(k, expandMCPValue(v, c.workdir))
+	}
+
+	res, err := c.client.Do(req)
+	if err != nil {
+		return mcpRPCResponse{}, err
+	}
+	defer res.Body.Close()
+
+	if sid := res.Header.Get("MCP-Session-Id"); sid != "" {
+		c.mu.Lock()
+		c.sessionID = sid
+		c.mu.Unlock()
+	}
+
+	if res.StatusCode == http.StatusAccepted || res.StatusCode == http.StatusNoContent {
+		return mcpRPCResponse{}, nil
+	}
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(res.Body, 4096))
+		return mcpRPCResponse{}, fmt.Errorf("mcp http status %d: %s", res.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	mediaType, _, _ := mime.ParseMediaType(res.Header.Get("Content-Type"))
+	switch strings.ToLower(mediaType) {
+	case "text/event-stream":
+		return readMCPSSE(ctx, res.Body)
+	default:
+		return readMCPJSONResponse(res.Body)
+	}
+}
+
+func (c *httpMCPClient) stop() {
+	c.mu.Lock()
+	c.closed = true
+	c.mu.Unlock()
+}
+
+func readMCPJSONResponse(r io.Reader) (mcpRPCResponse, error) {
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return mcpRPCResponse{}, err
+	}
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 {
+		return mcpRPCResponse{}, nil
+	}
+	if len(data) > 0 && data[0] == '[' {
+		var batch []mcpRPCResponse
+		if err := json.Unmarshal(data, &batch); err != nil {
+			return mcpRPCResponse{}, err
+		}
+		for _, resp := range batch {
+			if resp.ID != 0 || resp.Error != nil || len(resp.Result) > 0 {
+				return resp, nil
+			}
+		}
+		return mcpRPCResponse{}, nil
+	}
+	var resp mcpRPCResponse
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return mcpRPCResponse{}, err
+	}
+	return resp, nil
+}
+
+func readMCPSSE(ctx context.Context, r io.Reader) (mcpRPCResponse, error) {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024*16)
+	dataLines := []string{}
+	for scanner.Scan() {
+		select {
+		case <-ctx.Done():
+			return mcpRPCResponse{}, ctx.Err()
+		default:
+		}
+		line := scanner.Text()
+		if line == "" {
+			if resp, ok, err := decodeSSEData(dataLines); ok || err != nil {
+				return resp, err
+			}
+			dataLines = nil
+			continue
+		}
+		if strings.HasPrefix(line, ":") {
+			continue
+		}
+		field, value, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(field) != "data" {
+			continue
+		}
+		value = strings.TrimPrefix(value, " ")
+		dataLines = append(dataLines, value)
+	}
+	if err := scanner.Err(); err != nil {
+		return mcpRPCResponse{}, err
+	}
+	if resp, ok, err := decodeSSEData(dataLines); ok || err != nil {
+		return resp, err
+	}
+	return mcpRPCResponse{}, fmt.Errorf("mcp sse stream ended without response")
+}
+
+func decodeSSEData(lines []string) (mcpRPCResponse, bool, error) {
+	if len(lines) == 0 {
+		return mcpRPCResponse{}, false, nil
+	}
+	data := strings.TrimSpace(strings.Join(lines, "\n"))
+	if data == "" || data == "[DONE]" {
+		return mcpRPCResponse{}, false, nil
+	}
+	resp, err := readMCPJSONResponse(strings.NewReader(data))
+	if err != nil {
+		return mcpRPCResponse{}, true, err
+	}
+	if resp.ID == 0 && resp.Error == nil && len(resp.Result) == 0 {
+		return mcpRPCResponse{}, false, nil
+	}
+	return resp, true, nil
+}
+
+// shared helpers ----------------------------------------------------------
+
+func mcpInitializeParams() map[string]any {
+	return map[string]any{
+		"protocolVersion": mcpProtocolVersion,
+		"capabilities":    map[string]any{},
+		"clientInfo": map[string]string{
+			"name":    "asayn",
+			"version": "0.3.4",
+		},
+	}
+}
+
+func expandMCPValue(value, workspace string) string {
 	value = strings.ReplaceAll(value, "${PROJECT_ROOT}", workspace)
 	value = strings.ReplaceAll(value, "${WORKSPACE_ROOT}", workspace)
+	value = os.ExpandEnv(value)
 	if strings.HasPrefix(value, "~/") {
 		if home, err := os.UserHomeDir(); err == nil {
 			value = filepath.Join(home, strings.TrimPrefix(value, "~/"))

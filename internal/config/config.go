@@ -82,12 +82,20 @@ type AgentInfo struct {
 const MCPConfigKind = "mcp"
 
 type MCPServerConfig struct {
-	Type    string            `json:"type" toml:"type"`
-	Command string            `json:"command" toml:"command"`
-	Args    []string          `json:"args" toml:"args"`
-	Env     map[string]string `json:"env" toml:"env"`
-	URL     string            `json:"url" toml:"url"`
-	Headers map[string]string `json:"headers" toml:"headers"`
+	Type      string            `json:"type" toml:"type"`
+	Transport string            `json:"transport" toml:"transport"`
+	Command   string            `json:"command" toml:"command"`
+	Args      []string          `json:"args" toml:"args"`
+	Env       map[string]string `json:"env" toml:"env"`
+	URL       string            `json:"url" toml:"url"`
+	Headers   map[string]string `json:"headers" toml:"headers"`
+}
+
+func (c MCPServerConfig) TransportName() string {
+	if strings.TrimSpace(c.Type) != "" {
+		return c.Type
+	}
+	return c.Transport
 }
 
 type MCPServer struct {
@@ -443,6 +451,9 @@ func ListMCPServers(paths Paths) ([]MCPServer, error) {
 				if name == "" {
 					continue
 				}
+				if cfg.Type == "" && cfg.Transport != "" {
+					cfg.Type = cfg.Transport
+				}
 				if cfg.Type == "" {
 					cfg.Type = "stdio"
 				}
@@ -465,8 +476,9 @@ func ListMCPServerInfos(paths Paths) ([]MCPServerInfo, error) {
 	}
 	out := make([]MCPServerInfo, 0, len(servers))
 	for _, srv := range servers {
-		desc := srv.Config.Type
-		switch strings.ToLower(srv.Config.Type) {
+		transport := srv.Config.TransportName()
+		desc := transport
+		switch strings.ToLower(transport) {
 		case "", "stdio":
 			cmd := strings.TrimSpace(strings.Join(append([]string{srv.Config.Command}, srv.Config.Args...), " "))
 			if cmd != "" {
@@ -476,7 +488,7 @@ func ListMCPServerInfos(paths Paths) ([]MCPServerInfo, error) {
 			}
 		case "streamable_http", "http":
 			if srv.Config.URL != "" {
-				desc = srv.Config.Type + ": " + srv.Config.URL
+				desc = transport + ": " + srv.Config.URL
 			}
 		}
 		out = append(out, MCPServerInfo{Name: srv.Name, Description: desc, Source: srv.Source})
