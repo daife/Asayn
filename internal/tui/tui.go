@@ -232,6 +232,8 @@ func Run(ctx *app.Context) error {
 	}
 	m.usageStats, _ = m.ctx.UsageTracker.GetStats(m.session.ID)
 	m.initRenderer(80)
+	m.skillItems, _ = config.ListSkills(m.ctx.Paths)
+	m.mcpItems, _ = config.ListMCPServerInfos(m.ctx.Paths)
 	m.syncInputSize()
 	_, err = tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
 	return err
