@@ -281,10 +281,11 @@ for i in sorted(selected):
             migrated.append(f"skill {item['name']} -> {target}")
         else:
             name = item["name"]
-            if name and name in existing_asayn_mcp_names():
+            base = safe_filename(name)
+            target = asayn_mcp / f"{base}.json"
+            if target.exists():
                 skipped.append(f"mcp {name}：同名配置已存在")
                 continue
-            base = safe_filename(name)
             target = asayn_mcp / f"{base}.json"
             suffix = 1
             while target.exists():

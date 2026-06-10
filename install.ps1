@@ -35,13 +35,12 @@ function Get-AsaynSafeFileName {
 function Get-AsaynExistingSkillNames {
     param([string]$AsaynSkillsDir)
     $names = New-Object 'System.Collections.Generic.HashSet[string]'
+    if ([string]::IsNullOrWhiteSpace($AsaynSkillsDir)) { return $names }
     if (!(Test-Path $AsaynSkillsDir)) { return $names }
     Get-ChildItem -LiteralPath $AsaynSkillsDir -Directory -ErrorAction SilentlyContinue | ForEach-Object {
         $skillFile = Join-Path $_.FullName "SKILL.md"
         if (Test-Path $skillFile) {
             [void]$names.Add($_.Name)
-            $n = Get-AsaynSkillNameFromFile $skillFile
-            if (![string]::IsNullOrWhiteSpace($n)) { [void]$names.Add($n) }
         }
     }
     return $names
@@ -78,8 +77,7 @@ function Get-ClaudeSkillCandidates {
             $name = Get-AsaynSkillNameFromFile $_.FullName
             if ([string]::IsNullOrWhiteSpace($name)) { $name = $_.Directory.Name }
             $target = Join-Path $AsaynSkillsDir $_.Directory.Name
-            $nameSafe = if ($name) { $name } else { "" }
-            $dup = (Test-Path $target) -or $existing.Contains($nameSafe) -or $existing.Contains($_.Directory.Name)
+            $dup = (Test-Path $target) -or $existing.Contains($_.Directory.Name)
             $items += [pscustomobject]@{
                 Kind = "skill"
                 Name = $name
@@ -110,16 +108,15 @@ function Get-AsaynExistingMcpNames {
     $names = New-Object 'System.Collections.Generic.HashSet[string]'
     if ([string]::IsNullOrWhiteSpace($AsaynMcpDir)) { return $names }
     New-Item -ItemType Directory -Path $AsaynMcpDir -Force | Out-Null
-    $roots = @($AsaynMcpDir, (Join-Path (Get-Location).Path ".Asayn\mcp"))
-    foreach ($root in $roots) {
-        if (!(Test-Path $root)) { continue }
-        Get-ChildItem -LiteralPath $root -Filter "*.json" -File -ErrorAction SilentlyContinue | ForEach-Object {
-            try { $data = Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop } catch { return }
-            $prop = $data.PSObject.Properties | Where-Object { $_.Name -eq "mcpServers" } | Select-Object -First 1
-            if ($prop -and $prop.Value -is [pscustomobject]) {
-                foreach ($srv in $prop.Value.PSObject.Properties) { [void]$names.Add([string]$srv.Name) }
+    if (!(Test-Path $AsaynMcpDir)) { return $names }
+    Get-ChildItem -LiteralPath $AsaynMcpDir -Filter "*.json" -File -ErrorAction SilentlyContinue | ForEach-Object {
+        try {
+            $data = Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
+            $mcpServers = $data.mcpServers
+            if ($null -ne $mcpServers -and $mcpServers -is [pscustomobject]) {
+                foreach ($srv in $mcpServers.PSObject.Properties) { [void]$names.Add([string]$srv.Name) }
             }
-        }
+        } catch {}
     }
     return $names
 }
@@ -163,8 +160,7 @@ function Get-ClaudeMcpCandidates {
         if ($byName.ContainsKey($item.Name)) { continue }
         $safe = Get-AsaynSafeFileName $item.Name
         $target = Join-Path $AsaynMcpDir ($safe + ".json")
-        $nameSafe = if ($item.Name) { $item.Name } else { "" }
-        $dup = $existing.Contains($nameSafe) -or (Test-Path $target)
+        $dup = (Test-Path $target)
         $byName[$item.Name] = [pscustomobject]@{
             Kind = "mcp"
             Name = $item.Name
@@ -272,11 +268,9 @@ function Invoke-AsaynClaudeMigration {
                 Copy-Item -LiteralPath $item.Source -Destination $item.Target -Recurse -Force:$false
                 $migrated += "skill $($item.Name) -> $($item.Target)"
             } else {
-                $existing = Get-AsaynExistingMcpNames $asaynMcp
-                $nameSafe = if ($item.Name) { $item.Name } else { "" }
-                if ($existing.Contains($nameSafe)) { $skipped += "mcp $($item.Name)：同名配置已存在"; continue }
                 $base = Get-AsaynSafeFileName $item.Name
                 $target = Join-Path $asaynMcp ($base + ".json")
+                if (Test-Path $target) { $skipped += "mcp $($item.Name)：同名配置已存在"; continue }
                 $suffix = 1
                 while (Test-Path $target) {
                     $target = Join-Path $asaynMcp ("{0}_{1}.json" -f $base, $suffix)
