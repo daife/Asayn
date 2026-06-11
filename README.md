@@ -1,7 +1,7 @@
 # Asayn
 
 <p align="center">
-  <img src="assets/icon.png" alt="Asayn" width="180"/>
+  <img src="assets/banner.png" alt="Asayn" width="180"/>
 </p>
 
 [中文](README.zh-CN.md) | English
