@@ -7,8 +7,13 @@ echo ""
 
 ask_yes_no() {
     prompt="$1"
-    printf "%s" "$prompt"
-    IFS= read -r reply
+    if [ -r /dev/tty ]; then
+        printf "%s" "$prompt" > /dev/tty
+        IFS= read -r reply < /dev/tty
+    else
+        printf "%s" "$prompt"
+        IFS= read -r reply || reply=""
+    fi
     case "$reply" in
         y|Y|yes|YES|Yes)
             return 0
@@ -56,6 +61,17 @@ asayn_skills = asayn_dir / "skills"
 asayn_mcp = asayn_dir / "mcp"
 asayn_skills.mkdir(parents=True, exist_ok=True)
 asayn_mcp.mkdir(parents=True, exist_ok=True)
+try:
+    tty = open("/dev/tty", "r+", encoding="utf-8", buffering=1)
+except OSError:
+    tty = None
+
+def prompt_input(prompt):
+    if tty is None:
+        return ""
+    tty.write(prompt)
+    tty.flush()
+    return tty.readline().rstrip("\n")
 
 def uniq_paths(paths):
     seen = set()
@@ -277,7 +293,7 @@ for item in items:
     idx += 1
 
 print("\n输入要迁移的编号，例如 1,3,5 或 2-4；a=全部可迁移；n=不迁移；直接回车=迁移全部非重复项。")
-selected = parse_selection(input("选择: "), default_ids, len(indexed), blocked)
+selected = parse_selection(prompt_input("选择: "), default_ids, len(indexed), blocked)
 if not selected:
     print("未选择任何迁移项。")
     raise SystemExit(0)
@@ -286,7 +302,7 @@ print("\n将迁移：")
 for i in sorted(selected):
     item = indexed[i]
     print(f"  - {'Skill' if item['kind']=='skill' else 'MCP'}: {item['name']}")
-confirm = input("确认迁移？(y/N): ").strip().lower()
+confirm = prompt_input("确认迁移？(y/N): ").strip().lower()
 if confirm not in {"y", "yes"}:
     print("已取消迁移。")
     raise SystemExit(0)
