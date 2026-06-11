@@ -376,6 +376,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.commandSelected = 0
 			return m, nil
 		case "up", "down":
+			// Multi-line input: try cursor movement first
+			if m.input.isMultiline() {
+				if msg.String() == "up" {
+					if m.input.CursorUp() {
+						m.syncInputSize()
+						return m, nil
+					}
+				} else {
+					if m.input.CursorDown() {
+						m.syncInputSize()
+						return m, nil
+					}
+				}
+			}
+			// History navigation (when cursor is at boundary or single-line input)
 			if m.historyIndex != -1 {
 				if m.navigateInputHistory(msg.String()) {
 					return m, nil
@@ -531,7 +546,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pendingAnswerStart = -1
 			m.streamAnswerText = ""
 			m.refreshLog(false)
-			m.appendDivider()
 			_ = m.ctx.Sessions.Save(m.session)
 		}
 		if m.pendingCompact {

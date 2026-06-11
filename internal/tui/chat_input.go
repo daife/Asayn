@@ -71,6 +71,95 @@ func (i *chatInput) CursorEnd() {
 	i.field.CursorEnd()
 }
 
+// isMultiline reports whether the input wraps to more than one visual line.
+func (i chatInput) isMultiline() bool {
+	return i.height > 1
+}
+
+// CursorUp moves the cursor to the previous visual line, preserving
+// horizontal position as much as possible.
+// Returns false if already on the first visual line.
+func (i *chatInput) CursorUp() bool {
+	lines := wrappedInputLines(i.Value(), i.contentWidth)
+	cl := cursorInputLine(lines, i.field.Position())
+	if cl <= 0 {
+		return false
+	}
+	// Calculate current column position on this line
+	curLine := lines[cl]
+	localPos := i.field.Position() - curLine.start
+	if localPos < 0 {
+		localPos = 0
+	}
+	// Map to column (grapheme cluster width)
+	prevLine := lines[cl-1]
+	prevRunes := []rune(prevLine.text)
+	col := visualColumn(curLine.text, localPos)
+	// Find position on the previous line at the same column
+	targetPos := prevLine.start
+	curCol := 0
+	for i, r := range prevRunes {
+		rw := max(1, lipgloss.Width(string(r)))
+		if curCol+rw > col {
+			targetPos = prevLine.start + i
+			break
+		}
+		curCol += rw
+		targetPos = prevLine.start + i + 1
+	}
+	i.field.SetCursor(targetPos)
+	return true
+}
+
+// CursorDown moves the cursor to the next visual line, preserving
+// horizontal position as much as possible.
+// Returns false if already on the last visual line.
+func (i *chatInput) CursorDown() bool {
+	lines := wrappedInputLines(i.Value(), i.contentWidth)
+	cl := cursorInputLine(lines, i.field.Position())
+	if cl < 0 || cl >= len(lines)-1 {
+		return false
+	}
+	// Calculate current column position on this line
+	curLine := lines[cl]
+	localPos := i.field.Position() - curLine.start
+	if localPos < 0 {
+		localPos = 0
+	}
+	col := visualColumn(curLine.text, localPos)
+	// Find position on the next line at the same column
+	nextLine := lines[cl+1]
+	nextRunes := []rune(nextLine.text)
+	targetPos := nextLine.start
+	curCol := 0
+	for i, r := range nextRunes {
+		rw := max(1, lipgloss.Width(string(r)))
+		if curCol+rw > col {
+			targetPos = nextLine.start + i
+			break
+		}
+		curCol += rw
+		targetPos = nextLine.start + i + 1
+	}
+	i.field.SetCursor(targetPos)
+	return true
+}
+
+func visualColumn(text string, runePos int) int {
+	runes := []rune(text)
+	if runePos > len(runes) {
+		runePos = len(runes)
+	}
+	if runePos < 0 {
+		runePos = 0
+	}
+	col := 0
+	for _, r := range runes[:runePos] {
+		col += max(1, lipgloss.Width(string(r)))
+	}
+	return col
+}
+
 func (i chatInput) Blink() tea.Cmd {
 	return i.field.Cursor.BlinkCmd()
 }

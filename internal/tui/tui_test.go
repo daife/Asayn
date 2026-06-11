@@ -11,6 +11,7 @@ import (
 	"github.com/asayn/asayn/internal/tools"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func TestSanitizePasteKeyMsgReplacesNewlinesOnlyForPaste(t *testing.T) {
@@ -29,6 +30,26 @@ func TestSanitizePasteKeyMsgLeavesEnterUntouched(t *testing.T) {
 	got := sanitizePasteKeyMsg(msg)
 	if got.Type != tea.KeyEnter || got.String() != "enter" {
 		t.Fatalf("enter was rewritten: %#v (%q)", got, got.String())
+	}
+}
+
+func TestChatInputCursorMovesAcrossWrappedWideText(t *testing.T) {
+	input := newChatInput()
+	input.SetWidth(lipgloss.Width(inputPrompt) + 4)
+	input.SetValue("你好abc世界")
+	input.field.SetCursor(1)
+
+	if !input.CursorDown() {
+		t.Fatal("expected cursor to move down within multiline input")
+	}
+	if got := input.field.Position(); got != 4 {
+		t.Fatalf("unexpected cursor position after down: got %d want 4", got)
+	}
+	if !input.CursorUp() {
+		t.Fatal("expected cursor to move up within multiline input")
+	}
+	if got := input.field.Position(); got != 1 {
+		t.Fatalf("unexpected cursor position after up: got %d want 1", got)
 	}
 }
 
