@@ -128,7 +128,17 @@ First run creates `~/.Asayn/` with global defaults and `<project>/.Asayn/` for t
 go build -o asayn ./cmd/asayn
 ```
 
+For smaller release binaries:
+
+```bash
+CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -buildid=" -o asayn ./cmd/asayn
+```
+
+`-s -w` removes symbol and debug tables, `-trimpath` removes local source paths,
+and `-buildid=` avoids embedding a Go build ID. On Linux arm64 this reduces the
+binary from about 20 MB to about 15 MB.
+
 For Windows:
 ```bash
-GOOS=windows GOARCH=amd64 go build -o asayn.exe ./cmd/asayn
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w -buildid=" -o asayn.exe ./cmd/asayn
 ```
