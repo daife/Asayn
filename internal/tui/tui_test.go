@@ -73,6 +73,60 @@ func TestSidebarToggleUsesAsciiVisibleGlyphs(t *testing.T) {
 	}
 }
 
+func TestSlashSuggestionsOnlyUseRootVisibleSkillAndMCP(t *testing.T) {
+	m := testModel(t)
+	m.ctx.Root.VisibleSkills = []string{"visible-skill"}
+	m.ctx.Root.VisibleMCP = []string{"visible-mcp"}
+	m.skillItems = []config.Skill{
+		{Name: "hidden-skill", Description: "hidden"},
+		{Name: "visible-skill", Description: "visible"},
+	}
+	m.mcpItems = []config.MCPServerInfo{
+		{Name: "hidden-mcp", Description: "hidden"},
+		{Name: "visible-mcp", Description: "visible"},
+	}
+	m.input.SetValue("/")
+
+	suggestions := m.commandSuggestions()
+	names := map[string]bool{}
+	for _, item := range suggestions {
+		names[item.Name] = true
+	}
+	if !names["/visible-skill"] || !names["/visible-mcp"] {
+		t.Fatalf("visible skill/MCP missing from suggestions: %#v", suggestions)
+	}
+	if names["/hidden-skill"] || names["/hidden-mcp"] {
+		t.Fatalf("hidden skill/MCP leaked into suggestions: %#v", suggestions)
+	}
+}
+
+func TestSlashRecommendOnlyAcceptsRootVisibleSkillAndMCP(t *testing.T) {
+	m := testModel(t)
+	m.ctx.Root.VisibleSkills = []string{"visible-skill"}
+	m.ctx.Root.VisibleMCP = []string{"visible-mcp"}
+	m.skillItems = []config.Skill{
+		{Name: "hidden-skill"},
+		{Name: "visible-skill"},
+	}
+	m.mcpItems = []config.MCPServerInfo{
+		{Name: "hidden-mcp"},
+		{Name: "visible-mcp"},
+	}
+
+	if _, ok := m.parseSkillMCPCommand("/hidden-skill do it"); ok {
+		t.Fatal("hidden skill should not produce a Recommend message")
+	}
+	if _, ok := m.parseSkillMCPCommand("/hidden-mcp do it"); ok {
+		t.Fatal("hidden MCP should not produce a Recommend message")
+	}
+	if got, ok := m.parseSkillMCPCommand("/visible-skill do it"); !ok || !strings.Contains(got, `Recommend skill "visible-skill"`) {
+		t.Fatalf("visible skill did not produce expected Recommend message: ok=%v got=%q", ok, got)
+	}
+	if got, ok := m.parseSkillMCPCommand("/visible-mcp do it"); !ok || !strings.Contains(got, `Recommend MCP server "visible-mcp"`) {
+		t.Fatalf("visible MCP did not produce expected Recommend message: ok=%v got=%q", ok, got)
+	}
+}
+
 func testModel(t *testing.T) model {
 	t.Helper()
 	root := t.TempDir()

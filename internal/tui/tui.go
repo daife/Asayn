@@ -842,7 +842,7 @@ func (m model) startAgentTurn(value string, recordHistory bool) (model, tea.Cmd)
 	prompt, ok := m.parseSkillMCPCommand(value)
 	if ok {
 		m.appendLog("\n" + userStyle.Render("You") + ":\n" + value + "\n")
-		m.appendLog("\n" + mutedStyle.Render("● using " + prompt) + "\n")
+		m.appendLog("\n" + mutedStyle.Render("● using "+prompt) + "\n")
 	} else {
 		prompt = value
 		m.appendLog("\n" + userStyle.Render("You") + ":\n" + prompt + "\n")
@@ -947,14 +947,14 @@ func (m model) parseSkillMCPCommand(value string) (string, bool) {
 	rest := strings.TrimSpace(strings.TrimPrefix(value, parts[0]))
 
 	// Check if it's a visible skill
-	for _, s := range m.skillItems {
+	for _, s := range m.visibleSkillItems() {
 		if s.Name == name {
 			return fmt.Sprintf("%s\n\nRecommend skill %q", rest, name), true
 		}
 	}
 
 	// Check if it's a visible MCP server
-	for _, mcp := range m.mcpItems {
+	for _, mcp := range m.visibleMCPItems() {
 		if mcp.Name == name {
 			return fmt.Sprintf("%s\n\nRecommend MCP server %q", rest, name), true
 		}
@@ -962,7 +962,6 @@ func (m model) parseSkillMCPCommand(value string) (string, bool) {
 
 	return value, false
 }
-
 
 func (m model) handleInterrupt() model {
 	if len(m.queuedMessages) > 0 {
@@ -2320,7 +2319,7 @@ func (m model) resumePickerView() string {
 }
 
 func (m model) commandSuggestions() []commandSpec {
-	return commandSuggestionsFor(m.input.Value(), m.skillItems, m.mcpItems)
+	return commandSuggestionsFor(m.input.Value(), m.visibleSkillItems(), m.visibleMCPItems())
 }
 
 func commandSuggestionsFor(raw string, skills []config.Skill, mcpServers []config.MCPServerInfo) []commandSpec {
@@ -2510,11 +2509,39 @@ func (m model) selectedCommandForEnter(value string) (string, bool) {
 	if strings.Contains(value, " ") || strings.Contains(value, "\t") || exactCommand(value) {
 		return "", false
 	}
-	suggestions := commandSuggestionsFor(value, m.skillItems, m.mcpItems)
+	suggestions := commandSuggestionsFor(value, m.visibleSkillItems(), m.visibleMCPItems())
 	if len(suggestions) == 0 {
 		return "", false
 	}
 	return suggestions[m.clampedCommandSelected(len(suggestions))].Name, true
+}
+
+func (m model) visibleSkillItems() []config.Skill {
+	visible := map[string]bool{}
+	for _, name := range m.ctx.Root.VisibleSkills {
+		visible[name] = true
+	}
+	out := make([]config.Skill, 0, len(m.skillItems))
+	for _, item := range m.skillItems {
+		if visible[item.Name] {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func (m model) visibleMCPItems() []config.MCPServerInfo {
+	visible := map[string]bool{}
+	for _, name := range m.ctx.Root.VisibleMCP {
+		visible[name] = true
+	}
+	out := make([]config.MCPServerInfo, 0, len(m.mcpItems))
+	for _, item := range m.mcpItems {
+		if visible[item.Name] {
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 func exactCommand(value string) bool {
