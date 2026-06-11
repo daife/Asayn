@@ -1495,13 +1495,13 @@ func (m model) handleCommand(raw string) (model, tea.Cmd) {
 	case "help":
 		m.setCommandOutput(helpText())
 	case "new":
-		_ = m.cleanupEmptySession()
 		name := arg
 		sess, err := m.ctx.Sessions.New(name, m.ctx.Root.Name)
 		if err != nil {
 			m.setCommandOutput("error: " + err.Error())
 			return m, nil
 		}
+		_ = m.cleanupEmptySession()
 		m.session = sess
 		m.subViewID = ""
 		m.commandOutput = ""
@@ -1512,7 +1512,6 @@ func (m model) handleCommand(raw string) (model, tea.Cmd) {
 		m.content = ""
 		m.refreshLog(true)
 	case "resume":
-		_ = m.cleanupEmptySession()
 		if arg == "" {
 			return m.startResumePicker()
 		}
@@ -2060,6 +2059,7 @@ func (m model) resumeSession(idOrName string) (model, tea.Cmd) {
 		m.setCommandOutput("error: " + err.Error())
 		return m, nil
 	}
+	_ = m.cleanupEmptySession()
 	m.session = sess
 	m.subViewID = ""
 	m.commandOutput = ""
@@ -2441,7 +2441,7 @@ func (m model) clampedCommandSelected(length int) int {
 }
 
 func (m *model) completeCommand(name string) {
-	m.input.SetValue(name)
+	m.input.SetValue(name + " ")
 	m.input.CursorEnd()
 	m.syncInputSize()
 	m.commandSelected = 0
