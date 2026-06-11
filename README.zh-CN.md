@@ -1,5 +1,9 @@
 # Asayn
 
+<p align="center">
+  <img src="assets/icon.png" alt="Asayn" width="180"/>
+</p>
+
 中文 | [English](README.md)
 
 **Asayn = agent skills are all you need.**
