@@ -29,15 +29,13 @@ The Linux installer downloads the latest GitHub release, installs `asayn` to `~/
 ### Windows PowerShell
 
 ```powershell
-Invoke-WebRequest -Uri "https://raw.githubusercontent.com/daife/Asayn/main/install.ps1" -OutFile install.ps1
-.\install.ps1
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/daife/Asayn/main/install.ps1" -OutFile install.ps1 && .\install.ps1
 ```
 
 Or use the batch wrapper:
 
 ```cmd
-curl -o install.bat https://raw.githubusercontent.com/daife/Asayn/main/install.bat
-install.bat
+curl -o install.bat https://raw.githubusercontent.com/daife/Asayn/main/install.bat && install.bat
 ```
 
 The Windows installer installs `asayn.exe` to `%USERPROFILE%\.local\bin`, updates the user PATH, and can run the same Claude Code migration flow. Current release assets provide Windows amd64 binaries.

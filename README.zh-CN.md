@@ -29,15 +29,13 @@ Linux 安装脚本会下载最新 GitHub release，把 `asayn` 安装到 `~/.loc
 ### Windows PowerShell
 
 ```powershell
-Invoke-WebRequest -Uri "https://raw.githubusercontent.com/daife/Asayn/main/install.ps1" -OutFile install.ps1
-.\install.ps1
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/daife/Asayn/main/install.ps1" -OutFile install.ps1 && .\install.ps1
 ```
 
 也可以使用 batch 包装脚本：
 
 ```cmd
-curl -o install.bat https://raw.githubusercontent.com/daife/Asayn/main/install.bat
-install.bat
+curl -o install.bat https://raw.githubusercontent.com/daife/Asayn/main/install.bat && install.bat
 ```
 
 Windows 安装脚本会把 `asayn.exe` 安装到 `%USERPROFILE%\.local\bin`，更新用户 PATH，并可执行同样的 Claude Code 迁移流程。目前 release 提供 Windows amd64 二进制文件。

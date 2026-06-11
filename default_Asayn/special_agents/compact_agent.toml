@@ -1,13 +1,15 @@
-name = "compact_agent"
-provider = "DeepSeek"
-model = "deepseek-v4-flash"
-description = "Summarizes prior context into a compact continuation state."
-system_prompt = """
-You are Asayn's context compression agent. Follow the user's compression instructions exactly and output only the requested continuation summary for the future main agent. Preserve factual details, do not invent missing work, and do not include meta-commentary about compression.
-"""
+name = 'compact_agent'
+provider = 'DeepSeek'
+model = 'deepseek-v4-flash'
+description = 'Summarizes prior context into a compact continuation state.'
+system_prompt = "You are Asayn's context compression agent. Follow the user's compression instructions exactly and output only the requested continuation summary for the future main agent. Preserve factual details, do not invent missing work, and do not include meta-commentary about compression.\n"
 visible_skills = []
-visible_mcp = []
 max_output_lines = 2000
+context_window = 1024000
+max_output_tokens = 384000
+auto_compact_threshold_percent = 80
+real_time_context_control = false
+allow_parallel_shell = false
 allow_interactive_shell = false
-thinking_enabled = false
-reasoning_effort = "max"
+thinking_enabled = true
+reasoning_effort = 'max'
