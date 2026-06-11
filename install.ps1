@@ -47,6 +47,16 @@ function Get-AsaynSafeFileName {
     return $safe
 }
 
+function Test-AsaynPluginPath {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+    $parts = $Path -split '[\\/]+'
+    foreach ($part in $parts) {
+        if ($part -eq "plugins") { return $true }
+    }
+    return $false
+}
+
 function Get-AsaynExistingSkillNames {
     param([string]$AsaynSkillsDir)
     $names = New-Object 'System.Collections.Generic.HashSet[string]'
@@ -72,16 +82,12 @@ function Get-ClaudeSkillCandidates {
     $roots = New-Object 'System.Collections.Generic.List[string]'
     if ($env:CLAUDE_CONFIG_DIR) {
         $roots.Add((Join-Path $env:CLAUDE_CONFIG_DIR "skills"))
-        $roots.Add((Join-Path $env:CLAUDE_CONFIG_DIR "plugins"))
     }
     $roots.Add((Join-Path $env:USERPROFILE ".claude\skills"))
-    $roots.Add((Join-Path $env:USERPROFILE ".claude\plugins"))
     if ($env:APPDATA) {
         $roots.Add((Join-Path $env:APPDATA "Claude\skills"))
-        $roots.Add((Join-Path $env:APPDATA "Claude\plugins"))
     }
     $roots.Add((Join-Path (Get-Location).Path ".claude\skills"))
-    $roots.Add((Join-Path (Get-Location).Path ".claude\plugins"))
 
     $existing = Get-AsaynExistingSkillNames $AsaynSkillsDir
     $seen = New-Object 'System.Collections.Generic.HashSet[string]'
@@ -90,6 +96,7 @@ function Get-ClaudeSkillCandidates {
         if (!(Test-Path $root)) { continue }
         Get-ChildItem -LiteralPath $root -Recurse -Filter "SKILL.md" -File -ErrorAction SilentlyContinue | ForEach-Object {
             $folder = $_.Directory.FullName
+            if (Test-AsaynPluginPath $folder) { return }
             $key = (Resolve-Path -LiteralPath $folder).Path
             if ($seen.Contains($key)) { return }
             [void]$seen.Add($key)
@@ -157,9 +164,11 @@ function Get-ClaudeMcpCandidates {
         if (!(Test-Path $path)) { continue }
         $candidates = @()
         if ((Get-Item -LiteralPath $path).PSIsContainer) {
-            $candidates = Get-ChildItem -LiteralPath $path -Recurse -Filter "*.json" -File -ErrorAction SilentlyContinue | Where-Object { $_.Length -le 5MB } | Select-Object -ExpandProperty FullName
+            $candidates = Get-ChildItem -LiteralPath $path -Recurse -Filter "*.json" -File -ErrorAction SilentlyContinue | Where-Object { $_.Length -le 5MB -and !(Test-AsaynPluginPath $_.FullName) } | Select-Object -ExpandProperty FullName
         } elseif ($path.ToLower().EndsWith(".json")) {
-            $candidates = @($path)
+            if (!(Test-AsaynPluginPath $path)) {
+                $candidates = @($path)
+            }
         }
         foreach ($f in $candidates) {
             try { $key = (Resolve-Path -LiteralPath $f).Path } catch { $key = $f }

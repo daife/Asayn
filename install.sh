@@ -52,6 +52,7 @@ import json
 import os
 import re
 import shutil
+import sys
 from pathlib import Path
 
 home = Path.home()
@@ -61,17 +62,20 @@ asayn_skills = asayn_dir / "skills"
 asayn_mcp = asayn_dir / "mcp"
 asayn_skills.mkdir(parents=True, exist_ok=True)
 asayn_mcp.mkdir(parents=True, exist_ok=True)
-try:
-    tty = open("/dev/tty", "r+", encoding="utf-8", buffering=1)
-except OSError:
-    tty = None
 
 def prompt_input(prompt):
-    if tty is None:
-        return ""
-    tty.write(prompt)
-    tty.flush()
-    return tty.readline().rstrip("\n")
+    try:
+        with open("/dev/tty", "r", encoding="utf-8", errors="ignore") as tty_in, \
+             open("/dev/tty", "w", encoding="utf-8", errors="ignore") as tty_out:
+            tty_out.write(prompt)
+            tty_out.flush()
+            return tty_in.readline().rstrip("\n")
+    except OSError:
+        print(prompt, end="", flush=True)
+        return sys.stdin.readline().rstrip("\n")
+
+def is_under_plugin_dir(path):
+    return any(part == "plugins" for part in Path(path).parts)
 
 def uniq_paths(paths):
     seen = set()
@@ -123,14 +127,10 @@ def discover_skills():
     cfg = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
     if cfg:
         roots.append(Path(cfg) / "skills")
-        roots.append(Path(cfg) / "plugins")
     roots += [
         home / ".claude" / "skills",
-        home / ".claude" / "plugins",
         home / ".config" / "claude-code" / "skills",
-        home / ".config" / "claude-code" / "plugins",
         cwd / ".claude" / "skills",
-        cwd / ".claude" / "plugins",
     ]
     roots = uniq_paths(roots)
     existing = existing_asayn_skill_names()
@@ -189,9 +189,11 @@ def existing_asayn_mcp_names():
 
 def json_files_under(root):
     if root.is_file():
-        return [root] if root.suffix.lower() == ".json" else []
+        return [root] if root.suffix.lower() == ".json" and not is_under_plugin_dir(root) else []
     files = []
     for jf in root.rglob("*.json"):
+        if is_under_plugin_dir(jf):
+            continue
         try:
             if jf.stat().st_size > 5 * 1024 * 1024:
                 continue
