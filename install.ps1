@@ -2,6 +2,21 @@ param(
     [switch]$MigrateOnly
 )
 
+function Read-AsaynPrompt {
+    param([string]$Prompt)
+    try {
+        Write-Host -NoNewline $Prompt
+        $stream = [System.IO.File]::Open("CONIN$", [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+        try {
+            $reader = New-Object System.IO.StreamReader($stream, [Console]::InputEncoding, $false, 1024, $true)
+            return $reader.ReadLine()
+        } finally {
+            $stream.Dispose()
+        }
+    } catch {
+        return Read-Host $Prompt
+    }
+}
 
 function Get-AsaynSkillNameFromFile {
     param([string]$Path)
@@ -207,7 +222,7 @@ function Invoke-AsaynClaudeMigration {
     param([switch]$SkipInitialPrompt)
     Write-Host ""
     if (!$SkipInitialPrompt) {
-        $response = Read-Host "是否迁移 Claude Code 的 skills 和 MCP 配置？(y/N)"
+        $response = Read-AsaynPrompt "是否迁移 Claude Code 的 skills 和 MCP 配置？(y/N): "
         if ($response -ne "y" -and $response -ne "Y") { return }
     }
 
@@ -243,7 +258,7 @@ function Invoke-AsaynClaudeMigration {
 
     Write-Host ""
     Write-Host "输入要迁移的编号，例如 1,3,5 或 2-4；a=全部可迁移；n=不迁移；直接回车=迁移全部非重复项。"
-    $selected = Convert-AsaynSelection (Read-Host "选择") $defaultIds ($idx - 1) $blocked
+    $selected = Convert-AsaynSelection (Read-AsaynPrompt "选择: ") $defaultIds ($idx - 1) $blocked
     if ($selected.Count -eq 0) {
         Write-Host "未选择任何迁移项。"
         return
@@ -256,7 +271,7 @@ function Invoke-AsaynClaudeMigration {
         $type = if ($item.Kind -eq "skill") { "Skill" } else { "MCP" }
         Write-Host ("  - {0}: {1}" -f $type, $item.Name)
     }
-    $confirm = Read-Host "确认迁移？(y/N)"
+    $confirm = Read-AsaynPrompt "确认迁移？(y/N): "
     if ($confirm -ne "y" -and $confirm -ne "Y") {
         Write-Host "已取消迁移。"
         return
@@ -316,7 +331,7 @@ Write-Host ""
 $asaynDir = "$env:USERPROFILE\.Asayn"
 if (Test-Path $asaynDir) {
     Write-Host "检测到已存在的 $asaynDir 文件夹。" -ForegroundColor Yellow
-    $response = Read-Host "是否清空并重新安装？(y/N)"
+    $response = Read-AsaynPrompt "是否清空并重新安装？(y/N): "
     if ($response -eq "y" -or $response -eq "Y") {
         Write-Host "正在清空 $asaynDir 文件夹..."
         Remove-Item -Recurse -Force $asaynDir
