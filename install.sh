@@ -5,14 +5,25 @@ set -e
 echo "=== Asayn 安装脚本 ==="
 echo ""
 
-
+ask_yes_no() {
+    prompt="$1"
+    printf "%s" "$prompt"
+    IFS= read -r reply
+    case "$reply" in
+        y|Y|yes|YES|Yes)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
 
 prompt_clear_asayn() {
     if [ -d "$HOME/.Asayn" ]; then
         echo ""
-        read -p "检测到已存在的 ~/.Asayn 文件夹。是否清空并重新安装？(y/N): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
+        echo "检测到已存在的 ~/.Asayn 文件夹。"
+        if ask_yes_no "是否清空并重新安装？(y/N): "; then
             echo "正在清空 ~/.Asayn 文件夹..."
             rm -rf "$HOME/.Asayn"
             echo "清空完成。"
@@ -24,9 +35,7 @@ prompt_clear_asayn() {
 
 migrate_claude_code_assets() {
     echo ""
-    read -p "是否迁移 Claude Code 的 skills 和 MCP 配置？(y/N): " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    if ! ask_yes_no "是否迁移 Claude Code 的 skills 和 MCP 配置？(y/N): "; then
         return 0
     fi
     if ! command -v python3 >/dev/null 2>&1; then
@@ -323,19 +332,7 @@ if skipped:
 PYCODE
 }
 
-# 检查 ~/.Asayn 文件夹是否存在
-if [ -d "$HOME/.Asayn" ]; then
-    echo "检测到已存在的 ~/.Asayn 文件夹。"
-    read -p "是否清空并重新安装？(y/N): " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        echo "正在清空 ~/.Asayn 文件夹..."
-        rm -rf "$HOME/.Asayn"
-        echo "清空完成。"
-    else
-        echo "保留现有文件夹。"
-    fi
-fi
+prompt_clear_asayn
 
 # 获取最新版本
 echo "正在获取最新版本信息..."
@@ -378,7 +375,10 @@ curl -L -o "$INSTALL_DIR/asayn" "$DOWNLOAD_URL"
 chmod +x "$INSTALL_DIR/asayn"
 
 # 检查并更新 PATH（当前会话和永久性）
-if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
+case ":$PATH:" in
+    *":$INSTALL_DIR:"*)
+        ;;
+    *)
     echo "正在添加 $INSTALL_DIR 到 PATH..."
     
     # 更新当前会话的 PATH
@@ -401,24 +401,20 @@ if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
         fi
     fi
     
-    # 刷新环境变量
-    source "$HOME/.bashrc" 2>/dev/null || true
-    source "$HOME/.zshrc" 2>/dev/null || true
-    
-    echo "PATH 已更新，当前终端已生效。" -e "\033[32m"
-fi
+    printf "\033[32mPATH 已更新，当前终端已生效。\033[0m\n"
+        ;;
+esac
 
 echo ""
 echo "=== 安装完成 ==="
 echo "Asayn 已安装到: $INSTALL_DIR/asayn"
 echo ""
-echo "环境变量已自动配置，无需重启终端。" -e "\033[32m"
+printf "\033[32m环境变量已自动配置，无需重启终端。\033[0m\n"
 echo ""
 echo "配置文件位置:"
 echo "  ~/.Asayn/api_config.toml"
 echo "  在此文件中配置您的 API 密钥(首次运行后才会自动生成该目录)"
 echo ""
-prompt_clear_asayn
 migrate_claude_code_assets
 
 echo "使用方法:"

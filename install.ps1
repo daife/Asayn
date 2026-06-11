@@ -40,6 +40,10 @@ function Get-AsaynExistingSkillNames {
     Get-ChildItem -LiteralPath $AsaynSkillsDir -Directory -ErrorAction SilentlyContinue | ForEach-Object {
         $skillFile = Join-Path $_.FullName "SKILL.md"
         if (Test-Path $skillFile) {
+            $skillName = Get-AsaynSkillNameFromFile $skillFile
+            if (![string]::IsNullOrWhiteSpace($skillName)) {
+                [void]$names.Add($skillName)
+            }
             [void]$names.Add($_.Name)
         }
     }
@@ -77,7 +81,7 @@ function Get-ClaudeSkillCandidates {
             $name = Get-AsaynSkillNameFromFile $_.FullName
             if ([string]::IsNullOrWhiteSpace($name)) { $name = $_.Directory.Name }
             $target = Join-Path $AsaynSkillsDir $_.Directory.Name
-            $dup = (Test-Path $target) -or $existing.Contains($_.Directory.Name)
+            $dup = (Test-Path $target) -or $existing.Contains($_.Directory.Name) -or $existing.Contains($name)
             $items += [pscustomobject]@{
                 Kind = "skill"
                 Name = $name
@@ -160,7 +164,7 @@ function Get-ClaudeMcpCandidates {
         if ($byName.ContainsKey($item.Name)) { continue }
         $safe = Get-AsaynSafeFileName $item.Name
         $target = Join-Path $AsaynMcpDir ($safe + ".json")
-        $dup = (Test-Path $target)
+        $dup = (Test-Path $target) -or $existing.Contains($item.Name)
         $byName[$item.Name] = [pscustomobject]@{
             Kind = "mcp"
             Name = $item.Name
