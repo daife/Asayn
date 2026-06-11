@@ -7,6 +7,19 @@ echo ""
 
 
 
+prompt_clear_asayn() {
+    if [ -d "$HOME/.Asayn" ]; then
+        echo ""
+        read -p "检测到已存在的 ~/.Asayn 文件夹。是否清空并重新安装？(y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            echo "正在清空 ~/.Asayn 文件夹..."
+            rm -rf "$HOME/.Asayn"
+            echo "清空完成。"
+        fi
+    fi
+}
+
 migrate_claude_code_assets() {
     echo ""
     read -p "是否迁移 Claude Code 的 skills 和 MCP 配置？(y/N): " -n 1 -r
@@ -403,6 +416,7 @@ echo "配置文件位置:"
 echo "  ~/.Asayn/api_config.toml"
 echo "  在此文件中配置您的 API 密钥(首次运行后才会自动生成该目录)"
 echo ""
+prompt_clear_asayn
 migrate_claude_code_assets
 
 echo "使用方法:"
