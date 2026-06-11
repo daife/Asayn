@@ -16,6 +16,8 @@ prompt_clear_asayn() {
             echo "正在清空 ~/.Asayn 文件夹..."
             rm -rf "$HOME/.Asayn"
             echo "清空完成。"
+        else
+            echo "保留现有文件夹。"
         fi
     fi
 }
