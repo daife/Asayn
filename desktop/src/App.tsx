@@ -7,9 +7,51 @@ import Markdown from "./Markdown";
 import type { AgentConfig, AgentEvent, Catalog, Message, Session, Snapshot, Workspace } from "./types";
 
 type RunItem = { kind: "thinking" | "tool" | "error"; title: string; text: string; active?: boolean };
+type TranscriptItem =
+  | { kind: "user"; message: Message }
+  | { kind: "assistant"; runItems: RunItem[]; content: string };
 
 const compact = (n = 0) => n < 1_000 ? `${n}` : n < 1_000_000 ? `${(n / 1_000).toFixed(1)}K` : `${(n / 1_000_000).toFixed(1)}M`;
-const visibleMessages = (messages?: Message[] | null) => (messages || []).filter((m) => m.role === "user" || m.role === "tool" || (m.role === "assistant" && (m.content || m.reasoning_content || (m.tool_calls && m.tool_calls.length > 0))));
+export function buildTranscript(messages?: Message[] | null): TranscriptItem[] {
+  const transcript: TranscriptItem[] = [];
+  let assistant: Extract<TranscriptItem, { kind: "assistant" }> | undefined;
+  const toolItems = new Map<string, RunItem>();
+
+  const ensureAssistant = () => {
+    if (!assistant) {
+      assistant = { kind: "assistant", runItems: [], content: "" };
+      transcript.push(assistant);
+    }
+    return assistant;
+  };
+
+  for (const message of messages || []) {
+    if (message.role === "system") continue;
+    if (message.role === "user") {
+      transcript.push({ kind: "user", message });
+      assistant = undefined;
+      toolItems.clear();
+      continue;
+    }
+    if (message.role === "assistant") {
+      const turn = ensureAssistant();
+      if (message.reasoning_content) turn.runItems.push({ kind: "thinking", title: "Reasoning", text: message.reasoning_content });
+      for (const call of message.tool_calls || []) {
+        const item: RunItem = { kind: "tool", title: call.function.name, text: call.function.arguments };
+        turn.runItems.push(item);
+        toolItems.set(call.id, item);
+      }
+      if (message.content) turn.content += `${turn.content ? "\n\n" : ""}${message.content}`;
+      continue;
+    }
+    if (message.role === "tool") {
+      const matched = message.tool_call_id ? toolItems.get(message.tool_call_id) : undefined;
+      if (matched) matched.text = message.content;
+      else ensureAssistant().runItems.push({ kind: "tool", title: "Tool result", text: message.content });
+    }
+  }
+  return transcript.filter((item) => item.kind === "user" || item.content || item.runItems.length > 0);
+}
 const normalizedPath = (path: string) => {
   const value = path.replace(/\\/g, "/").replace(/\/$/, "");
   return /^[a-z]:/i.test(value) ? value.toLowerCase() : value;
@@ -78,9 +120,10 @@ export default function App() {
     });
     else if (event.kind === "auto_compact") { setStream(""); setRunItems([{ kind: "thinking", title: "Compressing context", text: "Preparing a continuation summary", active: true }]); }
     else if (event.kind === "done") {
-      setRunning(false); setStream(""); setRunItems([]);
+      setRunning(false);
       if (event.error && !event.error.includes("context canceled")) setError(event.error);
       refresh().then(() => {
+        setStream(""); setRunItems([]);
         const next = queueRef.current.shift(); setQueued([...queueRef.current]);
         if (next) launch(next);
       }).catch((e) => setError(String(e)));
@@ -169,7 +212,7 @@ export default function App() {
   }
 
   if (!snapshot) return <div className="boot"><div className="boot-mark">A</div><p>Starting the local agent engine…</p>{error && <pre>{error}</pre>}</div>;
-  const messages = visibleMessages(snapshot.session.messages);
+  const transcript = buildTranscript(snapshot.session.messages);
 
   return <div className={`app ${sidebar ? "" : "sidebar-closed"}`}>
     <aside className="sidebar">
@@ -209,7 +252,9 @@ export default function App() {
       </header>
 
       <section className="conversation" ref={conversationRef}>
-        {messages.length === 0 && !running ? <EmptyState agent={snapshot.agent}/> : messages.map((message, i) => <MessageView key={`${i}-${message.role}`} message={message}/>) }
+        {transcript.length === 0 && !running ? <EmptyState agent={snapshot.agent}/> : transcript.map((item, i) => item.kind === "user"
+          ? <UserMessage key={`user-${i}`} message={item.message}/>
+          : <AssistantTurn key={`assistant-${i}`} runItems={item.runItems} content={item.content}/>)}
         {(running || stream || runItems.length > 0) && <article className="turn assistant-turn live">
           <div className="speaker"><div className="speaker-icon"><Bot size={16}/></div><strong>Asayn</strong><span className="live-pill">LIVE</span></div>
           <div className="run-stack">{runItems.map((item, i) => <RunCard item={item} key={i}/>)}</div>
@@ -243,16 +288,16 @@ function EmptyState({ agent }: { agent: AgentConfig }) {
   return <div className="empty"><div className="empty-orbit"><div><BrainCircuit size={31}/></div></div><p className="eyebrow">READY IN THIS WORKSPACE</p><h1>What should we<br/><em>make happen?</em></h1><p>{agent.description || "A workspace-aware coding agent with tools, skills, and sub-agents."}</p><div className="starter-grid"><span><TerminalSquare size={15}/> Inspect this codebase</span><span><Wrench size={15}/> Fix a failing test</span></div></div>;
 }
 
-function MessageView({ message }: { message: Message }) {
+function UserMessage({ message }: { message: Message }) {
+  return <article className="turn user-turn"><div className="speaker"><div className="speaker-icon user">YOU</div><strong>You</strong></div><div className="user-copy">{message.content}</div></article>;
+}
+
+function AssistantTurn({ runItems, content }: { runItems: RunItem[]; content: string }) {
   const [copied, setCopied] = useState(false);
-  if (message.role === "user") return <article className="turn user-turn"><div className="speaker"><div className="speaker-icon user">YOU</div><strong>You</strong></div><div className="user-copy">{message.content}</div></article>;
-  if (message.role === "tool") return <article className="turn tool-turn"><div className="speaker"><div className="speaker-icon tool"><TerminalSquare size={16}/></div><strong>Tool result</strong><span className="tool-call-id">{message.tool_call_id?.slice(0, 8)}</span></div><pre className="tool-result">{message.content}</pre></article>;
-  const hasToolCalls = message.tool_calls && message.tool_calls.length > 0;
   return <article className="turn assistant-turn"><div className="speaker"><div className="speaker-icon"><Bot size={16}/></div><strong>Asayn</strong></div>
-    {message.reasoning_content && <details className="reasoning"><summary><BrainCircuit size={15}/> Reasoning</summary><div>{message.reasoning_content}</div></details>}
-    {hasToolCalls && <div className="run-stack">{message.tool_calls!.map((tc) => <details className="run-card" key={tc.id}><summary><TerminalSquare size={15}/><span>{tc.function.name}</span><ChevronDown size={14}/></summary><pre>{tc.function.arguments}</pre></details>)}</div>}
-    {message.content && <Markdown>{message.content}</Markdown>}
-    {message.content && <button className="copy" onClick={() => { navigator.clipboard.writeText(message.content); setCopied(true); setTimeout(() => setCopied(false), 1200); }}><Copy size={13}/>{copied ? "Copied" : "Copy"}</button>}
+    {runItems.length > 0 && <div className="run-stack">{runItems.map((item, i) => <RunCard item={item} key={i}/>)}</div>}
+    {content && <Markdown>{content}</Markdown>}
+    {content && <button className="copy" onClick={() => { navigator.clipboard.writeText(content); setCopied(true); setTimeout(() => setCopied(false), 1200); }}><Copy size={13}/>{copied ? "Copied" : "Copy"}</button>}
   </article>;
 }
 
