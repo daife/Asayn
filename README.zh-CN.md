@@ -22,7 +22,39 @@ Asayn 是一个受 Claude Code 启发的 Go 终端智能体。它提供 Bubble T
 
 ## 安装
 
-### Linux
+### 桌面 GUI
+
+从 [GitHub Releases](https://github.com/daife/Asayn/releases/latest) 下载最新桌面安装包。GUI 已内置本地 Go Agent 引擎，不需要另外安装 CLI。
+
+#### Windows x64
+
+下载并运行以下任一文件：
+
+- `Asayn_*_x64-setup.exe`：推荐使用的 NSIS 安装程序。
+- `Asayn_*_x64_en-US.msi`：适合统一部署或手动安装的 MSI 安装包。
+
+安装后从开始菜单启动 **Asayn**，点击 **Open workspace** 选择项目目录。首次启动时，需要在 `~/.Asayn/api_config.toml` 中配置 Provider 和 API key；也可以通过 GUI 的 Agent 设置打开该配置文件。
+
+#### Linux x64
+
+从最新 Release 中选择 DEB 或 AppImage：
+
+```bash
+# Debian / Ubuntu
+sudo apt install ./Asayn_*_amd64.deb
+
+# 便携 AppImage
+chmod +x Asayn_*_amd64.AppImage
+./Asayn_*_amd64.AppImage
+```
+
+桌面版目前提供 Windows x64 和 Linux x64 安装包。macOS 用户可以使用 CLI release asset，或从源码构建桌面应用。
+
+GUI 与 CLI 共用 `~/.Asayn/` 下的配置，包括 Providers、Agents、Skills、MCP servers、用量数据和工作区会话索引。
+
+### 终端 CLI
+
+#### Linux
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/daife/Asayn/main/install.sh | bash
@@ -30,7 +62,7 @@ curl -sSL https://raw.githubusercontent.com/daife/Asayn/main/install.sh | bash
 
 Linux 安装脚本会下载最新 GitHub release，把 `asayn` 安装到 `~/.local/bin`，必要时更新 shell PATH，并可选择迁移 Claude Code 的 skills 和 MCP server 配置。
 
-### Windows PowerShell
+#### Windows PowerShell
 
 ```powershell
 Invoke-WebRequest -Uri "https://raw.githubusercontent.com/daife/Asayn/main/install.ps1" -OutFile install.ps1 && .\install.ps1
@@ -44,15 +76,19 @@ curl -o install.bat https://raw.githubusercontent.com/daife/Asayn/main/install.b
 
 Windows 安装脚本会把 `asayn.exe` 安装到 `%USERPROFILE%\.local\bin`，更新用户 PATH，并可执行同样的 Claude Code 迁移流程。目前 release 提供 Windows amd64 二进制文件。
 
-### macOS
+#### macOS
 
 Release 中包含 `asayn-darwin-amd64` 和 `asayn-darwin-arm64`。当前 `install.sh` 实际下载 Linux 产物，因此 macOS 请手动下载对应 release asset，或从源码构建。
 
-### Claude Code 迁移
+#### Claude Code 迁移
 
 Linux 和 Windows 安装脚本可以扫描常见 Claude Code 位置中的 skills 和 MCP server 配置。脚本会把发现的每个 skill 或 MCP server 显示为独立编号；重复项会标记并跳过。选中的 skills 会复制到 `~/.Asayn/skills/`，选中的 MCP servers 会写成 `~/.Asayn/mcp/` 下的独立 JSON 文件。
 
 ## 快速开始
+
+使用 GUI 时，启动 **Asayn**，点击 **Open workspace**，然后选择需要 Agent 操作的项目目录。
+
+使用终端客户端时：
 
 ```bash
 cd /path/to/your/project
