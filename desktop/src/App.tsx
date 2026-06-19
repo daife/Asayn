@@ -72,6 +72,7 @@ export default function App() {
   const [sidebar, setSidebar] = useState(true);
   const [settings, setSettings] = useState(false);
   const [editing, setEditing] = useState<AgentConfig>();
+  const [textDialog, setTextDialog] = useState<{ kind: "rename" | "fork"; title: string; label: string; value: string }>();
   const endRef = useRef<HTMLDivElement>(null);
   const conversationRef = useRef<HTMLElement>(null);
   const historyIndex = useRef(-1);
@@ -211,12 +212,12 @@ export default function App() {
     try { await request("compact"); } catch (e) { setRunning(false); setError(String(e)); }
   }
 
-  if (!snapshot) return <div className="boot"><div className="boot-mark">A</div><p>Starting the local agent engine…</p>{error && <pre>{error}</pre>}</div>;
+  if (!snapshot) return <div className="boot"><div className="boot-mark" aria-label="Asayn"/><p>Starting the local agent engine…</p>{error && <pre>{error}</pre>}</div>;
   const transcript = buildTranscript(snapshot.session.messages);
 
   return <div className={`app ${sidebar ? "" : "sidebar-closed"}`}>
     <aside className="sidebar">
-      <header className="brand"><div className="brand-mark">A</div><div><strong>ASAYN</strong><span>LOCAL AGENT WORKBENCH</span></div><button onClick={() => setSidebar(false)} title="Hide sidebar"><PanelLeftClose size={17}/></button></header>
+      <header className="brand"><div className="brand-mark" aria-label="Asayn"/><div><strong>ASAYN</strong><span>LOCAL AGENT WORKBENCH</span></div><button onClick={() => setSidebar(false)} title="Hide sidebar"><PanelLeftClose size={17}/></button></header>
       <div className="sidebar-actions">
         <button className="open-workspace" onClick={chooseWorkspace}><FolderOpen size={17}/> Open workspace</button>
         <button className="new-chat" onClick={() => action("new_session", {})}><MessageSquarePlus size={17}/> New thread</button>
@@ -244,8 +245,8 @@ export default function App() {
         <div className="thread-title"><strong>{snapshot.session.name}</strong><span>{snapshot.session.id.slice(0, 8)}</span></div>
         <div className="top-actions">
           <label className="agent-select"><Bot size={15}/><select value={snapshot.agent.name} onChange={(e) => selectAgent(e.target.value)}>{catalog?.agents.map((a) => <option key={a.Name}>{a.Name}</option>)}</select><ChevronDown size={13}/></label>
-          <button className="icon-button" title="Rename" onClick={() => { const name = window.prompt("Rename thread", snapshot.session.name); if (name) action("rename_session", { name }); }}><Pencil size={16}/></button>
-          <button className="icon-button" title="Fork" onClick={() => { const name = window.prompt("Fork name", `${snapshot.session.name}-fork`); if (name) action("fork_session", { name }); }}><GitFork size={16}/></button>
+          <button className="icon-button" title="Rename" onClick={() => setTextDialog({ kind: "rename", title: "Rename thread", label: "Thread name", value: snapshot.session.name })}><Pencil size={16}/></button>
+          <button className="icon-button" title="Fork" onClick={() => setTextDialog({ kind: "fork", title: "Fork thread", label: "New thread name", value: `${snapshot.session.name}-fork` })}><GitFork size={16}/></button>
           <button className="icon-button" title="Compact context" disabled={running} onClick={compactNow}><BrainCircuit size={16}/></button>
           <button className="icon-button" title="Retry" disabled={running} onClick={() => send(true)}><RotateCcw size={16}/></button>
         </div>
@@ -256,7 +257,7 @@ export default function App() {
           ? <UserMessage key={`user-${i}`} message={item.message}/>
           : <AssistantTurn key={`assistant-${i}`} runItems={item.runItems} content={item.content}/>)}
         {(running || stream || runItems.length > 0) && <article className="turn assistant-turn live">
-          <div className="speaker"><div className="speaker-icon"><Bot size={16}/></div><strong>Asayn</strong><span className="live-pill">LIVE</span></div>
+          <div className="speaker"><AsaynAvatar/><strong>Asayn</strong><span className="live-pill">LIVE</span></div>
           <div className="run-stack">{runItems.map((item, i) => <RunCard item={item} key={i}/>)}</div>
           {stream && <Markdown>{stream}</Markdown>}
           {!stream && runItems.length === 0 && <div className="thinking-line"><i/><i/><i/>Contacting {snapshot.agent.model}</div>}
@@ -280,21 +281,27 @@ export default function App() {
         <div className="statusbar"><span><i className="online"/> Local engine</span><span>{snapshot.agent.model}</span><span>{compact(snapshot.stats.SessionInput)} in / {compact(snapshot.stats.SessionOutput)} out</span><span>{compact(snapshot.session.last_total_tokens)} context</span></div>
       </section>
     </main>
-    {settings && editing && catalog && <Settings config={editing} catalog={catalog} onClose={() => setSettings(false)} onSave={async (config) => { await action("save_agent_config", config); setCatalog(await request<Catalog>("catalog")); setSettings(false); }}/>} 
+    {settings && editing && catalog && <Settings config={editing} catalog={catalog} onClose={() => setSettings(false)} onSave={async (config) => { await action("save_agent_config", config); setCatalog(await request<Catalog>("catalog")); setSettings(false); }}/>}
+    {textDialog && <TextDialog {...textDialog} onClose={() => setTextDialog(undefined)} onSubmit={async (value) => {
+      await action(textDialog.kind === "rename" ? "rename_session" : "fork_session", { name: value });
+      setTextDialog(undefined);
+    }}/>}
   </div>;
 }
 
 function EmptyState({ agent }: { agent: AgentConfig }) {
-  return <div className="empty"><div className="empty-orbit"><div><BrainCircuit size={31}/></div></div><p className="eyebrow">READY IN THIS WORKSPACE</p><h1>What should we<br/><em>make happen?</em></h1><p>{agent.description || "A workspace-aware coding agent with tools, skills, and sub-agents."}</p><div className="starter-grid"><span><TerminalSquare size={15}/> Inspect this codebase</span><span><Wrench size={15}/> Fix a failing test</span></div></div>;
+  return <div className="empty"><div className="empty-orbit"><div className="empty-brand"/></div><p className="eyebrow">READY IN THIS WORKSPACE</p><h1>What should we<br/><em>make happen?</em></h1><p>{agent.description || "A workspace-aware coding agent with tools, skills, and sub-agents."}</p><div className="starter-grid"><span><TerminalSquare size={15}/> Inspect this codebase</span><span><Wrench size={15}/> Fix a failing test</span></div></div>;
 }
 
 function UserMessage({ message }: { message: Message }) {
-  return <article className="turn user-turn"><div className="speaker"><div className="speaker-icon user">YOU</div><strong>You</strong></div><div className="user-copy">{message.content}</div></article>;
+  return <article className="turn user-turn"><div className="speaker"><div className="speaker-icon user">Y</div><strong>You</strong></div><div className="user-copy">{message.content}</div></article>;
 }
+
+function AsaynAvatar() { return <div className="speaker-icon asayn" aria-label="Asayn"/>; }
 
 function AssistantTurn({ runItems, content }: { runItems: RunItem[]; content: string }) {
   const [copied, setCopied] = useState(false);
-  return <article className="turn assistant-turn"><div className="speaker"><div className="speaker-icon"><Bot size={16}/></div><strong>Asayn</strong></div>
+  return <article className="turn assistant-turn"><div className="speaker"><AsaynAvatar/><strong>Asayn</strong></div>
     {runItems.length > 0 && <div className="run-stack">{runItems.map((item, i) => <RunCard item={item} key={i}/>)}</div>}
     {content && <Markdown>{content}</Markdown>}
     {content && <button className="copy" onClick={() => { navigator.clipboard.writeText(content); setCopied(true); setTimeout(() => setCopied(false), 1200); }}><Copy size={13}/>{copied ? "Copied" : "Copy"}</button>}
@@ -303,6 +310,15 @@ function AssistantTurn({ runItems, content }: { runItems: RunItem[]; content: st
 
 function RunCard({ item }: { item: RunItem }) {
   return <details className={`run-card ${item.kind}`} open={item.active || item.kind === "error"}><summary>{item.kind === "thinking" ? <BrainCircuit size={15}/> : <TerminalSquare size={15}/>}<span>{item.title}</span>{item.active && <i/>}<ChevronDown size={14}/></summary>{item.text && <pre>{item.text}</pre>}</details>;
+}
+
+function TextDialog({ title, label, value, onClose, onSubmit }: { kind: "rename" | "fork"; title: string; label: string; value: string; onClose: () => void; onSubmit: (value: string) => Promise<void> }) {
+  const [draft, setDraft] = useState(value); const [saving, setSaving] = useState(false);
+  return <div className="modal-layer" onMouseDown={(e) => e.target === e.currentTarget && onClose()}><form className="text-dialog" onSubmit={async (e) => { e.preventDefault(); const next = draft.trim(); if (!next) return; setSaving(true); try { await onSubmit(next); } finally { setSaving(false); } }}>
+    <header><div className="dialog-mark"><Pencil size={17}/></div><div><span>THREAD ACTION</span><h2>{title}</h2></div><button type="button" className="icon-button" onClick={onClose}><X size={18}/></button></header>
+    <label>{label}<input autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} onFocus={(e) => e.currentTarget.select()}/></label>
+    <footer><button type="button" className="secondary" onClick={onClose}>Cancel</button><button type="submit" disabled={saving || !draft.trim()}>{saving ? "Saving…" : "Confirm"}</button></footer>
+  </form></div>;
 }
 
 function Settings({ config, catalog, onClose, onSave }: { config: AgentConfig; catalog: Catalog; onClose: () => void; onSave: (c: AgentConfig) => Promise<void> }) {

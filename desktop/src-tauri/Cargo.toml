@@ -1,6 +1,6 @@
 [package]
 name = "asayn-desktop"
-version = "0.5.6"
+version = "0.5.7"
 description = "Asayn desktop client"
 authors = ["Asayn contributors"]
 edition = "2021"
