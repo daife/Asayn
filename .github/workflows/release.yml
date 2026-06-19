@@ -9,70 +9,120 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  cli:
+    name: CLI binaries
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-
       - name: Test
         run: go test ./...
-
-      - name: Build release assets
+      - name: Build CLI assets
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p dist
+          mkdir -p release
+          flags=(-trimpath -ldflags="-s -w -buildid=")
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build "${flags[@]}" -o release/asayn-linux-amd64 ./cmd/asayn
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build "${flags[@]}" -o release/asayn-linux-arm64 ./cmd/asayn
+          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build "${flags[@]}" -o release/asayn-darwin-amd64 ./cmd/asayn
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build "${flags[@]}" -o release/asayn-darwin-arm64 ./cmd/asayn
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build "${flags[@]}" -o release/asayn-windows-amd64.exe ./cmd/asayn
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli
+          path: release/*
+          if-no-files-found: error
 
-          build_flags=(-trimpath -ldflags="-s -w -buildid=")
+  desktop:
+    name: Desktop ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            os: ubuntu-22.04
+            bundles: deb,appimage
+            artifact: desktop-linux-x64
+          - name: Windows x64
+            os: windows-latest
+            bundles: nsis,msi
+            artifact: desktop-windows-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libgbm-dev
+      - name: Install frontend dependencies
+        working-directory: desktop
+        run: npm ci
+      - name: Build desktop packages
+        working-directory: desktop
+        run: npm run tauri build -- --bundles ${{ matrix.bundles }}
+      - name: Collect Linux packages
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          mkdir -p release
+          find desktop/src-tauri/target/release/bundle -type f \( -name '*.deb' -o -name '*.AppImage' \) -exec cp {} release/ \;
+      - name: Collect Windows packages
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release | Out-Null
+          Get-ChildItem desktop/src-tauri/target/release/bundle -Recurse -File |
+            Where-Object { $_.Extension -in '.msi', '.exe' } |
+            Copy-Item -Destination release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: release/*
+          if-no-files-found: error
 
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build "${build_flags[@]}" -o "dist/asayn-linux-amd64" ./cmd/asayn
-          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build "${build_flags[@]}" -o "dist/asayn-linux-arm64" ./cmd/asayn
-          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build "${build_flags[@]}" -o "dist/asayn-darwin-amd64" ./cmd/asayn
-          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build "${build_flags[@]}" -o "dist/asayn-darwin-arm64" ./cmd/asayn
-          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build "${build_flags[@]}" -o "dist/asayn-windows-amd64.exe" ./cmd/asayn
-
-          (cd dist && sha256sum asayn-linux-amd64 asayn-linux-arm64 asayn-darwin-amd64 asayn-darwin-arm64 asayn-windows-amd64.exe > SHA256SUMS.txt)
-
+  publish:
+    name: Publish release
+    needs: [cli, desktop]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+      - name: Generate checksums
+        working-directory: release
+        run: sha256sum * > SHA256SUMS.txt
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
           name: Asayn ${{ github.ref_name }}
+          generate_release_notes: true
           body: |
-            ## Changes
-            - 修复多行输入框上下键行为：多行内优先移动光标，到边界后再切换输入历史
-            - 修复最终回答完成后重复渲染分割线的问题，与 `/resume` 后的样貌保持一致
-            - 使用 release 构建参数压缩二进制体积：`-trimpath -ldflags="-s -w -buildid="`
+            ## Desktop application
+            This release introduces the Tauri 2 desktop client while retaining the existing Go agent engine.
 
-            ## Assets
-            - `asayn-linux-amd64`: Linux amd64 二进制文件
-            - `asayn-linux-arm64`: Linux arm64 二进制文件
-            - `asayn-darwin-amd64`: macOS amd64 二进制文件
-            - `asayn-darwin-arm64`: macOS arm64 二进制文件
-            - `asayn-windows-amd64.exe`: Windows amd64 二进制文件
-            - `SHA256SUMS.txt`: 资产校验和
+            - Windows x64: NSIS setup (`.exe`) and MSI installer (`.msi`)
+            - Linux x64: Debian package (`.deb`) and AppImage (`.AppImage`)
+            - Existing CLI binaries remain available for Linux, macOS, and Windows.
 
-            ## 安装方式
+            ## 桌面应用
+            本版本新增 Tauri 2 桌面客户端，并继续使用原有 Go Agent 引擎。
 
-            **Linux/macOS:**
-            ```bash
-            curl -sSL https://raw.githubusercontent.com/daife/Asayn/main/install.sh | bash
-            ```
-
-            **Windows (PowerShell):**
-            ```powershell
-            Invoke-WebRequest -Uri "https://raw.githubusercontent.com/daife/Asayn/main/install.ps1" -OutFile install.ps1
-            .\install.ps1
-            ```
-          files: |
-            dist/asayn-linux-amd64
-            dist/asayn-linux-arm64
-            dist/asayn-darwin-amd64
-            dist/asayn-darwin-arm64
-            dist/asayn-windows-amd64.exe
-            dist/SHA256SUMS.txt
+            - Windows x64：NSIS 安装程序和 MSI 安装包
+            - Linux x64：DEB 安装包和 AppImage
+            - 同时保留 Linux、macOS、Windows 的 CLI 二进制文件
+          files: release/*
+          fail_on_unmatched_files: true

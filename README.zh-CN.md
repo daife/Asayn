@@ -198,6 +198,20 @@ Sub-agent 使用基础 executor：文件/搜索/skill/同步 shell 以及可见 
 
 ## 从源码构建
 
+### 桌面应用（Tauri 2）
+
+可选桌面客户端位于 `desktop/`。界面使用 React 和 TypeScript，Agent 引擎仍由打包后的 Go sidecar 提供，因此 CLI 与桌面端共用会话、工具、Skills、MCP 和模型配置实现。
+
+```bash
+cd desktop
+npm install
+npm run tauri dev
+```
+
+平台依赖及发布构建方式见 `desktop/README.md`。
+
+### 终端应用
+
 要求：
 
 - Go 1.24 或更新版本。
