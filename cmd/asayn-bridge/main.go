@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -16,6 +17,7 @@ import (
 	llmtypes "github.com/asayn/asayn/internal/llm/types"
 	"github.com/asayn/asayn/internal/session"
 	"github.com/asayn/asayn/internal/tools"
+	"github.com/asayn/asayn/internal/workspaceindex"
 )
 
 const compactRetainedPrompt = "Recall what we worked on before."
@@ -104,20 +106,33 @@ func (b *bridge) dispatch(req request) (any, error) {
 		}
 		_ = json.Unmarshal(req.Payload, &p)
 		if strings.TrimSpace(p.Workspace) == "" {
+			home, _ := os.UserHomeDir()
+			if recent, ok, _ := workspaceindex.MostRecent(filepath.Join(home, ".Asayn")); ok {
+				p.Workspace = recent.Path
+				return b.openWorkspace(p.Workspace, "")
+			}
 			p.Workspace, _ = os.Getwd()
 		}
-		ctx, err := app.Bootstrap(p.Workspace)
-		if err != nil {
-			return nil, err
+		return b.openWorkspace(p.Workspace, "")
+	case "switch_workspace":
+		var p struct {
+			Workspace string `json:"workspace"`
+			SessionID string `json:"session_id"`
 		}
-		sess, err := ctx.Sessions.New("", ctx.Root.Name)
-		if err != nil {
-			return nil, err
+		_ = json.Unmarshal(req.Payload, &p)
+		if strings.TrimSpace(p.Workspace) == "" {
+			return nil, errors.New("workspace is required")
 		}
+		return b.openWorkspace(p.Workspace, p.SessionID)
+	case "workspace_index":
+		home, _ := os.UserHomeDir()
+		homeDir := filepath.Join(home, ".Asayn")
 		b.mu.Lock()
-		b.ctx, b.sess = ctx, sess
+		if b.ctx != nil {
+			homeDir = b.ctx.Paths.HomeDir
+		}
 		b.mu.Unlock()
-		return b.snapshot()
+		return workspaceindex.List(homeDir)
 	case "snapshot":
 		return b.snapshot()
 	case "list_sessions":
@@ -380,20 +395,81 @@ func (b *bridge) compact(runCtx context.Context, sess *session.Session, emit fun
 }
 
 func (b *bridge) applyRoot(name string) error {
+	return applyRootToContext(b.ctx, name)
+}
+
+func applyRootToContext(ctx *app.Context, name string) error {
 	if name == "" {
 		name = "default"
 	}
-	root, err := config.LoadAgent(b.ctx.Paths, config.RootAgentKind, name)
+	root, err := config.LoadAgent(ctx.Paths, config.RootAgentKind, name)
 	if err != nil {
 		return err
 	}
-	limits := config.ModelLimitsFor(b.ctx.API, root.Provider, root.Model)
+	limits := config.ModelLimitsFor(ctx.API, root.Provider, root.Model)
 	root.ContextWindow, root.MaxOutputTokens = limits.ContextWindow, limits.MaxOutputTokens
-	b.ctx.Root = root
-	b.ctx.Tools.SetAgentLimits(root.MaxOutputLines, root.AllowParallelShell, root.AllowInteractiveShell)
-	b.ctx.Tools.SetVisibleMCP(root.VisibleMCP)
-	b.ctx.Agent = llm.NewAgent(b.ctx.API, root, b.ctx.Paths, b.ctx.Tools)
+	ctx.Root = root
+	ctx.Tools.SetAgentLimits(root.MaxOutputLines, root.AllowParallelShell, root.AllowInteractiveShell)
+	ctx.Tools.SetVisibleMCP(root.VisibleMCP)
+	ctx.Agent = llm.NewAgent(ctx.API, root, ctx.Paths, ctx.Tools)
 	return nil
+}
+
+func (b *bridge) openWorkspace(workspace, sessionID string) (map[string]any, error) {
+	b.mu.Lock()
+	if b.running {
+		b.mu.Unlock()
+		return nil, errors.New("agent is running")
+	}
+	oldCtx, oldSess := b.ctx, b.sess
+	b.mu.Unlock()
+
+	ctx, err := app.Bootstrap(strings.TrimSpace(workspace))
+	if err != nil {
+		return nil, err
+	}
+	requestedSession := strings.TrimSpace(sessionID)
+	if requestedSession == "" {
+		if indexed, ok, findErr := workspaceindex.Find(ctx.Paths.HomeDir, ctx.Paths.WorkspaceRoot); findErr == nil && ok {
+			requestedSession = indexed.LastSessionID
+		}
+	}
+	var sess *session.Session
+	if requestedSession != "" {
+		sess, err = ctx.Sessions.LoadByID(requestedSession)
+		if err != nil && strings.TrimSpace(sessionID) != "" {
+			ctx.Tools.Shutdown()
+			return nil, err
+		}
+	}
+	if sess == nil || err != nil {
+		sess, err = ctx.Sessions.New("", ctx.Root.Name)
+		if err != nil {
+			ctx.Tools.Shutdown()
+			return nil, err
+		}
+	}
+	if err := applyRootToContext(ctx, sess.RootAgent); err != nil {
+		ctx.Tools.Shutdown()
+		return nil, err
+	}
+	if len(sess.SubAgents) > 0 {
+		ctx.Tools.RestoreSubAgents(sess, sess.SubAgents, ctx.SubSessions)
+	}
+
+	if oldCtx != nil {
+		if !session.HasContent(oldSess) {
+			_ = oldCtx.Sessions.Delete(oldSess)
+		}
+		oldCtx.Tools.Shutdown()
+	}
+	b.mu.Lock()
+	b.ctx, b.sess = ctx, sess
+	b.mu.Unlock()
+	if err := workspaceindex.Register(ctx.Paths.HomeDir, ctx.Paths.WorkspaceRoot, sess.ID); err != nil {
+		return nil, err
+	}
+	return b.snapshot()
 }
 
 func (b *bridge) ready() (*app.Context, *session.Session, error) {
@@ -426,6 +502,7 @@ func (b *bridge) snapshot() (map[string]any, error) {
 	}
 	stats, _ := ctx.UsageTracker.GetStats(sess.ID)
 	items, _ := ctx.Sessions.List()
+	_ = workspaceindex.Register(ctx.Paths.HomeDir, ctx.Paths.WorkspaceRoot, sess.ID)
 	return map[string]any{"session": sess, "sessions": items, "agent": ctx.Root, "stats": stats, "workspace": ctx.Paths.WorkspaceRoot}, nil
 }
 

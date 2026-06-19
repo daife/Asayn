@@ -9,6 +9,7 @@ export type AgentConfig = {
 };
 export type Stats = { TotalInput: number; TotalOutput: number; TotalCacheHit: number; SessionInput: number; SessionOutput: number; SessionCacheHit: number };
 export type Snapshot = { session: Session; sessions: Session[]; agent: AgentConfig; stats: Stats; workspace: string };
+export type Workspace = { path: string; name: string; last_session_id?: string; last_opened_at: string; available: boolean; sessions: Session[] };
 export type CatalogItem = { Name: string; Description: string; Source: string };
 export type Skill = CatalogItem & { Folder: string };
 export type Provider = { url: string; allowed_models: string[] };

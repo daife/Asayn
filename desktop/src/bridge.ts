@@ -37,6 +37,7 @@ export function onAgentEvent(fn: (event: AgentEvent) => void) { subscribers.add(
 export async function request<T>(action: string, payload?: unknown): Promise<T> {
   if (!isTauri()) {
     if (action === "catalog") return { agents: [{ Name: "default", Description: "General-purpose root agent", Source: "global" }], skills: [{ Name: "uv-python", Description: "Python project workflows", Source: "global", Folder: "uv-python" }], mcp: [{ Name: "codegraph", Description: "Workspace code intelligence", Source: "global" }], providers: { DeepSeek: { url: "https://api.deepseek.com", allowed_models: ["deepseek-v4-pro", "deepseek-v4-flash"] } }, config: demo.agent } as T;
+    if (action === "workspace_index") return [{ path: demo.workspace, name: "Asayn", last_session_id: demo.session.id, last_opened_at: demo.session.updated_at, available: true, sessions: demo.sessions }] as T;
     return demo as T;
   }
   const id = crypto.randomUUID();

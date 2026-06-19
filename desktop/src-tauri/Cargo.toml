@@ -1,6 +1,6 @@
 [package]
 name = "asayn-desktop"
-version = "0.5.3"
+version = "0.5.4"
 description = "Asayn desktop client"
 authors = ["Asayn contributors"]
 edition = "2021"
@@ -16,3 +16,4 @@ tauri-build = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
