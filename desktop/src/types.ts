@@ -1,6 +1,6 @@
 export type ToolCall = { id: string; type: string; function: { name: string; arguments: string } };
 export type Message = { role: "system" | "user" | "assistant" | "tool"; content: string; reasoning_content?: string; tool_calls?: ToolCall[]; tool_call_id?: string };
-export type Session = { id: string; name: string; root_agent: string; created_at: string; updated_at: string; messages: Message[]; input_history?: string[]; last_total_tokens?: number };
+export type Session = { id: string; name: string; root_agent: string; created_at: string; updated_at: string; messages: Message[] | null; input_history?: string[] | null; last_total_tokens?: number };
 export type AgentConfig = {
   name: string; provider: string; model: string; description: string; system_prompt: string;
   visible_skills: string[]; visible_mcp: string[]; max_output_lines: number; context_window: number;

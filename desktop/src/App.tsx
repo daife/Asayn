@@ -8,7 +8,7 @@ import type { AgentConfig, AgentEvent, Catalog, Message, Session, Snapshot } fro
 type RunItem = { kind: "thinking" | "tool" | "error"; title: string; text: string; active?: boolean };
 
 const compact = (n = 0) => n < 1_000 ? `${n}` : n < 1_000_000 ? `${(n / 1_000).toFixed(1)}K` : `${(n / 1_000_000).toFixed(1)}M`;
-const visibleMessages = (messages: Message[] = []) => messages.filter((m) => m.role === "user" || (m.role === "assistant" && (m.content || m.reasoning_content)));
+const visibleMessages = (messages?: Message[] | null) => (messages || []).filter((m) => m.role === "user" || (m.role === "assistant" && (m.content || m.reasoning_content)));
 
 export default function App() {
   const [snapshot, setSnapshot] = useState<Snapshot>();
