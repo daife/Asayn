@@ -22,7 +22,39 @@ Asayn is a Go-based terminal agent inspired by Claude Code. It provides a Bubble
 
 ## Install
 
-### Linux
+### Desktop GUI
+
+Download the latest desktop package from [GitHub Releases](https://github.com/daife/Asayn/releases/latest). The GUI bundles the local Go agent engine, so a separate CLI installation is not required.
+
+#### Windows x64
+
+Download and run one of these assets:
+
+- `Asayn_*_x64-setup.exe`: recommended NSIS installer.
+- `Asayn_*_x64_en-US.msi`: MSI package for managed or manual installation.
+
+After installation, launch **Asayn** from the Start menu. Use **Open workspace** to select a project directory. On first launch, configure your provider and API key in `~/.Asayn/api_config.toml`; the file can also be opened from the GUI agent settings.
+
+#### Linux x64
+
+Choose either package from the latest release:
+
+```bash
+# Debian / Ubuntu
+sudo apt install ./Asayn_*_amd64.deb
+
+# Portable AppImage
+chmod +x Asayn_*_amd64.AppImage
+./Asayn_*_amd64.AppImage
+```
+
+The desktop release currently provides Windows x64 and Linux x64 packages. macOS users can use the CLI release assets or build the desktop app from source.
+
+The GUI and CLI share configuration under `~/.Asayn/`, including providers, agents, skills, MCP servers, usage data, and the workspace session index.
+
+### Terminal CLI
+
+#### Linux
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/daife/Asayn/main/install.sh | bash
@@ -30,7 +62,7 @@ curl -sSL https://raw.githubusercontent.com/daife/Asayn/main/install.sh | bash
 
 The Linux installer downloads the latest GitHub release, installs `asayn` to `~/.local/bin`, updates your shell PATH when needed, and can optionally migrate Claude Code skills and MCP server configs.
 
-### Windows PowerShell
+#### Windows PowerShell
 
 ```powershell
 Invoke-WebRequest -Uri "https://raw.githubusercontent.com/daife/Asayn/main/install.ps1" -OutFile install.ps1 && .\install.ps1
@@ -44,15 +76,19 @@ curl -o install.bat https://raw.githubusercontent.com/daife/Asayn/main/install.b
 
 The Windows installer installs `asayn.exe` to `%USERPROFILE%\.local\bin`, updates the user PATH, and can run the same Claude Code migration flow. Current release assets provide Windows amd64 binaries.
 
-### macOS
+#### macOS
 
 Release assets include `asayn-darwin-amd64` and `asayn-darwin-arm64`. The current `install.sh` downloads Linux assets, so on macOS use the release asset manually or build from source.
 
-### Claude Code Migration
+#### Claude Code Migration
 
 The Linux and Windows installers can scan common Claude Code locations for skills and MCP server configs. Each discovered skill or MCP server is shown as a numbered item; duplicates are marked and skipped. Selected skills are copied to `~/.Asayn/skills/`, and selected MCP servers are written as individual JSON files under `~/.Asayn/mcp/`.
 
 ## Quick Start
+
+For the GUI, start **Asayn**, click **Open workspace**, and select the project directory you want the agent to use.
+
+For the terminal client:
 
 ```bash
 cd /path/to/your/project
