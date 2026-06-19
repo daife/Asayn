@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Bot, BrainCircuit, ChevronDown, ChevronRight, CircleStop, Copy, ExternalLink, Folder, FolderOpen, GitFork, Menu, MessageSquarePlus, PanelLeftClose, Pencil, RotateCcw, Send, Settings2, TerminalSquare, Wrench, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -10,6 +10,33 @@ type RunItem = { kind: "thinking" | "tool" | "error"; title: string; text: strin
 type TranscriptItem =
   | { kind: "user"; message: Message }
   | { kind: "assistant"; runItems: RunItem[]; content: string };
+type SlashSuggestion = { value: string; description: string; kind: "command" | "skill" | "mcp" };
+
+const BUILTIN_COMMANDS: SlashSuggestion[] = [
+  { value: "/new", description: "Start a new thread", kind: "command" },
+  { value: "/resume", description: "Resume a saved thread", kind: "command" },
+  { value: "/retry", description: "Retry the last request", kind: "command" },
+  { value: "/rename", description: "Rename the current thread", kind: "command" },
+  { value: "/fork", description: "Fork the current thread", kind: "command" },
+  { value: "/root_agent", description: "Choose the root agent", kind: "command" },
+  { value: "/model", description: "Choose the root agent", kind: "command" },
+  { value: "/model_config", description: "Open agent settings", kind: "command" },
+  { value: "/compact", description: "Compress conversation context", kind: "command" },
+  { value: "/help", description: "Show available commands", kind: "command" },
+  { value: "/exit", description: "Close Asayn", kind: "command" },
+];
+
+export function buildSlashSuggestions(prompt: string, catalog?: Catalog): SlashSuggestion[] {
+  if (!prompt.startsWith("/") || /\s/.test(prompt)) return [];
+  const query = prompt.slice(1).toLowerCase();
+  const dynamic: SlashSuggestion[] = [
+    ...(catalog?.skills || []).map((item) => ({ value: `/${item.Name}`, description: item.Description || "Use skill", kind: "skill" as const })),
+    ...(catalog?.mcp || []).map((item) => ({ value: `/${item.Name}`, description: item.Description || "Use MCP server", kind: "mcp" as const })),
+  ];
+  return [...BUILTIN_COMMANDS, ...dynamic]
+    .filter((item) => !query || item.value.slice(1).toLowerCase().includes(query) || item.description.toLowerCase().includes(query))
+    .slice(0, 8);
+}
 
 const compact = (n = 0) => n < 1_000 ? `${n}` : n < 1_000_000 ? `${(n / 1_000).toFixed(1)}K` : `${(n / 1_000_000).toFixed(1)}M`;
 export function buildTranscript(messages?: Message[] | null): TranscriptItem[] {
@@ -73,10 +100,20 @@ export default function App() {
   const [settings, setSettings] = useState(false);
   const [editing, setEditing] = useState<AgentConfig>();
   const [textDialog, setTextDialog] = useState<{ kind: "rename" | "fork"; title: string; label: string; value: string }>();
+  const [slashIndex, setSlashIndex] = useState(0);
+  const [slashDismissed, setSlashDismissed] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const conversationRef = useRef<HTMLElement>(null);
   const historyIndex = useRef(-1);
   const queueRef = useRef<string[]>([]);
+  const slashSuggestions = useMemo(() => slashDismissed ? [] : buildSlashSuggestions(prompt, catalog), [prompt, catalog, slashDismissed]);
+
+  useEffect(() => setSlashIndex(0), [prompt]);
+
+  const completeSlashSuggestion = (suggestion: SlashSuggestion) => {
+    setPrompt(`${suggestion.value} `);
+    setSlashDismissed(true);
+  };
 
   const refreshWorkspaceIndex = async (activePath?: string) => {
     const items = await request<Workspace[]>("workspace_index");
@@ -268,9 +305,15 @@ export default function App() {
       <section className="composer-wrap">
         {error && <div className="error-banner"><span>{error}</span><button onClick={() => setError("")}><X size={15}/></button></div>}
         <div className="composer">
-          <textarea value={prompt} rows={1} placeholder={running ? "Add a message to the queue…" : `Ask ${snapshot.agent.name} to inspect, build, or explain…`} onChange={(e) => { historyIndex.current = -1; setPrompt(e.target.value); }} onKeyDown={(e) => {
+          {slashSuggestions.length > 0 && <div className="command-menu" role="listbox" aria-label="Slash commands">{slashSuggestions.map((item, index) => <button type="button" role="option" aria-selected={index === slashIndex} className={index === slashIndex ? "active" : ""} key={`${item.kind}-${item.value}`} onMouseDown={(e) => e.preventDefault()} onClick={() => completeSlashSuggestion(item)}>
+            <span className="command-value">{item.value}</span><span className="command-description">{item.description}</span><small>{item.kind}</small>
+          </button>)}<footer><span><kbd>↑↓</kbd> navigate</span><span><kbd>Tab</kbd> complete</span><span><kbd>Esc</kbd> close</span></footer></div>}
+          <textarea value={prompt} rows={1} placeholder={running ? "Add a message to the queue…" : `Ask ${snapshot.agent.name} to inspect, build, or explain…`} onChange={(e) => { historyIndex.current = -1; setSlashDismissed(false); setPrompt(e.target.value); }} onKeyDown={(e) => {
             const history = snapshot.session.input_history || [];
-            if (e.key === "Escape") { e.preventDefault(); if (queueRef.current.length) { queueRef.current.pop(); setQueued([...queueRef.current]); } else if (running) request("cancel"); }
+            if (slashSuggestions.length && (e.key === "ArrowDown" || e.key === "ArrowUp")) { e.preventDefault(); setSlashIndex((current) => (current + (e.key === "ArrowDown" ? 1 : -1) + slashSuggestions.length) % slashSuggestions.length); }
+            else if (slashSuggestions.length && (e.key === "Tab" || e.key === "Enter")) { e.preventDefault(); completeSlashSuggestion(slashSuggestions[slashIndex] || slashSuggestions[0]); }
+            else if (e.key === "Escape" && slashSuggestions.length) { e.preventDefault(); setSlashDismissed(true); }
+            else if (e.key === "Escape") { e.preventDefault(); if (queueRef.current.length) { queueRef.current.pop(); setQueued([...queueRef.current]); } else if (running) request("cancel"); }
             else if (e.key === "ArrowUp" && !prompt.includes("\n") && history.length) { e.preventDefault(); historyIndex.current = Math.min(history.length - 1, historyIndex.current < 0 ? history.length - 1 : historyIndex.current - 1); setPrompt(history[historyIndex.current]); }
             else if (e.key === "ArrowDown" && historyIndex.current >= 0) { e.preventDefault(); historyIndex.current += 1; if (historyIndex.current >= history.length) { historyIndex.current = -1; setPrompt(""); } else setPrompt(history[historyIndex.current]); }
             else if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
