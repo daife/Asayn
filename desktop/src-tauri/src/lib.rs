@@ -73,6 +73,7 @@ pub fn run() {
     #[cfg(target_os = "linux")]
     retain_gbm_link();
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(BridgeState { child: Mutex::new(None), stdin: Mutex::new(None) })
         .invoke_handler(tauri::generate_handler![start_bridge, bridge_request])
         .on_window_event(|window, event| if let tauri::WindowEvent::Destroyed = event {

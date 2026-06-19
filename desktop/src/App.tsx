@@ -1,18 +1,26 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Bot, BrainCircuit, ChevronDown, CircleStop, Copy, GitFork, Menu, MessageSquarePlus, PanelLeftClose, Pencil, RotateCcw, Send, Settings2, TerminalSquare, Wrench, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Bot, BrainCircuit, ChevronDown, ChevronRight, CircleStop, Copy, Folder, FolderOpen, GitFork, Menu, MessageSquarePlus, PanelLeftClose, Pencil, RotateCcw, Send, Settings2, TerminalSquare, Wrench, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { open } from "@tauri-apps/plugin-dialog";
 import { connect, onAgentEvent, request } from "./bridge";
 import Markdown from "./Markdown";
-import type { AgentConfig, AgentEvent, Catalog, Message, Session, Snapshot } from "./types";
+import type { AgentConfig, AgentEvent, Catalog, Message, Session, Snapshot, Workspace } from "./types";
 
 type RunItem = { kind: "thinking" | "tool" | "error"; title: string; text: string; active?: boolean };
 
 const compact = (n = 0) => n < 1_000 ? `${n}` : n < 1_000_000 ? `${(n / 1_000).toFixed(1)}K` : `${(n / 1_000_000).toFixed(1)}M`;
 const visibleMessages = (messages?: Message[] | null) => (messages || []).filter((m) => m.role === "user" || (m.role === "assistant" && (m.content || m.reasoning_content)));
+const normalizedPath = (path: string) => {
+  const value = path.replace(/\\/g, "/").replace(/\/$/, "");
+  return /^[a-z]:/i.test(value) ? value.toLowerCase() : value;
+};
+const samePath = (left: string, right: string) => normalizedPath(left) === normalizedPath(right);
 
 export default function App() {
   const [snapshot, setSnapshot] = useState<Snapshot>();
   const [catalog, setCatalog] = useState<Catalog>();
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [expandedWorkspaces, setExpandedWorkspaces] = useState<Set<string>>(new Set());
   const [prompt, setPrompt] = useState("");
   const [running, setRunning] = useState(false);
   const [stream, setStream] = useState("");
@@ -23,19 +31,37 @@ export default function App() {
   const [settings, setSettings] = useState(false);
   const [editing, setEditing] = useState<AgentConfig>();
   const endRef = useRef<HTMLDivElement>(null);
+  const conversationRef = useRef<HTMLElement>(null);
   const historyIndex = useRef(-1);
   const queueRef = useRef<string[]>([]);
 
-  const refresh = async () => setSnapshot(await request<Snapshot>("snapshot"));
+  const refreshWorkspaceIndex = async (activePath?: string) => {
+    const items = await request<Workspace[]>("workspace_index");
+    setWorkspaces(items);
+    if (activePath) setExpandedWorkspaces((current) => new Set([...current, activePath]));
+  };
+
+  const refresh = async () => {
+    const next = await request<Snapshot>("snapshot");
+    setSnapshot(next);
+    await refreshWorkspaceIndex(next.workspace);
+  };
 
   useEffect(() => {
     const off = onAgentEvent((event) => consumeEvent(event));
-    connect().then(() => request<Snapshot>("initialize", { workspace: "" })).then(setSnapshot)
-      .then(() => request<Catalog>("catalog")).then(setCatalog).catch((e) => setError(String(e)));
+    connect().then(async () => {
+      const next = await request<Snapshot>("initialize", { workspace: "" });
+      setSnapshot(next);
+      const [nextCatalog] = await Promise.all([request<Catalog>("catalog"), refreshWorkspaceIndex(next.workspace)]);
+      setCatalog(nextCatalog);
+    }).catch((e) => setError(String(e)));
     return off;
   }, []);
 
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: running ? "smooth" : "auto" }); }, [snapshot?.session.messages, stream, runItems, running]);
+  useEffect(() => {
+    const conversation = conversationRef.current;
+    if (conversation) conversation.scrollTo({ top: conversation.scrollHeight, behavior: running ? "smooth" : "auto" });
+  }, [snapshot?.session.messages, stream, runItems, running]);
 
   function consumeEvent(event: AgentEvent) {
     if (event.kind === "assistant_delta") setStream((text) => text + (event.text || ""));
@@ -93,8 +119,42 @@ export default function App() {
   }
 
   async function action(name: string, payload?: unknown) {
-    try { setError(""); setSnapshot(await request<Snapshot>(name, payload)); }
+    try {
+      setError("");
+      const next = await request<Snapshot>(name, payload);
+      setSnapshot(next);
+      await refreshWorkspaceIndex(next.workspace);
+    }
     catch (e) { setError(String(e)); }
+  }
+
+  async function switchWorkspace(workspace: string, sessionId?: string) {
+    if (running) { setError("Stop the current agent turn before switching workspaces."); return; }
+    try {
+      setError("");
+      const next = await request<Snapshot>("switch_workspace", { workspace, session_id: sessionId || "" });
+      setSnapshot(next);
+      const [nextCatalog] = await Promise.all([request<Catalog>("catalog"), refreshWorkspaceIndex(next.workspace)]);
+      setCatalog(nextCatalog);
+    } catch (e) { setError(String(e)); }
+  }
+
+  async function chooseWorkspace() {
+    const selected = await open({ directory: true, multiple: false, title: "Open an Asayn workspace" });
+    if (typeof selected === "string") await switchWorkspace(selected);
+  }
+
+  async function openIndexedSession(workspace: Workspace, session: Session) {
+    if (samePath(workspace.path, snapshot?.workspace || "")) await action("load_session", { id: session.id });
+    else await switchWorkspace(workspace.path, session.id);
+  }
+
+  function toggleWorkspace(path: string) {
+    setExpandedWorkspaces((current) => {
+      const next = new Set(current);
+      if (next.has(path)) next.delete(path); else next.add(path);
+      return next;
+    });
   }
 
   async function selectAgent(name: string) {
@@ -114,11 +174,24 @@ export default function App() {
   return <div className={`app ${sidebar ? "" : "sidebar-closed"}`}>
     <aside className="sidebar">
       <header className="brand"><div className="brand-mark">A</div><div><strong>ASAYN</strong><span>LOCAL AGENT WORKBENCH</span></div><button onClick={() => setSidebar(false)} title="Hide sidebar"><PanelLeftClose size={17}/></button></header>
-      <button className="new-chat" onClick={() => action("new_session", {})}><MessageSquarePlus size={17}/> New thread <kbd>⌘ N</kbd></button>
-      <div className="session-label"><span>Threads</span><span>{snapshot.sessions.length}</span></div>
-      <nav className="sessions">{snapshot.sessions.map((session) => <button key={session.id} className={session.id === snapshot.session.id ? "active" : ""} onClick={() => action("load_session", { id: session.id })}>
-        <span className="session-name">{session.name}</span><time>{relativeTime(session.updated_at)}</time>
-      </button>)}</nav>
+      <div className="sidebar-actions">
+        <button className="open-workspace" onClick={chooseWorkspace}><FolderOpen size={17}/> Open workspace</button>
+        <button className="new-chat" onClick={() => action("new_session", {})}><MessageSquarePlus size={17}/> New thread</button>
+      </div>
+      <div className="session-label"><span>Workspaces</span><span>{workspaces.length}</span></div>
+      <nav className="workspaces">{workspaces.map((workspace) => {
+        const expanded = expandedWorkspaces.has(workspace.path);
+        const activeWorkspace = samePath(workspace.path, snapshot.workspace);
+        return <section className={`workspace-group ${activeWorkspace ? "current" : ""} ${workspace.available ? "" : "unavailable"}`} key={workspace.path}>
+          <button className="workspace-row" disabled={!workspace.available} onClick={() => toggleWorkspace(workspace.path)} title={workspace.path}>
+            {expanded ? <ChevronDown size={13}/> : <ChevronRight size={13}/>}<Folder size={14}/>
+            <span>{workspace.name}</span><small>{workspace.sessions.length}</small>
+          </button>
+          {expanded && <div className="workspace-sessions">{workspace.sessions.length ? workspace.sessions.map((session) => <button key={session.id} className={activeWorkspace && session.id === snapshot.session.id ? "active" : ""} onClick={() => openIndexedSession(workspace, session)}>
+            <span className="session-name">{session.name}</span><time>{relativeTime(session.updated_at)}</time>
+          </button>) : <p>No saved threads</p>}</div>}
+        </section>;
+      })}</nav>
       <footer className="sidebar-footer"><div className="workspace-dot"/><div><span>Workspace</span><strong title={snapshot.workspace}>{snapshot.workspace.split(/[\\/]/).pop()}</strong></div><button onClick={() => { setEditing({ ...snapshot.agent }); setSettings(true); }}><Settings2 size={18}/></button></footer>
     </aside>
 
@@ -135,7 +208,7 @@ export default function App() {
         </div>
       </header>
 
-      <section className="conversation">
+      <section className="conversation" ref={conversationRef}>
         {messages.length === 0 && !running ? <EmptyState agent={snapshot.agent}/> : messages.map((message, i) => <MessageView key={`${i}-${message.role}`} message={message}/>) }
         {(running || stream || runItems.length > 0) && <article className="turn assistant-turn live">
           <div className="speaker"><div className="speaker-icon"><Bot size={16}/></div><strong>Asayn</strong><span className="live-pill">LIVE</span></div>
