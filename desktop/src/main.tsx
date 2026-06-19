@@ -14,7 +14,7 @@ class AppErrorBoundary extends Component<{ children: ReactNode }, { error?: Erro
 
   render() {
     if (this.state.error) {
-      return <div className="fatal-error"><div className="boot-mark">A</div><h1>Asayn could not render the application.</h1><pre>{this.state.error.message}</pre><p>Restart the application. If the problem persists, include this message in a bug report.</p></div>;
+      return <div className="fatal-error"><div className="boot-mark" aria-label="Asayn"/><h1>Asayn could not render the application.</h1><pre>{this.state.error.message}</pre><p>Restart the application. If the problem persists, include this message in a bug report.</p></div>;
     }
     return this.props.children;
   }
