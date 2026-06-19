@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Bot, BrainCircuit, ChevronDown, ChevronRight, CircleStop, Copy, Folder, FolderOpen, GitFork, Menu, MessageSquarePlus, PanelLeftClose, Pencil, RotateCcw, Send, Settings2, TerminalSquare, Wrench, X } from "lucide-react";
+import { Bot, BrainCircuit, ChevronDown, ChevronRight, CircleStop, Copy, ExternalLink, Folder, FolderOpen, GitFork, Menu, MessageSquarePlus, PanelLeftClose, Pencil, RotateCcw, Send, Settings2, TerminalSquare, Wrench, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import { connect, onAgentEvent, request } from "./bridge";
@@ -9,7 +9,7 @@ import type { AgentConfig, AgentEvent, Catalog, Message, Session, Snapshot, Work
 type RunItem = { kind: "thinking" | "tool" | "error"; title: string; text: string; active?: boolean };
 
 const compact = (n = 0) => n < 1_000 ? `${n}` : n < 1_000_000 ? `${(n / 1_000).toFixed(1)}K` : `${(n / 1_000_000).toFixed(1)}M`;
-const visibleMessages = (messages?: Message[] | null) => (messages || []).filter((m) => m.role === "user" || (m.role === "assistant" && (m.content || m.reasoning_content)));
+const visibleMessages = (messages?: Message[] | null) => (messages || []).filter((m) => m.role === "user" || m.role === "tool" || (m.role === "assistant" && (m.content || m.reasoning_content || (m.tool_calls && m.tool_calls.length > 0))));
 const normalizedPath = (path: string) => {
   const value = path.replace(/\\/g, "/").replace(/\/$/, "");
   return /^[a-z]:/i.test(value) ? value.toLowerCase() : value;
@@ -246,9 +246,13 @@ function EmptyState({ agent }: { agent: AgentConfig }) {
 function MessageView({ message }: { message: Message }) {
   const [copied, setCopied] = useState(false);
   if (message.role === "user") return <article className="turn user-turn"><div className="speaker"><div className="speaker-icon user">YOU</div><strong>You</strong></div><div className="user-copy">{message.content}</div></article>;
+  if (message.role === "tool") return <article className="turn tool-turn"><div className="speaker"><div className="speaker-icon tool"><TerminalSquare size={16}/></div><strong>Tool result</strong><span className="tool-call-id">{message.tool_call_id?.slice(0, 8)}</span></div><pre className="tool-result">{message.content}</pre></article>;
+  const hasToolCalls = message.tool_calls && message.tool_calls.length > 0;
   return <article className="turn assistant-turn"><div className="speaker"><div className="speaker-icon"><Bot size={16}/></div><strong>Asayn</strong></div>
     {message.reasoning_content && <details className="reasoning"><summary><BrainCircuit size={15}/> Reasoning</summary><div>{message.reasoning_content}</div></details>}
-    <Markdown>{message.content}</Markdown><button className="copy" onClick={() => { navigator.clipboard.writeText(message.content); setCopied(true); setTimeout(() => setCopied(false), 1200); }}><Copy size={13}/>{copied ? "Copied" : "Copy"}</button>
+    {hasToolCalls && <div className="run-stack">{message.tool_calls!.map((tc) => <details className="run-card" key={tc.id}><summary><TerminalSquare size={15}/><span>{tc.function.name}</span><ChevronDown size={14}/></summary><pre>{tc.function.arguments}</pre></details>)}</div>}
+    {message.content && <Markdown>{message.content}</Markdown>}
+    {message.content && <button className="copy" onClick={() => { navigator.clipboard.writeText(message.content); setCopied(true); setTimeout(() => setCopied(false), 1200); }}><Copy size={13}/>{copied ? "Copied" : "Copy"}</button>}
   </article>;
 }
 
@@ -267,7 +271,7 @@ function Settings({ config, catalog, onClose, onSave }: { config: AgentConfig; c
       <div className="field-row"><label>Reasoning effort<select value={draft.reasoning_effort} onChange={(e) => setDraft({ ...draft, reasoning_effort: e.target.value })}>{["none", "low", "medium", "high", "max"].map((x) => <option key={x}>{x}</option>)}</select></label><label>Compact at<input type="number" min="10" max="100" value={draft.auto_compact_threshold_percent} onChange={(e) => setDraft({ ...draft, auto_compact_threshold_percent: Number(e.target.value) })}/></label></div>
       <div className="switches"><Switch label="Thinking stream" value={draft.thinking_enabled} set={(v) => setDraft({ ...draft, thinking_enabled: v })}/><Switch label="Parallel shell" value={draft.allow_parallel_shell} set={(v) => setDraft({ ...draft, allow_parallel_shell: v, allow_interactive_shell: v && draft.allow_interactive_shell })}/><Switch label="Interactive shell" value={draft.allow_interactive_shell} set={(v) => setDraft({ ...draft, allow_interactive_shell: v, allow_parallel_shell: v || draft.allow_parallel_shell })}/></div>
       <Picker title="Visible skills" items={catalog.skills} selected={draft.visible_skills} toggle={(x) => toggle("visible_skills", x)}/><Picker title="Visible MCP servers" items={catalog.mcp} selected={draft.visible_mcp} toggle={(x) => toggle("visible_mcp", x)}/>
-    </div><footer><button className="secondary" onClick={onClose}>Cancel</button><button disabled={saving} onClick={async () => { setSaving(true); await onSave(draft); }}>{saving ? "Saving…" : "Save profile"}</button></footer>
+    </div><footer><button className="secondary api-config" onClick={() => request("open_path", { path: catalog.api_config_path })} title="Open API config file"><ExternalLink size={13}/>API config</button><button className="secondary" onClick={onClose}>Cancel</button><button disabled={saving} onClick={async () => { setSaving(true); await onSave(draft); }}>{saving ? "Saving…" : "Save profile"}</button></footer>
   </section></div>;
 }
 

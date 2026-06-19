@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -243,7 +244,7 @@ func (b *bridge) dispatch(req request) (any, error) {
 		roots, _ := config.ListAgentInfos(ctx.Paths, config.RootAgentKind)
 		skills, _ := config.ListSkills(ctx.Paths)
 		mcps, _ := config.ListMCPServerInfos(ctx.Paths)
-		return map[string]any{"agents": roots, "skills": skills, "mcp": mcps, "providers": ctx.API.Providers, "config": ctx.Root}, nil
+		return map[string]any{"agents": roots, "skills": skills, "mcp": mcps, "providers": ctx.API.Providers, "config": ctx.Root, "api_config_path": ctx.Paths.HomePath("api_config.toml")}, nil
 	case "save_agent_config":
 		ctx, _, err := b.readyIdle()
 		if err != nil {
@@ -267,6 +268,15 @@ func (b *bridge) dispatch(req request) (any, error) {
 			}
 		}
 		return b.snapshot()
+	case "open_path":
+		var p struct {
+			Path string `json:"path"`
+		}
+		_ = json.Unmarshal(req.Payload, &p)
+		if p.Path != "" {
+			exec.Command("cmd", "/c", "start", "", p.Path).Start()
+		}
+		return nil, nil
 	case "ask", "retry", "compact":
 		_, _, err := b.readyIdle()
 		if err != nil {

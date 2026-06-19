@@ -112,6 +112,8 @@ func (m *MCPManager) SetVisible(names []string) {
 	m.Reload()
 }
 
+// Reload re-syncs visible servers from config. It starts newly-visible servers
+// and retries failed ones. Call this before reading tool schemas.
 func (m *MCPManager) Reload() {
 	m.mu.Lock()
 	visible := append([]string(nil), m.visible...)
@@ -130,6 +132,7 @@ func (m *MCPManager) Reload() {
 	}
 
 	m.mu.Lock()
+	// Remove servers no longer visible or whose config changed.
 	for name, rt := range m.servers {
 		info, exists := byName[name]
 		if !visibleSet[name] || !exists || rt.signature != mcpServerSignature(info) {
@@ -137,8 +140,24 @@ func (m *MCPManager) Reload() {
 			delete(m.servers, name)
 		}
 	}
+	// Start or retry visible servers.
 	for _, name := range visible {
-		if _, ok := m.servers[name]; ok {
+		rt, exists := m.servers[name]
+		if exists {
+			// Retry servers that previously failed or never finished starting.
+			if rt.err != "" || rt.client == nil {
+				info, ok := byName[name]
+				if !ok {
+					rt.err = fmt.Sprintf("mcp server %q not found", name)
+					continue
+				}
+				rt.stop()
+				rt2 := &mcpServerRuntime{info: info, signature: mcpServerSignature(info)}
+				m.servers[name] = rt2
+				m.mu.Unlock()
+				rt2.start(m.paths)
+				m.mu.Lock()
+			}
 			continue
 		}
 		info, ok := byName[name]
@@ -146,10 +165,10 @@ func (m *MCPManager) Reload() {
 			m.servers[name] = &mcpServerRuntime{err: fmt.Sprintf("mcp server %q not found", name)}
 			continue
 		}
-		rt := &mcpServerRuntime{info: info, signature: mcpServerSignature(info)}
-		m.servers[name] = rt
+		rt3 := &mcpServerRuntime{info: info, signature: mcpServerSignature(info)}
+		m.servers[name] = rt3
 		m.mu.Unlock()
-		rt.start(m.paths)
+		rt3.start(m.paths)
 		m.mu.Lock()
 	}
 	m.rebuildToolMapLocked()
