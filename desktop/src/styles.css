@@ -146,10 +146,51 @@ main{min-width:0;min-height:0;overflow:hidden;display:grid;grid-template-rows:58
 .text-dialog>footer button { border:0;padding:10px 16px;font-size:11px;font-weight:700;cursor:pointer; }
 .text-dialog>footer button:disabled { opacity:.45;cursor:default; }
 
+.command-menu { position:absolute;left:0;right:0;bottom:calc(100% + 10px);z-index:8;padding:7px;border:1px solid #2c3d53;border-radius:14px;background:#101824f2;box-shadow:0 22px 70px #02050a99,inset 0 1px #ffffff0a;backdrop-filter:blur(18px);overflow:hidden;animation:command-in .16s cubic-bezier(.16,1,.3,1) both; }
+.command-menu>button { width:100%;min-height:40px;display:grid;grid-template-columns:150px minmax(0,1fr) auto;align-items:center;gap:12px;padding:7px 10px;border:0;border-radius:8px;background:transparent;color:#91a2b6;text-align:left;cursor:pointer;transition:background .14s,color .14s; }
+.command-menu>button:hover,.command-menu>button.active { background:#19283c;color:#edf5fd; }
+.command-value { color:#72c0ff;font:500 12px DM Mono;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
+.command-description { min-width:0;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
+.command-menu small { color:#65768b;font:9px DM Mono;text-transform:uppercase;letter-spacing:.08em; }
+.command-menu footer { height:29px;display:flex;align-items:end;justify-content:flex-end;gap:14px;padding:0 8px 2px;border-top:1px solid #243247;color:#66778b;font:9px DM Mono; }
+.command-menu kbd { color:#a8b8ca;font:9px DM Mono; }
+
+/* Readability scale: body 15px, controls 12-13px, metadata 9-10px. */
+.brand span { font-size:9px; }
+.sidebar-actions button { font-size:12px; }
+.sidebar-actions .open-workspace { font-size:13px; }
+.session-label { font-size:10px; }
+.workspace-row span,.session-name { font-size:12px; }
+.workspace-row small,.workspace-sessions time,.workspace-sessions p { font-size:10px; }
+.sidebar-footer span { font-size:9px; }
+.sidebar-footer strong { font-size:12px; }
+.thread-title strong { font-size:14px; }
+.thread-title span { font-size:10px; }
+.agent-select select { font-size:12px; }
+.speaker strong { font-size:12px; }
+.user-copy { font-size:15px; }
+.markdown { font-size:15px;line-height:1.78; }
+.markdown code { font-size:13px; }
+.run-card summary { font-size:11px; }
+.run-card pre { font-size:11px; }
+.thinking-line { font-size:12px; }
+.copy { font-size:11px; }
+.empty>p { font-size:14px; }
+.starter-grid span { font-size:11px; }
+.composer textarea { font-size:15px; }
+.composer-meta,.composer-meta kbd,.statusbar { font-size:9px; }
+.error-banner { font-size:11px; }
+.settings label,.text-dialog>label { font-size:10px; }
+.settings textarea,.settings select,.settings input,.text-dialog input { font-size:12px; }
+.picker button { font-size:11px; }
+.picker small { font-size:9px; }
+.settings>footer button,.text-dialog>footer button { font-size:12px; }
+
 .boot,.fatal-error { background:radial-gradient(circle at 50% 30%,#142a45,transparent 32%),#0b0f16;color:#78899e; }
 .boot-mark { width:54px;height:54px; }
 .sidebar ::-webkit-scrollbar-thumb,.conversation::-webkit-scrollbar-thumb { background:#2b3a4e;border-radius:10px; }
 
 @keyframes fade-in { from { opacity:0 } }
 @keyframes dialog-in { from { opacity:0;transform:translateY(8px) scale(.985) } }
+@keyframes command-in { from { opacity:0;transform:translateY(6px) scale(.99) } }
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important}}

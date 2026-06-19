@@ -6,6 +6,12 @@ use std::{
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 #[cfg(target_os = "linux")]
 #[link(name = "gbm")]
 extern "C" { fn gbm_bo_create_with_modifiers2(); }
@@ -41,6 +47,8 @@ fn start_bridge(app: AppHandle, state: State<BridgeState>, workspace: String) ->
         cmd
     };
     command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
     if !workspace.trim().is_empty() { command.current_dir(&workspace); }
     let mut child = command.spawn().map_err(|e| format!("start Go bridge: {e}"))?;
     let stdin = child.stdin.take().ok_or("bridge stdin unavailable")?;
