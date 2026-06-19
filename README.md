@@ -198,6 +198,20 @@ Sub-agents use a basic executor: file/search/skill/synchronous shell plus visibl
 
 ## Build From Source
 
+### Desktop app (Tauri 2)
+
+The optional desktop client lives in `desktop/`. It uses React and TypeScript for the interface while retaining the Go agent engine as a bundled sidecar, so CLI and desktop sessions, tools, skills, MCP servers, and provider configuration use the same implementation.
+
+```bash
+cd desktop
+npm install
+npm run tauri dev
+```
+
+See `desktop/README.md` for platform prerequisites and release builds.
+
+### Terminal app
+
 Requirements:
 
 - Go 1.24 or newer.
