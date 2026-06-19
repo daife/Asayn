@@ -112,14 +112,14 @@ jobs:
           generate_release_notes: true
           body: |
             ## Desktop application
-            This release introduces the Tauri 2 desktop client while retaining the existing Go agent engine.
+            This release includes the Tauri 2 desktop client backed by the local Go agent engine.
 
             - Windows x64: NSIS setup (`.exe`) and MSI installer (`.msi`)
             - Linux x64: Debian package (`.deb`) and AppImage (`.AppImage`)
             - Existing CLI binaries remain available for Linux, macOS, and Windows.
 
             ## 桌面应用
-            本版本新增 Tauri 2 桌面客户端，并继续使用原有 Go Agent 引擎。
+            本版本包含由本地 Go Agent 引擎驱动的 Tauri 2 桌面客户端。
 
             - Windows x64：NSIS 安装程序和 MSI 安装包
             - Linux x64：DEB 安装包和 AppImage

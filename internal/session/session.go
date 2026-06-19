@@ -57,7 +57,10 @@ func (s *Store) New(name, rootAgent string) (*Session, error) {
 		RootAgent:     rootAgent,
 		CreatedAt:     now,
 		UpdatedAt:     now,
+		Messages:      []types.ChatMessage{},
 		VisibleSkills: map[string]bool{},
+		SubAgents:     []SubAgentRef{},
+		InputHistory:  []string{},
 	}
 	return sess, s.Save(sess)
 }
@@ -70,6 +73,7 @@ func shortSessionID(id string) string {
 }
 
 func (s *Store) Save(sess *Session) error {
+	normalizeCollections(sess)
 	sess.UpdatedAt = time.Now()
 	dir := s.sessionDir(sess.ID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -136,6 +140,7 @@ func (s *Store) Fork(src *Session, name string) (*Session, error) {
 	cp.UpdatedAt = cp.CreatedAt
 	cp.Messages = append([]types.ChatMessage(nil), src.Messages...)
 	cp.SubAgents = append([]SubAgentRef(nil), src.SubAgents...)
+	cp.InputHistory = append([]string(nil), src.InputHistory...)
 	cp.VisibleSkills = map[string]bool{}
 	for k, v := range src.VisibleSkills {
 		cp.VisibleSkills[k] = v
@@ -235,7 +240,23 @@ func (s *Store) loadByID(id string) (*Session, error) {
 	if err := json.Unmarshal(data, &sess); err != nil {
 		return nil, err
 	}
+	normalizeCollections(&sess)
 	return &sess, nil
+}
+
+func normalizeCollections(sess *Session) {
+	if sess.Messages == nil {
+		sess.Messages = []types.ChatMessage{}
+	}
+	if sess.VisibleSkills == nil {
+		sess.VisibleSkills = map[string]bool{}
+	}
+	if sess.SubAgents == nil {
+		sess.SubAgents = []SubAgentRef{}
+	}
+	if sess.InputHistory == nil {
+		sess.InputHistory = []string{}
+	}
 }
 
 func (s *Store) sessionDir(id string) string {
