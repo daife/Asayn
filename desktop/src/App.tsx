@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bot, BrainCircuit, ChevronDown, ChevronRight, CircleStop, Copy, ExternalLink, Folder, FolderOpen, GitFork, Menu, MessageSquarePlus, PanelLeftClose, Pencil, RotateCcw, Send, Settings2, TerminalSquare, Wrench, X } from "lucide-react";
+import { Bot, BrainCircuit, ChevronDown, ChevronRight, CircleStop, Copy, ExternalLink, Folder, FolderOpen, GitFork, Maximize2, Menu, MessageSquarePlus, Minus, PanelLeftClose, Pencil, RotateCcw, Send, Settings2, TerminalSquare, Wrench, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import { connect, onAgentEvent, request } from "./bridge";
@@ -280,12 +280,18 @@ export default function App() {
       <header className="topbar">
         {!sidebar && <button className="icon-button" onClick={() => setSidebar(true)}><Menu size={19}/></button>}
         <div className="thread-title"><strong>{snapshot.session.name}</strong><span>{snapshot.session.id.slice(0, 8)}</span></div>
+        <div className="topbar-drag" data-tauri-drag-region onDoubleClick={() => getCurrentWindow().toggleMaximize()} />
         <div className="top-actions">
           <label className="agent-select"><Bot size={15}/><select value={snapshot.agent.name} onChange={(e) => selectAgent(e.target.value)}>{catalog?.agents.map((a) => <option key={a.Name}>{a.Name}</option>)}</select><ChevronDown size={13}/></label>
           <button className="icon-button" title="Rename" onClick={() => setTextDialog({ kind: "rename", title: "Rename thread", label: "Thread name", value: snapshot.session.name })}><Pencil size={16}/></button>
           <button className="icon-button" title="Fork" onClick={() => setTextDialog({ kind: "fork", title: "Fork thread", label: "New thread name", value: `${snapshot.session.name}-fork` })}><GitFork size={16}/></button>
           <button className="icon-button" title="Compact context" disabled={running} onClick={compactNow}><BrainCircuit size={16}/></button>
           <button className="icon-button" title="Retry" disabled={running} onClick={() => send(true)}><RotateCcw size={16}/></button>
+          <div className="window-controls" aria-label="Window controls">
+            <button className="window-control" title="Minimize" onClick={() => getCurrentWindow().minimize()}><Minus size={15}/></button>
+            <button className="window-control" title="Maximize" onClick={() => getCurrentWindow().toggleMaximize()}><Maximize2 size={13}/></button>
+            <button className="window-control close" title="Close" onClick={() => getCurrentWindow().close()}><X size={15}/></button>
+          </div>
         </div>
       </header>
 

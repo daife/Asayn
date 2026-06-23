@@ -456,3 +456,123 @@ main {
   background: #351f25bd;
   backdrop-filter: blur(20px);
 }
+
+/* Frameless window correction: the app fills the WebView, while internal layers carry the transparency. */
+body {
+  background: transparent;
+}
+
+.app {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  border-radius: 18px;
+  border-color: #d6ebff1d;
+  background:
+    radial-gradient(circle at 78% -8%, #12375a 0, transparent 36%),
+    linear-gradient(145deg, #08101a 0%, #0b111b 48%, #070b12 100%);
+  box-shadow:
+    0 0 0 1px #ffffff0a inset,
+    0 1px 0 #ffffff16 inset;
+  backdrop-filter: none;
+}
+
+.sidebar {
+  background:
+    radial-gradient(circle at 0% 0%, #2d9bff1c, transparent 36%),
+    linear-gradient(180deg, #0b14228a, #07101a52);
+  border-right-color: #d6ebff1c;
+  backdrop-filter: blur(26px) saturate(1.2);
+}
+
+.sidebar-actions button {
+  backdrop-filter: none;
+}
+
+.sidebar-actions .open-workspace {
+  background: #15253a;
+  border-color: #284a70;
+}
+
+.sidebar-actions .new-chat {
+  background: #131b28;
+  border-color: #263348;
+}
+
+main {
+  background:
+    radial-gradient(circle at 84% 3%, #2b8df01f, transparent 30%),
+    linear-gradient(180deg, #09101a 0%, #0a1018 100%);
+}
+
+.topbar {
+  -webkit-app-region: drag;
+  background: linear-gradient(180deg, #0b111bd9, #0b111ba6);
+}
+
+.topbar button,
+.topbar select,
+.topbar label,
+.top-actions,
+.window-controls {
+  -webkit-app-region: no-drag;
+}
+
+.topbar-drag {
+  align-self: stretch;
+  flex: 1 1 auto;
+  min-width: 32px;
+}
+
+.top-actions {
+  margin-left: 0;
+}
+
+.window-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 10px;
+  padding-left: 10px;
+  border-left: 1px solid #d6ebff1c;
+}
+
+.window-control {
+  width: 34px;
+  height: 30px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #8092a9;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: background .16s, color .16s, transform .12s;
+}
+
+.window-control:hover {
+  background: #22365087;
+  color: #eef6ff;
+}
+
+.window-control:active {
+  transform: scale(.94);
+}
+
+.window-control.close:hover {
+  background: #d84f5f;
+  color: #fff;
+}
+
+.conversation {
+  background: transparent;
+}
+
+.composer-wrap {
+  background: linear-gradient(180deg, transparent, #07101bea 48%, #07101b);
+}
+
+.boot,
+.fatal-error {
+  background: transparent;
+}
