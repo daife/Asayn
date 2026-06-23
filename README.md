@@ -229,7 +229,7 @@ Type `/` in the TUI to see fuzzy command suggestions. `Tab` completes a selected
 
 During a running agent turn, pressing Enter queues the typed message. Pressing Esc cancels the last queued message, or interrupts the current turn if the queue is empty.
 
-On Windows, `/model_config` and the GUI Agent settings include a **Git Bash** shell option for root agents. When enabled, Asayn checks that Git Bash is available as `bash.exe` in `PATH`; if it is not, the setting is rejected and the UI asks you to install Git for Windows from <https://git-scm.com/download/win> and add Git Bash to PATH. Once enabled, shell tools are described to the model as Git Bash commands and run through Git Bash instead of PowerShell.
+On Windows, `/model_config` and the GUI Agent settings include a **Git Bash** shell option for root agents. It is strongly recommended to enable Git Bash — models are generally far more proficient with bash shell commands than PowerShell. When enabled, Asayn checks that Git Bash is installed at the default path `C:\Program Files\Git\bin\bash.exe`; if it is not found, the setting is rejected and the UI asks you to install Git for Windows from <https://git-scm.com/download/win> using the default installation settings. Once enabled, shell tools are described to the model as Git Bash commands and run through Git Bash instead of PowerShell.
 
 ## Tools and Capabilities
 

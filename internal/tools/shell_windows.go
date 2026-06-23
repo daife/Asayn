@@ -5,12 +5,15 @@ package tools
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+const gitBashDefaultPath = "C:\\Program Files\\Git\\bin\\bash.exe"
 
 func (m *ShellManager) start(command string, interactive bool) (*shellRun, error) {
 	useGitBash := m.usesGitBash()
@@ -69,19 +72,18 @@ func (m *ShellManager) usesGitBash() bool {
 }
 
 func GitBashPath() (string, error) {
-	bash, err := exec.LookPath("bash.exe")
-	if err != nil {
-		return "", fmt.Errorf("Git Bash is not available in PATH. Install Git for Windows from https://git-scm.com/download/win and add Git Bash to PATH")
+	if _, err := os.Stat(gitBashDefaultPath); err == nil {
+		out, err := exec.Command(gitBashDefaultPath, "-lc", "uname -o").CombinedOutput()
+		if err != nil {
+			return "", fmt.Errorf("Git Bash check failed for %s: %w", gitBashDefaultPath, err)
+		}
+		env := strings.ToLower(strings.TrimSpace(string(out)))
+		if strings.Contains(env, "msys") || strings.Contains(env, "mingw") {
+			return gitBashDefaultPath, nil
+		}
+		return "", fmt.Errorf("%s is not Git Bash. Please install Git for Windows from https://git-scm.com/download/win using default settings", gitBashDefaultPath)
 	}
-	out, err := exec.Command(bash, "-lc", "uname -o").CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("Git Bash check failed for %s: %w", bash, err)
-	}
-	env := strings.ToLower(strings.TrimSpace(string(out)))
-	if !strings.Contains(env, "msys") && !strings.Contains(env, "mingw") {
-		return "", fmt.Errorf("bash.exe in PATH is not Git Bash. Install Git for Windows from https://git-scm.com/download/win and add Git Bash to PATH")
-	}
-	return bash, nil
+	return "", fmt.Errorf("Git Bash not found at %s. Please install Git for Windows from https://git-scm.com/download/win using the default installation path (C:\\Program Files\\Git)", gitBashDefaultPath)
 }
 
 func GitBashAvailable() error {
