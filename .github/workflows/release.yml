@@ -93,9 +93,60 @@ jobs:
           path: release/*
           if-no-files-found: error
 
+  electron_desktop:
+    name: Electron ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            os: windows-latest
+            args: --win nsis msi --x64
+            artifact: electron-windows-x64
+          - name: Linux x64
+            os: ubuntu-22.04
+            args: --linux AppImage deb --x64
+            artifact: electron-linux-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: desktop
+        run: npm ci
+      - name: Build Electron packages
+        working-directory: desktop
+        run: npm run build:electron -- ${{ matrix.args }}
+      - name: Collect Linux Electron packages
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          mkdir -p release
+          find desktop/electron-dist -maxdepth 1 -type f \( -name '*.deb' -o -name '*.AppImage' \) -exec cp {} release/ \;
+      - name: Collect Windows Electron packages
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release | Out-Null
+          Get-ChildItem desktop/electron-dist -File |
+            Where-Object { $_.Extension -in '.msi', '.exe' } |
+            Copy-Item -Destination release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: release/*
+          if-no-files-found: error
+
   publish:
     name: Publish release
-    needs: [cli, desktop]
+    needs: [cli, desktop, electron_desktop]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -116,6 +167,7 @@ jobs:
 
             - Windows x64: NSIS setup (`.exe`) and MSI installer (`.msi`)
             - Linux x64: Debian package (`.deb`) and AppImage (`.AppImage`)
+            - Electron fallback builds are also published for Windows x64 and Linux x64 for systems where WebView availability or behavior is unreliable.
             - Existing CLI binaries remain available for Linux, macOS, and Windows.
 
             ## 桌面应用
@@ -123,6 +175,7 @@ jobs:
 
             - Windows x64：NSIS 安装程序和 MSI 安装包
             - Linux x64：DEB 安装包和 AppImage
+            - 同时发布 Windows x64 与 Linux x64 的 Electron 兜底版本，用于 WebView 不可用或表现不一致的设备
             - 同时保留 Linux、macOS、Windows 的 CLI 二进制文件
           files: release/*
           fail_on_unmatched_files: true

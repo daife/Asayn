@@ -1,13 +1,30 @@
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { AgentEvent } from "./types";
 
 type Envelope = { type: "response" | "event"; id?: string; request_id?: string; ok?: boolean; data?: unknown; error?: string };
 type Pending = { resolve: (value: unknown) => void; reject: (reason: Error) => void };
+type Unsubscribe = () => void;
+type DesktopRuntime = {
+  platform: "electron";
+  startBridge: (workspace: string) => Promise<void>;
+  bridgeRequest: (request: unknown) => Promise<void>;
+  openDirectory: (title: string) => Promise<string | undefined>;
+  minimize: () => Promise<void>;
+  toggleMaximize: () => Promise<void>;
+  close: () => Promise<void>;
+  onBridgeEvent: (fn: (payload: Envelope) => void) => Unsubscribe;
+};
+
+declare global {
+  interface Window {
+    asaynDesktop?: DesktopRuntime;
+  }
+}
+
 const pending = new Map<string, Pending>();
 const subscribers = new Set<(event: AgentEvent) => void>();
-let unlisten: UnlistenFn | undefined;
+let unlisten: Unsubscribe | undefined;
 const isTauri = () => "__TAURI_INTERNALS__" in window;
+const electron = () => window.asaynDesktop;
 const demo = {
   session: { id: "demo-7f31c2a8", name: "desktop-migration", root_agent: "default", created_at: new Date().toISOString(), updated_at: new Date().toISOString(), messages: [], input_history: [] },
   sessions: [{ id: "demo-7f31c2a8", name: "desktop-migration", root_agent: "default", created_at: new Date().toISOString(), updated_at: new Date().toISOString(), messages: [] }],
@@ -16,8 +33,26 @@ const demo = {
 };
 
 export async function connect(workspace = "") {
+  const runtime = electron();
+  if (runtime) {
+    if (!unlisten) {
+      unlisten = runtime.onBridgeEvent((payload) => {
+        if (payload.type === "response" && payload.id) {
+          const item = pending.get(payload.id);
+          if (!item) return;
+          pending.delete(payload.id);
+          payload.ok ? item.resolve(payload.data) : item.reject(new Error(payload.error || "Bridge request failed"));
+        } else if (payload.type === "event") {
+          subscribers.forEach((fn) => fn(payload.data as AgentEvent));
+        }
+      });
+    }
+    await runtime.startBridge(workspace);
+    return;
+  }
   if (!isTauri()) return;
   if (!unlisten) {
+    const { listen } = await import("@tauri-apps/api/event");
     unlisten = await listen<Envelope>("bridge-event", ({ payload }) => {
       if (payload.type === "response" && payload.id) {
         const item = pending.get(payload.id);
@@ -29,6 +64,7 @@ export async function connect(workspace = "") {
       }
     });
   }
+  const { invoke } = await import("@tauri-apps/api/core");
   await invoke("start_bridge", { workspace });
 }
 
@@ -42,7 +78,47 @@ export async function request<T>(action: string, payload?: unknown): Promise<T> 
   }
   const id = crypto.randomUUID();
   const promise = new Promise<T>((resolve, reject) => pending.set(id, { resolve: resolve as (v: unknown) => void, reject }));
-  try { await invoke("bridge_request", { request: { id, action, payload } }); }
+  try {
+    const runtime = electron();
+    if (runtime) await runtime.bridgeRequest({ id, action, payload });
+    else {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("bridge_request", { request: { id, action, payload } });
+    }
+  }
   catch (error) { pending.delete(id); throw error; }
   return promise;
+}
+
+export async function openDirectory(title: string) {
+  const runtime = electron();
+  if (runtime) return runtime.openDirectory(title);
+  if (!isTauri()) return undefined;
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const selected = await open({ directory: true, multiple: false, title });
+  return typeof selected === "string" ? selected : undefined;
+}
+
+export async function minimizeWindow() {
+  const runtime = electron();
+  if (runtime) return runtime.minimize();
+  if (!isTauri()) return;
+  const { getCurrentWindow } = await import("@tauri-apps/api/window");
+  await getCurrentWindow().minimize();
+}
+
+export async function toggleMaximizeWindow() {
+  const runtime = electron();
+  if (runtime) return runtime.toggleMaximize();
+  if (!isTauri()) return;
+  const { getCurrentWindow } = await import("@tauri-apps/api/window");
+  await getCurrentWindow().toggleMaximize();
+}
+
+export async function closeWindow() {
+  const runtime = electron();
+  if (runtime) return runtime.close();
+  if (!isTauri()) return;
+  const { getCurrentWindow } = await import("@tauri-apps/api/window");
+  await getCurrentWindow().close();
 }

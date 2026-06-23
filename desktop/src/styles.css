@@ -576,3 +576,83 @@ main {
 .fatal-error {
   background: transparent;
 }
+
+/* 0.5.11 window hit-test fix: do not make the whole title bar draggable.
+   Only the center drag strip should drag; controls must receive normal clicks. */
+html,
+body,
+#root {
+  background: #070b12;
+}
+
+body {
+  background:
+    radial-gradient(circle at 11% 0%, #174c7c55, transparent 29%),
+    radial-gradient(circle at 92% 3%, #2b8df02e, transparent 30%),
+    #070b12;
+}
+
+.app {
+  border-radius: 18px;
+  border: 1px solid #d7ecff20;
+  background:
+    radial-gradient(circle at 78% -8%, #134a7d 0, transparent 34%),
+    radial-gradient(circle at 6% 22%, #1a6aa52c 0, transparent 28%),
+    linear-gradient(145deg, #08111d 0%, #0b111b 48%, #070b12 100%);
+  box-shadow:
+    0 0 0 1px #ffffff0c inset,
+    0 1px 0 #ffffff18 inset;
+}
+
+.topbar {
+  -webkit-app-region: no-drag;
+  background: linear-gradient(180deg, #0b111bd6, #0a111b9c);
+  backdrop-filter: blur(24px) saturate(1.18);
+}
+
+.topbar-drag {
+  -webkit-app-region: drag;
+}
+
+.topbar button,
+.topbar select,
+.topbar label,
+.top-actions,
+.window-controls,
+.window-control {
+  -webkit-app-region: no-drag;
+  position: relative;
+  z-index: 2;
+}
+
+.window-control {
+  pointer-events: auto;
+}
+
+.sidebar {
+  background:
+    radial-gradient(circle at 0% 0%, #3aa8ff1f, transparent 40%),
+    linear-gradient(180deg, #0a152480, #07101a3d);
+  backdrop-filter: blur(30px) saturate(1.28);
+}
+
+.brand,
+.sidebar-footer {
+  background: #07101a36;
+  backdrop-filter: blur(20px) saturate(1.16);
+}
+
+main {
+  background:
+    radial-gradient(circle at 88% 0%, #2b8df02d, transparent 32%),
+    radial-gradient(circle at 24% 100%, #12395e42, transparent 34%),
+    linear-gradient(180deg, #09101a 0%, #0a1018 100%);
+}
+
+.conversation {
+  background: linear-gradient(180deg, #07101a12, transparent 44%);
+}
+
+.composer-wrap {
+  background: linear-gradient(180deg, transparent, #07101bd8 45%, #07101b);
+}

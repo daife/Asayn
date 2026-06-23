@@ -1,13 +1,54 @@
 {
   "name": "asayn-desktop",
   "private": true,
-  "version": "0.5.10",
+  "version": "0.5.11",
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:electron": "npm run build && npm run build:electron-sidecar && electron-builder",
+    "build:electron-sidecar": "node scripts/build-electron-sidecar.mjs",
     "build:sidecar": "sh scripts/build-sidecar.sh",
     "tauri": "tauri"
+  },
+  "build": {
+    "appId": "com.asayn.desktop.electron",
+    "productName": "Asayn Electron",
+    "directories": {
+      "output": "electron-dist"
+    },
+    "files": [
+      "dist/**",
+      "electron/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "electron-binaries",
+        "to": ".",
+        "filter": [
+          "asayn-bridge*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "msi"
+      ],
+      "icon": "src-tauri/icons/icon.ico",
+      "artifactName": "Asayn-Electron-${version}-windows-${arch}.${ext}"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "src-tauri/icons/icon.png",
+      "category": "Development",
+      "artifactName": "Asayn-Electron-${version}-linux-${arch}.${ext}"
+    }
   },
   "dependencies": {
     "@tauri-apps/api": "^2.5.0",
@@ -21,9 +62,12 @@
   "devDependencies": {
     "@tauri-apps/cli": "^2.5.0",
     "@types/dompurify": "^3.0.5",
+    "@types/node": "^26.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^42.4.1",
+    "electron-builder": "^26.15.3",
     "typescript": "~5.7.2",
     "vite": "^6.0.5"
   }

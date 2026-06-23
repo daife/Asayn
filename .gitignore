@@ -8,6 +8,8 @@ main
 .codegraph/
 desktop/node_modules/
 desktop/dist/
+desktop/electron-binaries/
+desktop/electron-dist/
 desktop/src-tauri/target/
 desktop/src-tauri/binaries/
 desktop/src-tauri/gen/
