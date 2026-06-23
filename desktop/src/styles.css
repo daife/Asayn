@@ -586,19 +586,13 @@ body,
 }
 
 body {
-  background:
-    radial-gradient(circle at 11% 0%, #174c7c55, transparent 29%),
-    radial-gradient(circle at 92% 3%, #2b8df02e, transparent 30%),
-    transparent;
+  background: transparent;
 }
 
 .app {
   border-radius: 18px;
   border: 1px solid #d7ecff20;
-  background:
-    radial-gradient(circle at 78% -8%, #134a7d 0, transparent 34%),
-    radial-gradient(circle at 6% 22%, #1a6aa52c 0, transparent 28%),
-    linear-gradient(145deg, #08111df0 0%, #0b111be8 48%, #070b12f0 100%);
+  background: linear-gradient(145deg, #08111db8 0%, #0b111ba8 48%, #070b12b8 100%);
   box-shadow:
     0 0 0 1px #ffffff0c inset,
     0 1px 0 #ffffff18 inset;
@@ -630,10 +624,8 @@ body {
 }
 
 .sidebar {
-  background:
-    radial-gradient(circle at 0% 0%, #3aa8ff1f, transparent 40%),
-    linear-gradient(180deg, #0a152480, #07101a3d);
-  backdrop-filter: blur(30px) saturate(1.28);
+  background: linear-gradient(180deg, #0a15245c, #07101a26);
+  backdrop-filter: blur(14px) saturate(1.12);
 }
 
 .brand,
@@ -643,16 +635,13 @@ body {
 }
 
 main {
-  background:
-    radial-gradient(circle at 88% 0%, #2b8df02d, transparent 32%),
-    radial-gradient(circle at 24% 100%, #12395e42, transparent 34%),
-    linear-gradient(180deg, #09101ae0 0%, #0a1018e8 100%);
+  background: linear-gradient(180deg, #09101a88 0%, #0a10189c 100%);
 }
 
 .conversation {
-  background: linear-gradient(180deg, #07101a12, transparent 44%);
+  background: transparent;
 }
 
 .composer-wrap {
-  background: linear-gradient(180deg, transparent, #07101bd8 45%, #07101b);
+  background: linear-gradient(180deg, transparent, #07101b9c 45%, #07101bb8);
 }
