@@ -26,18 +26,26 @@ Asayn is a Go-based terminal agent inspired by Claude Code. It provides a Bubble
 
 Download the latest desktop package from [GitHub Releases](https://github.com/daife/Asayn/releases/latest). The GUI bundles the local Go agent engine, so a separate CLI installation is not required.
 
+Asayn publishes two desktop variants:
+
+- **Tauri desktop**: the default, smaller package. It uses the system WebView/WebKit runtime and is recommended for most users.
+- **Electron desktop**: a fallback package named `Asayn-Electron-*`. It bundles Chromium, so downloads are larger, but it avoids missing WebView runtimes and WebView-version differences on some devices.
+
+If the Tauri build opens to a blank screen, shows WebView-specific rendering bugs, or the target system does not have a reliable WebView runtime, use the Electron package instead.
+
 #### Windows x64
 
 Download and run one of these assets:
 
 - `Asayn_*_x64-setup.exe`: recommended NSIS installer.
 - `Asayn_*_x64_en-US.msi`: MSI package for managed or manual installation.
+- `Asayn-Electron-*-windows-x64.exe` / `.msi`: Electron fallback installers for machines with WebView issues.
 
 After installation, launch **Asayn** from the Start menu. Use **Open workspace** to select a project directory. On first launch, configure your provider and API key in `~/.Asayn/api_config.toml`; the file can also be opened from the GUI agent settings.
 
 #### Linux x64
 
-Choose either package from the latest release:
+Choose either Tauri package from the latest release:
 
 ```bash
 # Debian / Ubuntu
@@ -48,7 +56,9 @@ chmod +x Asayn_*_amd64.AppImage
 ./Asayn_*_amd64.AppImage
 ```
 
-The desktop release currently provides Windows x64 and Linux x64 packages. macOS users can use the CLI release assets or build the desktop app from source.
+Electron fallback packages are also available as `Asayn-Electron-*-linux-x86_64.AppImage` and `Asayn-Electron-*-linux-amd64.deb`. Use them when the system WebKit/WebView stack is missing or behaves inconsistently.
+
+The desktop release currently provides Windows x64 and Linux x64 packages for both Tauri and Electron. macOS users can use the CLI release assets or build the desktop app from source.
 
 The GUI and CLI share configuration under `~/.Asayn/`, including providers, agents, skills, MCP servers, usage data, and the workspace session index.
 
@@ -234,14 +244,31 @@ Sub-agents use a basic executor: file/search/skill/synchronous shell plus visibl
 
 ## Build From Source
 
-### Desktop app (Tauri 2)
+### Desktop app (Tauri 2 and Electron)
 
 The optional desktop client lives in `desktop/`. It uses React and TypeScript for the interface while retaining the Go agent engine as a bundled sidecar, so CLI and desktop sessions, tools, skills, MCP servers, and provider configuration use the same implementation.
+
+The same React UI is shared by the Tauri and Electron runtimes.
 
 ```bash
 cd desktop
 npm install
 npm run tauri dev
+```
+
+Build the Tauri desktop packages:
+
+```bash
+cd desktop
+npm run tauri build
+```
+
+Build the Electron fallback packages:
+
+```bash
+cd desktop
+npm run build:electron -- --win nsis msi --x64
+npm run build:electron -- --linux AppImage deb --x64
 ```
 
 See `desktop/README.md` for platform prerequisites and release builds.

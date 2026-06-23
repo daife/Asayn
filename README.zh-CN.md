@@ -26,18 +26,26 @@ Asayn 是一个受 Claude Code 启发的 Go 终端智能体。它提供 Bubble T
 
 从 [GitHub Releases](https://github.com/daife/Asayn/releases/latest) 下载最新桌面安装包。GUI 已内置本地 Go Agent 引擎，不需要另外安装 CLI。
 
+Asayn 发布两种桌面版本：
+
+- **Tauri 桌面版**：默认推荐，安装包更小。它使用系统自带的 WebView/WebKit runtime，适合大多数用户。
+- **Electron 桌面版**：文件名为 `Asayn-Electron-*` 的兜底版本。它内置 Chromium，因此体积更大，但可以避免部分设备缺少 WebView runtime、或不同 WebView 版本导致的不可预测问题。
+
+如果 Tauri 版本出现黑屏、WebView 渲染异常，或者目标设备没有可靠的 WebView runtime，请改用 Electron 版本。
+
 #### Windows x64
 
 下载并运行以下任一文件：
 
 - `Asayn_*_x64-setup.exe`：推荐使用的 NSIS 安装程序。
 - `Asayn_*_x64_en-US.msi`：适合统一部署或手动安装的 MSI 安装包。
+- `Asayn-Electron-*-windows-x64.exe` / `.msi`：Electron 兜底安装包，适合 WebView 有问题的机器。
 
 安装后从开始菜单启动 **Asayn**，点击 **Open workspace** 选择项目目录。首次启动时，需要在 `~/.Asayn/api_config.toml` 中配置 Provider 和 API key；也可以通过 GUI 的 Agent 设置打开该配置文件。
 
 #### Linux x64
 
-从最新 Release 中选择 DEB 或 AppImage：
+从最新 Release 中选择 Tauri 版 DEB 或 AppImage：
 
 ```bash
 # Debian / Ubuntu
@@ -48,7 +56,9 @@ chmod +x Asayn_*_amd64.AppImage
 ./Asayn_*_amd64.AppImage
 ```
 
-桌面版目前提供 Windows x64 和 Linux x64 安装包。macOS 用户可以使用 CLI release asset，或从源码构建桌面应用。
+Electron 兜底包也会同时发布：`Asayn-Electron-*-linux-x86_64.AppImage` 和 `Asayn-Electron-*-linux-amd64.deb`。当系统 WebKit/WebView 缺失或表现不稳定时，请使用 Electron 版本。
+
+桌面版目前同时提供 Tauri 与 Electron 的 Windows x64、Linux x64 安装包。macOS 用户可以使用 CLI release asset，或从源码构建桌面应用。
 
 GUI 与 CLI 共用 `~/.Asayn/` 下的配置，包括 Providers、Agents、Skills、MCP servers、用量数据和工作区会话索引。
 
@@ -234,14 +244,31 @@ Sub-agent 使用基础 executor：文件/搜索/skill/同步 shell 以及可见 
 
 ## 从源码构建
 
-### 桌面应用（Tauri 2）
+### 桌面应用（Tauri 2 与 Electron）
 
 可选桌面客户端位于 `desktop/`。界面使用 React 和 TypeScript，Agent 引擎仍由打包后的 Go sidecar 提供，因此 CLI 与桌面端共用会话、工具、Skills、MCP 和模型配置实现。
+
+Tauri 与 Electron 版本共用同一套 React UI，只是桌面 runtime 与打包方式不同。
 
 ```bash
 cd desktop
 npm install
 npm run tauri dev
+```
+
+构建 Tauri 桌面安装包：
+
+```bash
+cd desktop
+npm run tauri build
+```
+
+构建 Electron 兜底安装包：
+
+```bash
+cd desktop
+npm run build:electron -- --win nsis msi --x64
+npm run build:electron -- --linux AppImage deb --x64
 ```
 
 平台依赖及发布构建方式见 `desktop/README.md`。
