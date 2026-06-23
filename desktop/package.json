@@ -1,7 +1,14 @@
 {
   "name": "asayn-desktop",
   "private": true,
-  "version": "0.5.11",
+  "version": "0.5.12",
+  "description": "Asayn desktop client backed by the local Go agent engine.",
+  "homepage": "https://github.com/daife/Asayn",
+  "desktopName": "Asayn.desktop",
+  "author": {
+    "name": "daife",
+    "email": "daife@users.noreply.github.com"
+  },
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -41,6 +48,9 @@
       "artifactName": "Asayn-Electron-${version}-windows-${arch}.${ext}"
     },
     "linux": {
+      "synopsis": "Local agent workbench",
+      "maintainer": "daife <daife@users.noreply.github.com>",
+      "syncDesktopName": true,
       "target": [
         "AppImage",
         "deb"
