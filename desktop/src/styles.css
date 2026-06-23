@@ -134,6 +134,30 @@ main{min-width:0;min-height:0;overflow:hidden;display:grid;grid-template-rows:58
 .settings>footer .secondary,.text-dialog>footer .secondary { background:transparent;color:#93a3b6;border:1px solid #304057; }
 .settings>footer .secondary:hover,.text-dialog>footer .secondary:hover { background:#172131;color:#dce8f5; }
 
+.migration-panel { border-top:1px solid #2b394d;border-bottom:1px solid #2b394d;padding:16px 0;display:flex;flex-direction:column;gap:10px; }
+.migration-panel>header { display:flex;align-items:center;justify-content:space-between;gap:14px; }
+.migration-panel h3 { margin:3px 0 0;color:#edf4fb;font-size:15px; }
+.migration-panel>header span { font:8px DM Mono;color:#62b7ff;letter-spacing:.16em; }
+.migration-panel>header>div:last-child { display:flex;align-items:center;gap:7px; }
+.migration-panel button.mini { height:32px;border:0;border-radius:9px;background:#319cf4;color:#07111c;padding:0 11px;display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;cursor:pointer;transition:background .18s,transform .12s; }
+.migration-panel button.mini:hover { background:#64b7fb; }
+.migration-panel button.mini:active { transform:scale(.97); }
+.migration-panel button.mini.secondary { background:transparent;color:#93a3b6;border:1px solid #304057; }
+.migration-panel button.mini.secondary:hover { background:#172131;color:#dce8f5; }
+.migration-panel button.mini:disabled { opacity:.45;cursor:default;transform:none; }
+.migration-status { margin:0;color:#7f90a4;font:10px DM Mono; }
+.migration-list { display:grid;grid-template-columns:1fr 1fr;gap:7px; }
+.migration-list>button { min-height:58px;border:1px solid #28364a;border-radius:10px;background:#0d141e;display:grid;grid-template-columns:18px minmax(0,1fr);gap:9px;text-align:left;padding:9px;cursor:pointer;color:#91a2b6;transition:background .18s,border-color .18s,opacity .18s; }
+.migration-list>button:hover { border-color:#3a4f6b;background:#141e2c; }
+.migration-list>button.duplicate { opacity:.48;cursor:default; }
+.migration-list>button.duplicate:hover { border-color:#28364a;background:#0d141e; }
+.migration-list i { width:16px;height:16px;border:1px solid #53657a;border-radius:5px;display:grid;place-items:center;color:#07111c; }
+.migration-list .selected i { border-color:#3da5ff;background:#3da5ff; }
+.migration-list div { min-width:0; }
+.migration-list strong { display:block;color:#dceafb;font:11px DM Mono;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
+.migration-list span { display:block;margin-top:3px;color:#6f8399;font:9px DM Mono;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
+.migration-list small { display:block;margin-top:3px;color:#64768b;font:9px Manrope;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
+
 .text-dialog { width:min(440px,100%); }
 .text-dialog>header { min-height:78px;display:flex;align-items:center;gap:12px;padding:0 20px;border-bottom:1px solid #263347; }
 .text-dialog>header>button { margin-left:auto; }
@@ -298,6 +322,7 @@ main {
 .dialog-mark,
 .switch,
 .picker button,
+.migration-list>button,
 .settings textarea,
 .settings select,
 .settings input,
@@ -316,6 +341,10 @@ main {
 .sidebar-actions .new-chat,
 .workspace-sessions button.active,
 .picker button.selected {
+  background: linear-gradient(135deg, #1634548a, #0d1827a8);
+}
+
+.migration-list>button.selected {
   background: linear-gradient(135deg, #1634548a, #0d1827a8);
 }
 

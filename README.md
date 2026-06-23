@@ -41,7 +41,7 @@ Download and run one of these assets:
 - `Asayn_*_x64_en-US.msi`: MSI package for managed or manual installation.
 - `Asayn-Electron-*-windows-x64.exe` / `.msi`: Electron fallback installers for machines with WebView issues.
 
-After installation, launch **Asayn** from the Start menu. Use **Open workspace** to select a project directory. On first launch, configure your provider and API key in `~/.Asayn/api_config.toml`; the file can also be opened from the GUI agent settings.
+After installation, launch **Asayn** from the Start menu. Use **Open workspace** to select a project directory. On first launch, the GUI creates the same `~/.Asayn/` defaults and workspace `.Asayn/` state as the CLI. Configure your provider and API key in `~/.Asayn/api_config.toml`; the file can also be opened from the GUI agent settings. The settings panel also includes the same Claude Code skills and MCP migration flow offered by the one-command installers.
 
 #### Linux x64
 

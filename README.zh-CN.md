@@ -41,7 +41,7 @@ Asayn 发布两种桌面版本：
 - `Asayn_*_x64_en-US.msi`：适合统一部署或手动安装的 MSI 安装包。
 - `Asayn-Electron-*-windows-x64.exe` / `.msi`：Electron 兜底安装包，适合 WebView 有问题的机器。
 
-安装后从开始菜单启动 **Asayn**，点击 **Open workspace** 选择项目目录。首次启动时，需要在 `~/.Asayn/api_config.toml` 中配置 Provider 和 API key；也可以通过 GUI 的 Agent 设置打开该配置文件。
+安装后从开始菜单启动 **Asayn**，点击 **Open workspace** 选择项目目录。首次启动时，GUI 会和 CLI 一样创建 `~/.Asayn/` 全局默认配置以及工作区 `.Asayn/` 状态。需要在 `~/.Asayn/api_config.toml` 中配置 Provider 和 API key；也可以通过 GUI 的 Agent 设置打开该配置文件。设置面板中也提供和一键安装脚本一致的 Claude Code skills 与 MCP 迁移入口。
 
 #### Linux x64
 

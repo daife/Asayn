@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bot, BrainCircuit, ChevronDown, ChevronRight, CircleStop, Copy, ExternalLink, Folder, FolderOpen, GitFork, Maximize2, Menu, MessageSquarePlus, Minus, PanelLeftClose, Pencil, Send, Settings2, TerminalSquare, Wrench, X } from "lucide-react";
+import { Bot, BrainCircuit, Check, ChevronDown, ChevronRight, CircleStop, Copy, ExternalLink, Folder, FolderOpen, GitFork, Maximize2, Menu, MessageSquarePlus, Minus, PanelLeftClose, Pencil, RefreshCw, Send, Settings2, Sparkles, TerminalSquare, Wrench, X } from "lucide-react";
 import { closeWindow, connect, minimizeWindow, onAgentEvent, openDirectory, request, toggleMaximizeWindow } from "./bridge";
 import Markdown from "./Markdown";
-import type { AgentConfig, AgentEvent, Catalog, Message, Session, Snapshot, Workspace } from "./types";
+import type { AgentConfig, AgentEvent, Catalog, ClaudeMigrationItem, ClaudeMigrationResult, Message, Session, Snapshot, Workspace } from "./types";
 
 type RunItem = { kind: "thinking" | "tool" | "error"; title: string; text: string; active?: boolean };
 type TranscriptItem =
@@ -346,7 +346,7 @@ export default function App() {
         <div className="statusbar"><span><i className="online"/> Local engine</span><span>{snapshot.agent.model}</span><span>{compact(snapshot.stats.SessionInput)} in / {compact(snapshot.stats.SessionOutput)} out</span><span>{compact(snapshot.session.last_total_tokens)} context</span></div>
       </section>
     </main>
-    {settings && editing && catalog && <Settings config={editing} catalog={catalog} onClose={() => setSettings(false)} onSave={async (config) => { await action("save_agent_config", config); setCatalog(await request<Catalog>("catalog")); setSettings(false); }}/>}
+    {settings && editing && catalog && <Settings config={editing} catalog={catalog} onCatalogChange={setCatalog} onClose={() => setSettings(false)} onSave={async (config) => { await action("save_agent_config", config); setCatalog(await request<Catalog>("catalog")); setSettings(false); }}/>}
     {textDialog && <TextDialog {...textDialog} onClose={() => setTextDialog(undefined)} onSubmit={async (value) => {
       await action(textDialog.kind === "rename" ? "rename_session" : "fork_session", { name: value });
       setTextDialog(undefined);
@@ -386,16 +386,64 @@ function TextDialog({ title, label, value, onClose, onSubmit }: { kind: "rename"
   </form></div>;
 }
 
-function Settings({ config, catalog, onClose, onSave }: { config: AgentConfig; catalog: Catalog; onClose: () => void; onSave: (c: AgentConfig) => Promise<void> }) {
+function Settings({ config, catalog, onCatalogChange, onClose, onSave }: { config: AgentConfig; catalog: Catalog; onCatalogChange: (catalog: Catalog) => void; onClose: () => void; onSave: (c: AgentConfig) => Promise<void> }) {
   const [draft, setDraft] = useState(config); const [saving, setSaving] = useState(false);
+  const [migrationItems, setMigrationItems] = useState<ClaudeMigrationItem[]>([]);
+  const [migrationSelected, setMigrationSelected] = useState<Set<string>>(new Set());
+  const [migrationBusy, setMigrationBusy] = useState(false);
+  const [migrationStatus, setMigrationStatus] = useState("");
   const models = catalog.providers[draft.provider]?.allowed_models || [];
   const toggle = (field: "visible_skills" | "visible_mcp", value: string) => setDraft({ ...draft, [field]: draft[field].includes(value) ? draft[field].filter((x) => x !== value) : [...draft[field], value] });
+  const scanMigration = async () => {
+    setMigrationBusy(true); setMigrationStatus("");
+    try {
+      const items = await request<ClaudeMigrationItem[]>("claude_migration_scan");
+      setMigrationItems(items);
+      setMigrationSelected(new Set(items.filter((item) => !item.duplicate).map((item) => item.id)));
+      setMigrationStatus(items.length ? `${items.length} item${items.length === 1 ? "" : "s"} found` : "No Claude Code assets found");
+    } catch (e) { setMigrationStatus(String(e)); }
+    finally { setMigrationBusy(false); }
+  };
+  const applyMigration = async () => {
+    if (migrationSelected.size === 0) return;
+    setMigrationBusy(true); setMigrationStatus("");
+    try {
+      const result = await request<ClaudeMigrationResult>("claude_migration_apply", { ids: [...migrationSelected] });
+      const nextCatalog = await request<Catalog>("catalog");
+      onCatalogChange(nextCatalog);
+      const nextItems = await request<ClaudeMigrationItem[]>("claude_migration_scan");
+      setMigrationItems(nextItems);
+      setMigrationSelected(new Set(nextItems.filter((item) => !item.duplicate).map((item) => item.id)));
+      const migrated = result.migrated.length;
+      const skipped = result.skipped.length;
+      setMigrationStatus(`${migrated} migrated${skipped ? `, ${skipped} skipped` : ""}`);
+    } catch (e) { setMigrationStatus(String(e)); }
+    finally { setMigrationBusy(false); }
+  };
+  const toggleMigrationItem = (item: ClaudeMigrationItem) => {
+    if (item.duplicate) return;
+    setMigrationSelected((current) => {
+      const next = new Set(current);
+      if (next.has(item.id)) next.delete(item.id); else next.add(item.id);
+      return next;
+    });
+  };
   return <div className="modal-layer" onMouseDown={(e) => e.target === e.currentTarget && onClose()}><section className="settings">
     <header><div><span>AGENT PROFILE</span><h2>{draft.name}</h2></div><button className="icon-button" onClick={onClose}><X size={19}/></button></header>
     <div className="settings-body"><div className="field-row"><label>Provider<select value={draft.provider} onChange={(e) => setDraft({ ...draft, provider: e.target.value, model: catalog.providers[e.target.value]?.allowed_models?.[0] || "" })}>{Object.keys(catalog.providers).map((x) => <option key={x}>{x}</option>)}</select></label><label>Model<select value={draft.model} onChange={(e) => setDraft({ ...draft, model: e.target.value })}>{models.map((x) => <option key={x}>{x}</option>)}</select></label></div>
       <label>System prompt<textarea rows={5} value={draft.system_prompt} onChange={(e) => setDraft({ ...draft, system_prompt: e.target.value })}/></label>
       <div className="field-row"><label>Reasoning effort<select value={draft.reasoning_effort} onChange={(e) => setDraft({ ...draft, reasoning_effort: e.target.value })}>{["none", "low", "medium", "high", "max"].map((x) => <option key={x}>{x}</option>)}</select></label><label>Compact at<input type="number" min="10" max="100" value={draft.auto_compact_threshold_percent} onChange={(e) => setDraft({ ...draft, auto_compact_threshold_percent: Number(e.target.value) })}/></label></div>
       <div className="switches"><Switch label="Thinking stream" value={draft.thinking_enabled} set={(v) => setDraft({ ...draft, thinking_enabled: v })}/><Switch label="Parallel shell" value={draft.allow_parallel_shell} set={(v) => setDraft({ ...draft, allow_parallel_shell: v, allow_interactive_shell: v && draft.allow_interactive_shell })}/><Switch label="Interactive shell" value={draft.allow_interactive_shell} set={(v) => setDraft({ ...draft, allow_interactive_shell: v, allow_parallel_shell: v || draft.allow_parallel_shell })}/></div>
+      <section className="migration-panel">
+        <header><div><span>SETUP</span><h3>Claude Code migration</h3></div><div><button className="secondary mini" disabled={migrationBusy} onClick={scanMigration}><RefreshCw size={13}/>Scan</button><button className="mini" disabled={migrationBusy || migrationSelected.size === 0} onClick={applyMigration}><Sparkles size={13}/>Migrate</button></div></header>
+        {migrationStatus && <p className="migration-status">{migrationStatus}</p>}
+        {migrationItems.length > 0 && <div className="migration-list">{migrationItems.map((item) => {
+          const checked = migrationSelected.has(item.id);
+          return <button type="button" key={item.id} disabled={item.duplicate} className={`${checked ? "selected" : ""} ${item.duplicate ? "duplicate" : ""}`} onClick={() => toggleMigrationItem(item)} title={item.source}>
+            <i>{checked && <Check size={11}/>}</i><div><strong>{item.name}</strong><span>{item.kind.toUpperCase()} · {item.duplicate ? item.reason || "already exists" : "ready"}</span><small>{item.source}</small></div>
+          </button>;
+        })}</div>}
+      </section>
       <Picker title="Visible skills" items={catalog.skills} selected={draft.visible_skills} toggle={(x) => toggle("visible_skills", x)}/><Picker title="Visible MCP servers" items={catalog.mcp} selected={draft.visible_mcp} toggle={(x) => toggle("visible_mcp", x)}/>
     </div><footer><button className="secondary api-config" onClick={() => request("open_path", { path: catalog.api_config_path })} title="Open API config file"><ExternalLink size={13}/>API config</button><button className="secondary" onClick={onClose}>Cancel</button><button disabled={saving} onClick={async () => { setSaving(true); await onSave(draft); }}>{saving ? "Saving…" : "Save profile"}</button></footer>
   </section></div>;

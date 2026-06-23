@@ -16,6 +16,7 @@ import (
 	"github.com/asayn/asayn/internal/config"
 	"github.com/asayn/asayn/internal/llm"
 	llmtypes "github.com/asayn/asayn/internal/llm/types"
+	"github.com/asayn/asayn/internal/migration"
 	"github.com/asayn/asayn/internal/session"
 	"github.com/asayn/asayn/internal/tools"
 	"github.com/asayn/asayn/internal/workspaceindex"
@@ -245,6 +246,22 @@ func (b *bridge) dispatch(req request) (any, error) {
 		skills, _ := config.ListSkills(ctx.Paths)
 		mcps, _ := config.ListMCPServerInfos(ctx.Paths)
 		return map[string]any{"agents": roots, "skills": skills, "mcp": mcps, "providers": ctx.API.Providers, "config": ctx.Root, "api_config_path": ctx.Paths.HomePath("api_config.toml")}, nil
+	case "claude_migration_scan":
+		ctx, _, err := b.ready()
+		if err != nil {
+			return nil, err
+		}
+		return migration.DiscoverClaude(ctx.Paths)
+	case "claude_migration_apply":
+		ctx, _, err := b.readyIdle()
+		if err != nil {
+			return nil, err
+		}
+		var p struct {
+			IDs []string `json:"ids"`
+		}
+		_ = json.Unmarshal(req.Payload, &p)
+		return migration.MigrateClaude(ctx.Paths, p.IDs)
 	case "save_agent_config":
 		ctx, _, err := b.readyIdle()
 		if err != nil {
