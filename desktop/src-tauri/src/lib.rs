@@ -4,7 +4,7 @@ use std::{
     process::{Child, ChildStdin, Command, Stdio},
     sync::Mutex,
 };
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State, Window};
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -77,13 +77,38 @@ fn bridge_request(state: State<BridgeState>, request: serde_json::Value) -> Resu
     stdin.write_all(b"\n").and_then(|_| stdin.flush()).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn minimize_window(window: Window) -> Result<(), String> {
+    window.minimize().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn toggle_maximize_window(window: Window) -> Result<(), String> {
+    if window.is_maximized().map_err(|e| e.to_string())? {
+        window.unmaximize().map_err(|e| e.to_string())
+    } else {
+        window.maximize().map_err(|e| e.to_string())
+    }
+}
+
+#[tauri::command]
+fn close_window(window: Window) -> Result<(), String> {
+    window.close().map_err(|e| e.to_string())
+}
+
 pub fn run() {
     #[cfg(target_os = "linux")]
     retain_gbm_link();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(BridgeState { child: Mutex::new(None), stdin: Mutex::new(None) })
-        .invoke_handler(tauri::generate_handler![start_bridge, bridge_request])
+        .invoke_handler(tauri::generate_handler![
+            start_bridge,
+            bridge_request,
+            minimize_window,
+            toggle_maximize_window,
+            close_window
+        ])
         .on_window_event(|window, event| if let tauri::WindowEvent::Destroyed = event {
             if let Some(state) = window.try_state::<BridgeState>() {
                 if let Ok(mut child) = state.child.lock() { if let Some(child) = child.as_mut() { let _ = child.kill(); } }

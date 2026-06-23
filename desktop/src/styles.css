@@ -582,14 +582,14 @@ main {
 html,
 body,
 #root {
-  background: #070b12;
+  background: transparent;
 }
 
 body {
   background:
     radial-gradient(circle at 11% 0%, #174c7c55, transparent 29%),
     radial-gradient(circle at 92% 3%, #2b8df02e, transparent 30%),
-    #070b12;
+    transparent;
 }
 
 .app {
@@ -598,7 +598,7 @@ body {
   background:
     radial-gradient(circle at 78% -8%, #134a7d 0, transparent 34%),
     radial-gradient(circle at 6% 22%, #1a6aa52c 0, transparent 28%),
-    linear-gradient(145deg, #08111d 0%, #0b111b 48%, #070b12 100%);
+    linear-gradient(145deg, #08111df0 0%, #0b111be8 48%, #070b12f0 100%);
   box-shadow:
     0 0 0 1px #ffffff0c inset,
     0 1px 0 #ffffff18 inset;
@@ -646,7 +646,7 @@ main {
   background:
     radial-gradient(circle at 88% 0%, #2b8df02d, transparent 32%),
     radial-gradient(circle at 24% 100%, #12395e42, transparent 34%),
-    linear-gradient(180deg, #09101a 0%, #0a1018 100%);
+    linear-gradient(180deg, #09101ae0 0%, #0a1018e8 100%);
 }
 
 .conversation {

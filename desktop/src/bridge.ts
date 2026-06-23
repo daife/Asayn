@@ -103,22 +103,22 @@ export async function minimizeWindow() {
   const runtime = electron();
   if (runtime) return runtime.minimize();
   if (!isTauri()) return;
-  const { getCurrentWindow } = await import("@tauri-apps/api/window");
-  await getCurrentWindow().minimize();
+  const { invoke } = await import("@tauri-apps/api/core");
+  await invoke("minimize_window");
 }
 
 export async function toggleMaximizeWindow() {
   const runtime = electron();
   if (runtime) return runtime.toggleMaximize();
   if (!isTauri()) return;
-  const { getCurrentWindow } = await import("@tauri-apps/api/window");
-  await getCurrentWindow().toggleMaximize();
+  const { invoke } = await import("@tauri-apps/api/core");
+  await invoke("toggle_maximize_window");
 }
 
 export async function closeWindow() {
   const runtime = electron();
   if (runtime) return runtime.close();
   if (!isTauri()) return;
-  const { getCurrentWindow } = await import("@tauri-apps/api/window");
-  await getCurrentWindow().close();
+  const { invoke } = await import("@tauri-apps/api/core");
+  await invoke("close_window");
 }
