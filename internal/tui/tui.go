@@ -927,7 +927,7 @@ func (m model) startCompactTurn() (model, tea.Cmd) {
 		temp.VisibleSkills[k] = v
 	}
 
-	exec := tools.NewBasicExecutor(m.ctx.Paths, m.ctx.Sessions, cfg.MaxOutputLines)
+	exec := tools.NewBasicExecutor(m.ctx.Paths, m.ctx.Sessions, cfg.MaxOutputLines, m.ctx.Root.UseGitBash)
 	agent := llm.NewSubAgent(m.ctx.API, cfg, m.ctx.Paths, exec)
 	agent.RefreshSystemPrompt(&temp)
 
@@ -1601,7 +1601,7 @@ func (m model) applyRootAgent(name string) model {
 	root.MaxOutputTokens = limits.MaxOutputTokens
 
 	m.ctx.Root = root
-	m.ctx.Tools.SetAgentLimits(root.MaxOutputLines, root.AllowParallelShell, root.AllowInteractiveShell)
+	m.ctx.Tools.SetAgentLimits(root.MaxOutputLines, root.AllowParallelShell, root.AllowInteractiveShell, root.UseGitBash)
 	m.ctx.Tools.SetVisibleMCP(root.VisibleMCP)
 	m.ctx.Agent = llm.NewAgent(m.ctx.API, root, m.ctx.Paths, m.ctx.Tools)
 	m.session.RootAgent = root.Name
@@ -1779,7 +1779,7 @@ func (m model) handleModelConfigAction() model {
 		configKind = config.SpecialAgentKind
 	}
 
-	if m.modelConfigOptionSelected == 5 {
+	if m.modelConfigOptionSelected == 6 {
 		if configKind == config.RootAgentKind {
 			cfg, err := config.LoadAgent(m.ctx.Paths, configKind, agentInfo.Name)
 			if err != nil {
@@ -1840,12 +1840,22 @@ func (m model) handleModelConfigAction() model {
 					cfg.AllowParallelShell = true
 				}
 			}
-		case 6: // Real-time Context Control
+		case 5: // Git Bash
+			if configKind == config.RootAgentKind {
+				if !cfg.UseGitBash {
+					if err := tools.GitBashAvailable(); err != nil {
+						m.setCommandOutput("error enabling Git Bash: " + err.Error())
+						return
+					}
+				}
+				cfg.UseGitBash = !cfg.UseGitBash
+			}
+		case 7: // Real-time Context Control
 			if configKind == config.RootAgentKind {
 				cfg.RealTimeContextControl = !cfg.RealTimeContextControl
 			}
 		default: // Skills and MCP servers
-			idx := m.modelConfigOptionSelected - 7
+			idx := m.modelConfigOptionSelected - 8
 			if idx >= 0 && idx < len(m.skillItems) {
 				skillName := m.skillItems[idx].Name
 				found := -1
@@ -1891,7 +1901,7 @@ func (m model) handleModelConfigAction() model {
 
 	if configKind == config.RootAgentKind && newCfg.Name == m.session.RootAgent {
 		m.ctx.Root = newCfg
-		m.ctx.Tools.SetAgentLimits(newCfg.MaxOutputLines, newCfg.AllowParallelShell, newCfg.AllowInteractiveShell)
+		m.ctx.Tools.SetAgentLimits(newCfg.MaxOutputLines, newCfg.AllowParallelShell, newCfg.AllowInteractiveShell, newCfg.UseGitBash)
 		m.ctx.Tools.SetVisibleMCP(newCfg.VisibleMCP)
 		m.ctx.Agent = llm.NewAgent(m.ctx.API, newCfg, m.ctx.Paths, m.ctx.Tools)
 		m.ctx.Agent.RefreshSystemPrompt(m.session)
@@ -1918,7 +1928,7 @@ func (m model) saveModelConfigThreshold(value int) model {
 	}
 	if newCfg.Name == m.session.RootAgent {
 		m.ctx.Root = newCfg
-		m.ctx.Tools.SetAgentLimits(newCfg.MaxOutputLines, newCfg.AllowParallelShell, newCfg.AllowInteractiveShell)
+		m.ctx.Tools.SetAgentLimits(newCfg.MaxOutputLines, newCfg.AllowParallelShell, newCfg.AllowInteractiveShell, newCfg.UseGitBash)
 		m.ctx.Tools.SetVisibleMCP(newCfg.VisibleMCP)
 		m.ctx.Agent = llm.NewAgent(m.ctx.API, newCfg, m.ctx.Paths, m.ctx.Tools)
 		m.ctx.Agent.RefreshSystemPrompt(m.session)
@@ -1968,6 +1978,7 @@ func (m model) modelConfigPickerView() string {
 		options = append(options,
 			fmt.Sprintf("Parallel Shell: %s", checkbox(cfg.AllowParallelShell)),
 			fmt.Sprintf("Interactive Shell: %s", checkbox(cfg.AllowInteractiveShell)),
+			fmt.Sprintf("Use Git Bash: %s", checkbox(cfg.UseGitBash)),
 			fmt.Sprintf("Auto Compact Threshold: %s", thresholdText),
 			fmt.Sprintf("Real-time Context Control (beta): %s %s", checkbox(cfg.RealTimeContextControl), mutedStyle.Render("may significantly reduce cache hit rates")),
 		)
@@ -1975,6 +1986,7 @@ func (m model) modelConfigPickerView() string {
 		options = append(options,
 			mutedStyle.Render("Parallel Shell: n/a"),
 			mutedStyle.Render("Interactive Shell: n/a"),
+			mutedStyle.Render("Use Git Bash: n/a"),
 			mutedStyle.Render("Auto Compact Threshold: n/a"),
 			mutedStyle.Render("Real-time Context Control (beta): n/a"),
 		)

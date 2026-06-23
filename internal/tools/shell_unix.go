@@ -40,8 +40,12 @@ func (m *ShellManager) start(command string, interactive bool) (*shellRun, error
 	return run, nil
 }
 
-func ShellEnvironmentName() string {
+func (m *ShellManager) environmentName() string {
 	return "sh"
+}
+
+func GitBashAvailable() error {
+	return nil
 }
 
 func (m *ShellManager) killRun(run *shellRun) {

@@ -146,6 +146,7 @@ main{min-width:0;min-height:0;overflow:hidden;display:grid;grid-template-rows:58
 .migration-panel button.mini.secondary:hover { background:#172131;color:#dce8f5; }
 .migration-panel button.mini:disabled { opacity:.45;cursor:default;transform:none; }
 .migration-status { margin:0;color:#7f90a4;font:10px DM Mono; }
+.settings-error { margin:0;padding:10px 12px;border:1px solid #684049;border-radius:10px;background:#351f25bd;color:#ffaaa3;font:10px/1.5 DM Mono; }
 .migration-list { display:grid;grid-template-columns:1fr 1fr;gap:7px; }
 .migration-list>button { min-height:58px;border:1px solid #28364a;border-radius:10px;background:#0d141e;display:grid;grid-template-columns:18px minmax(0,1fr);gap:9px;text-align:left;padding:9px;cursor:pointer;color:#91a2b6;transition:background .18s,border-color .18s,opacity .18s; }
 .migration-list>button:hover { border-color:#3a4f6b;background:#141e2c; }
@@ -209,6 +210,7 @@ main{min-width:0;min-height:0;overflow:hidden;display:grid;grid-template-rows:58
 .picker button { font-size:11px; }
 .picker small { font-size:9px; }
 .settings>footer button,.text-dialog>footer button { font-size:12px; }
+.shell-switches { grid-template-columns:repeat(4,1fr); }
 
 .boot,.fatal-error { background:radial-gradient(circle at 50% 30%,#142a45,transparent 32%),#0b0f16;color:#78899e; }
 .boot-mark { width:54px;height:54px; }

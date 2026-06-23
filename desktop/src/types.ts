@@ -5,7 +5,7 @@ export type AgentConfig = {
   name: string; provider: string; model: string; description: string; system_prompt: string;
   visible_skills: string[]; visible_mcp: string[]; max_output_lines: number; context_window: number;
   max_output_tokens: number; auto_compact_threshold_percent: number; real_time_context_control: boolean;
-  allow_parallel_shell: boolean; allow_interactive_shell: boolean; thinking_enabled: boolean; reasoning_effort: string;
+  allow_parallel_shell: boolean; allow_interactive_shell: boolean; use_git_bash: boolean; thinking_enabled: boolean; reasoning_effort: string;
 };
 export type Stats = { TotalInput: number; TotalOutput: number; TotalCacheHit: number; SessionInput: number; SessionOutput: number; SessionCacheHit: number };
 export type Snapshot = { session: Session; sessions: Session[]; agent: AgentConfig; stats: Stats; workspace: string };

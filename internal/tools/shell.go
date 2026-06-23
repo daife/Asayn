@@ -13,11 +13,12 @@ import (
 )
 
 type ShellManager struct {
-	workdir string
-	limit   int
-	mu      sync.Mutex
-	runs    map[string]*shellRun
-	ended   map[string]string
+	workdir    string
+	limit      int
+	useGitBash bool
+	mu         sync.Mutex
+	runs       map[string]*shellRun
+	ended      map[string]string
 }
 
 type shellRun struct {
@@ -47,12 +48,13 @@ type safeBuffer struct {
 	b  bytes.Buffer
 }
 
-func NewShellManager(workdir string, limit int) *ShellManager {
+func NewShellManager(workdir string, limit int, useGitBash bool) *ShellManager {
 	return &ShellManager{
-		workdir: workdir,
-		limit:   limit,
-		runs:    map[string]*shellRun{},
-		ended:   map[string]string{},
+		workdir:    workdir,
+		limit:      limit,
+		useGitBash: useGitBash,
+		runs:       map[string]*shellRun{},
+		ended:      map[string]string{},
 	}
 }
 
@@ -60,6 +62,12 @@ func (m *ShellManager) SetLimit(limit int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.limit = limit
+}
+
+func (m *ShellManager) SetUseGitBash(useGitBash bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.useGitBash = useGitBash
 }
 
 func (m *ShellManager) RunBlocking(ctx context.Context, command string, timeoutSec int) (string, error) {

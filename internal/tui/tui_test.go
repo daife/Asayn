@@ -172,7 +172,7 @@ func testModel(t *testing.T) model {
 			ReasoningEffort: "max",
 		},
 		Sessions: store,
-		Tools:    tools.NewExecutor(paths, store, 2000, false, false),
+		Tools:    tools.NewExecutor(paths, store, 2000, false, false, false),
 	}
 	return model{
 		ctx:                ctx,

@@ -28,7 +28,7 @@ const electron = () => window.asaynDesktop;
 const demo = {
   session: { id: "demo-7f31c2a8", name: "desktop-migration", root_agent: "default", created_at: new Date().toISOString(), updated_at: new Date().toISOString(), messages: [], input_history: [] },
   sessions: [{ id: "demo-7f31c2a8", name: "desktop-migration", root_agent: "default", created_at: new Date().toISOString(), updated_at: new Date().toISOString(), messages: [] }],
-  agent: { name: "default", provider: "DeepSeek", model: "deepseek-v4-pro", description: "A workspace-aware coding agent with tools, skills, and sub-agents.", system_prompt: "You are a highly capable agent.", visible_skills: ["uv-python"], visible_mcp: ["codegraph"], max_output_lines: 2000, context_window: 1024000, max_output_tokens: 384000, auto_compact_threshold_percent: 70, real_time_context_control: true, allow_parallel_shell: true, allow_interactive_shell: true, thinking_enabled: true, reasoning_effort: "low" },
+  agent: { name: "default", provider: "DeepSeek", model: "deepseek-v4-pro", description: "A workspace-aware coding agent with tools, skills, and sub-agents.", system_prompt: "You are a highly capable agent.", visible_skills: ["uv-python"], visible_mcp: ["codegraph"], max_output_lines: 2000, context_window: 1024000, max_output_tokens: 384000, auto_compact_threshold_percent: 70, real_time_context_control: true, allow_parallel_shell: true, allow_interactive_shell: true, use_git_bash: false, thinking_enabled: true, reasoning_effort: "low" },
   stats: { TotalInput: 0, TotalOutput: 0, TotalCacheHit: 0, SessionInput: 0, SessionOutput: 0, SessionCacheHit: 0 }, workspace: "/workspace/Asayn"
 };
 

@@ -12,5 +12,6 @@ auto_compact_threshold_percent = 70
 real_time_context_control = true
 allow_parallel_shell = false
 allow_interactive_shell = false
+use_git_bash = false
 thinking_enabled = false
 reasoning_effort = 'high'

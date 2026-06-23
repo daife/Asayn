@@ -392,6 +392,7 @@ function Settings({ config, catalog, onCatalogChange, onClose, onSave }: { confi
   const [migrationSelected, setMigrationSelected] = useState<Set<string>>(new Set());
   const [migrationBusy, setMigrationBusy] = useState(false);
   const [migrationStatus, setMigrationStatus] = useState("");
+  const [saveError, setSaveError] = useState("");
   const models = catalog.providers[draft.provider]?.allowed_models || [];
   const toggle = (field: "visible_skills" | "visible_mcp", value: string) => setDraft({ ...draft, [field]: draft[field].includes(value) ? draft[field].filter((x) => x !== value) : [...draft[field], value] });
   const scanMigration = async () => {
@@ -433,7 +434,8 @@ function Settings({ config, catalog, onCatalogChange, onClose, onSave }: { confi
     <div className="settings-body"><div className="field-row"><label>Provider<select value={draft.provider} onChange={(e) => setDraft({ ...draft, provider: e.target.value, model: catalog.providers[e.target.value]?.allowed_models?.[0] || "" })}>{Object.keys(catalog.providers).map((x) => <option key={x}>{x}</option>)}</select></label><label>Model<select value={draft.model} onChange={(e) => setDraft({ ...draft, model: e.target.value })}>{models.map((x) => <option key={x}>{x}</option>)}</select></label></div>
       <label>System prompt<textarea rows={5} value={draft.system_prompt} onChange={(e) => setDraft({ ...draft, system_prompt: e.target.value })}/></label>
       <div className="field-row"><label>Reasoning effort<select value={draft.reasoning_effort} onChange={(e) => setDraft({ ...draft, reasoning_effort: e.target.value })}>{["none", "low", "medium", "high", "max"].map((x) => <option key={x}>{x}</option>)}</select></label><label>Compact at<input type="number" min="10" max="100" value={draft.auto_compact_threshold_percent} onChange={(e) => setDraft({ ...draft, auto_compact_threshold_percent: Number(e.target.value) })}/></label></div>
-      <div className="switches"><Switch label="Thinking stream" value={draft.thinking_enabled} set={(v) => setDraft({ ...draft, thinking_enabled: v })}/><Switch label="Parallel shell" value={draft.allow_parallel_shell} set={(v) => setDraft({ ...draft, allow_parallel_shell: v, allow_interactive_shell: v && draft.allow_interactive_shell })}/><Switch label="Interactive shell" value={draft.allow_interactive_shell} set={(v) => setDraft({ ...draft, allow_interactive_shell: v, allow_parallel_shell: v || draft.allow_parallel_shell })}/></div>
+      <div className="switches shell-switches"><Switch label="Thinking stream" value={draft.thinking_enabled} set={(v) => setDraft({ ...draft, thinking_enabled: v })}/><Switch label="Parallel shell" value={draft.allow_parallel_shell} set={(v) => setDraft({ ...draft, allow_parallel_shell: v, allow_interactive_shell: v && draft.allow_interactive_shell })}/><Switch label="Interactive shell" value={draft.allow_interactive_shell} set={(v) => setDraft({ ...draft, allow_interactive_shell: v, allow_parallel_shell: v || draft.allow_parallel_shell })}/><Switch label="Git Bash" value={draft.use_git_bash} set={(v) => setDraft({ ...draft, use_git_bash: v })}/></div>
+      {saveError && <p className="settings-error">{saveError}</p>}
       <section className="migration-panel">
         <header><div><span>SETUP</span><h3>Claude Code migration</h3></div><div><button className="secondary mini" disabled={migrationBusy} onClick={scanMigration}><RefreshCw size={13}/>Scan</button><button className="mini" disabled={migrationBusy || migrationSelected.size === 0} onClick={applyMigration}><Sparkles size={13}/>Migrate</button></div></header>
         {migrationStatus && <p className="migration-status">{migrationStatus}</p>}
@@ -445,7 +447,7 @@ function Settings({ config, catalog, onCatalogChange, onClose, onSave }: { confi
         })}</div>}
       </section>
       <Picker title="Visible skills" items={catalog.skills} selected={draft.visible_skills} toggle={(x) => toggle("visible_skills", x)}/><Picker title="Visible MCP servers" items={catalog.mcp} selected={draft.visible_mcp} toggle={(x) => toggle("visible_mcp", x)}/>
-    </div><footer><button className="secondary api-config" onClick={() => request("open_path", { path: catalog.api_config_path })} title="Open API config file"><ExternalLink size={13}/>API config</button><button className="secondary" onClick={onClose}>Cancel</button><button disabled={saving} onClick={async () => { setSaving(true); await onSave(draft); }}>{saving ? "Saving…" : "Save profile"}</button></footer>
+    </div><footer><button className="secondary api-config" onClick={() => request("open_path", { path: catalog.api_config_path })} title="Open API config file"><ExternalLink size={13}/>API config</button><button className="secondary" onClick={onClose}>Cancel</button><button disabled={saving} onClick={async () => { setSaving(true); setSaveError(""); try { await onSave(draft); } catch (e) { setSaveError(String(e)); } finally { setSaving(false); } }}>{saving ? "Saving…" : "Save profile"}</button></footer>
   </section></div>;
 }
 

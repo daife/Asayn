@@ -58,6 +58,7 @@ type AgentConfig struct {
 	RealTimeContextControl      bool     `toml:"real_time_context_control" json:"real_time_context_control"`
 	AllowParallelShell          bool     `toml:"allow_parallel_shell" json:"allow_parallel_shell"`
 	AllowInteractiveShell       bool     `toml:"allow_interactive_shell" json:"allow_interactive_shell"`
+	UseGitBash                  bool     `toml:"use_git_bash" json:"use_git_bash"`
 	ThinkingEnabled             bool     `toml:"thinking_enabled" json:"thinking_enabled"`
 	ReasoningEffort             string   `toml:"reasoning_effort" json:"reasoning_effort"`
 }

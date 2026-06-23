@@ -4,19 +4,31 @@
 package tools
 
 import (
+	"fmt"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 )
 
 func (m *ShellManager) start(command string, interactive bool) (*shellRun, error) {
-	args := []string{"-NoLogo", "-NoProfile"}
-	if !interactive {
-		args = append(args, "-NonInteractive")
+	useGitBash := m.usesGitBash()
+	var cmd *exec.Cmd
+	if useGitBash {
+		bash, err := GitBashPath()
+		if err != nil {
+			return nil, err
+		}
+		cmd = exec.Command(bash, "-lc", command)
+	} else {
+		args := []string{"-NoLogo", "-NoProfile"}
+		if !interactive {
+			args = append(args, "-NonInteractive")
+		}
+		args = append(args, "-ExecutionPolicy", "Bypass", "-Command", "[Console]::OutputEncoding = [Text.Encoding]::UTF8; "+command)
+		cmd = exec.Command("powershell.exe", args...)
 	}
-	args = append(args, "-ExecutionPolicy", "Bypass", "-Command", "[Console]::OutputEncoding = [Text.Encoding]::UTF8; "+command)
-	cmd := exec.Command("powershell.exe", args...)
 	cmd.Dir = m.workdir
 	out := &safeBuffer{}
 	stdin, err := cmd.StdinPipe()
@@ -43,8 +55,38 @@ func (m *ShellManager) start(command string, interactive bool) (*shellRun, error
 	return run, nil
 }
 
-func ShellEnvironmentName() string {
+func (m *ShellManager) environmentName() string {
+	if m.usesGitBash() {
+		return "Git Bash"
+	}
 	return "PowerShell"
+}
+
+func (m *ShellManager) usesGitBash() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.useGitBash
+}
+
+func GitBashPath() (string, error) {
+	bash, err := exec.LookPath("bash.exe")
+	if err != nil {
+		return "", fmt.Errorf("Git Bash is not available in PATH. Install Git for Windows from https://git-scm.com/download/win and add Git Bash to PATH")
+	}
+	out, err := exec.Command(bash, "-lc", "uname -o").CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("Git Bash check failed for %s: %w", bash, err)
+	}
+	env := strings.ToLower(strings.TrimSpace(string(out)))
+	if !strings.Contains(env, "msys") && !strings.Contains(env, "mingw") {
+		return "", fmt.Errorf("bash.exe in PATH is not Git Bash. Install Git for Windows from https://git-scm.com/download/win and add Git Bash to PATH")
+	}
+	return bash, nil
+}
+
+func GitBashAvailable() error {
+	_, err := GitBashPath()
+	return err
 }
 
 func (m *ShellManager) killRun(run *shellRun) {

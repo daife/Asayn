@@ -275,6 +275,11 @@ func (b *bridge) dispatch(req request) (any, error) {
 		if name == "" {
 			name = ctx.Root.Name
 		}
+		if p.UseGitBash {
+			if err := tools.GitBashAvailable(); err != nil {
+				return nil, err
+			}
+		}
 		_, err = config.SaveAgent(ctx.Paths, config.RootAgentKind, name, func(c *config.AgentConfig) { *c = p; c.Name = name })
 		if err != nil {
 			return nil, err
@@ -404,7 +409,7 @@ func (b *bridge) compact(runCtx context.Context, sess *session.Session, emit fun
 	for name, visible := range sess.VisibleSkills {
 		temp.VisibleSkills[name] = visible
 	}
-	exec := tools.NewBasicExecutor(b.ctx.Paths, b.ctx.Sessions, cfg.MaxOutputLines)
+	exec := tools.NewBasicExecutor(b.ctx.Paths, b.ctx.Sessions, cfg.MaxOutputLines, b.ctx.Root.UseGitBash)
 	defer exec.Shutdown()
 	agent := llm.NewSubAgent(b.ctx.API, cfg, b.ctx.Paths, exec)
 	agent.RefreshSystemPrompt(&temp)
@@ -436,7 +441,7 @@ func applyRootToContext(ctx *app.Context, name string) error {
 	limits := config.ModelLimitsFor(ctx.API, root.Provider, root.Model)
 	root.ContextWindow, root.MaxOutputTokens = limits.ContextWindow, limits.MaxOutputTokens
 	ctx.Root = root
-	ctx.Tools.SetAgentLimits(root.MaxOutputLines, root.AllowParallelShell, root.AllowInteractiveShell)
+	ctx.Tools.SetAgentLimits(root.MaxOutputLines, root.AllowParallelShell, root.AllowInteractiveShell, root.UseGitBash)
 	ctx.Tools.SetVisibleMCP(root.VisibleMCP)
 	ctx.Agent = llm.NewAgent(ctx.API, root, ctx.Paths, ctx.Tools)
 	return nil

@@ -26,6 +26,7 @@ type Executor struct {
 	maxOutputLines        int
 	allowParallelShell    bool
 	allowInteractiveShell bool
+	useGitBash            bool
 	basicOnly             bool
 	shells                *ShellManager
 	subAgents             *SubAgentManager
@@ -33,7 +34,7 @@ type Executor struct {
 	mu                    sync.Mutex
 }
 
-func NewExecutor(paths config.Paths, store *session.Store, maxOutputLines int, allowParallelShell, allowInteractiveShell bool) *Executor {
+func NewExecutor(paths config.Paths, store *session.Store, maxOutputLines int, allowParallelShell, allowInteractiveShell, useGitBash bool) *Executor {
 	if maxOutputLines <= 0 {
 		maxOutputLines = 2000
 	}
@@ -46,17 +47,24 @@ func NewExecutor(paths config.Paths, store *session.Store, maxOutputLines int, a
 		maxOutputLines:        maxOutputLines,
 		allowParallelShell:    allowParallelShell,
 		allowInteractiveShell: allowInteractiveShell,
+		useGitBash:            useGitBash,
 	}
-	exec.shells = NewShellManager(paths.WorkspaceRoot, maxOutputLines)
+	exec.shells = NewShellManager(paths.WorkspaceRoot, maxOutputLines, useGitBash)
 	exec.subAgents = NewSubAgentManager(maxOutputLines)
 	exec.mcp = NewMCPManager(paths, maxOutputLines)
 	return exec
 }
 
-func NewBasicExecutor(paths config.Paths, store *session.Store, maxOutputLines int) *Executor {
-	exec := NewExecutor(paths, store, maxOutputLines, false, false)
+func NewBasicExecutor(paths config.Paths, store *session.Store, maxOutputLines int, useGitBash bool) *Executor {
+	exec := NewExecutor(paths, store, maxOutputLines, false, false, useGitBash)
 	exec.basicOnly = true
 	return exec
+}
+
+func (e *Executor) UseGitBash() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.useGitBash
 }
 
 func (e *Executor) SetSubAgentRunner(runner SubAgentRunner) {
@@ -69,7 +77,7 @@ func (e *Executor) SetVisibleMCP(visibleMCP []string) {
 	}
 }
 
-func (e *Executor) SetAgentLimits(maxOutputLines int, allowParallelShell, allowInteractiveShell bool) {
+func (e *Executor) SetAgentLimits(maxOutputLines int, allowParallelShell, allowInteractiveShell, useGitBash bool) {
 	if maxOutputLines <= 0 {
 		maxOutputLines = 2000
 	}
@@ -80,8 +88,10 @@ func (e *Executor) SetAgentLimits(maxOutputLines int, allowParallelShell, allowI
 	e.maxOutputLines = maxOutputLines
 	e.allowParallelShell = allowParallelShell
 	e.allowInteractiveShell = allowInteractiveShell
+	e.useGitBash = useGitBash
 	e.mu.Unlock()
 	e.shells.SetLimit(maxOutputLines)
+	e.shells.SetUseGitBash(useGitBash)
 	e.subAgents.SetLimit(maxOutputLines)
 	if e.mcp != nil {
 		e.mcp.SetLimit(maxOutputLines)
@@ -127,7 +137,7 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 	if shellCWD == "" {
 		shellCWD = "workspace"
 	}
-	shellEnv := ShellEnvironmentName()
+	shellEnv := e.shells.environmentName()
 	schemas = append(schemas, schema("shell_run_sync", fmt.Sprintf("Run a blocking non-interactive %s command in %q(workspace).", shellEnv, shellCWD), map[string]any{
 		"type": "object",
 		"properties": map[string]any{
