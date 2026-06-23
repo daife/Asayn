@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bot, BrainCircuit, ChevronDown, ChevronRight, CircleStop, Copy, ExternalLink, Folder, FolderOpen, GitFork, Maximize2, Menu, MessageSquarePlus, Minus, PanelLeftClose, Pencil, RotateCcw, Send, Settings2, TerminalSquare, Wrench, X } from "lucide-react";
+import { Bot, BrainCircuit, ChevronDown, ChevronRight, CircleStop, Copy, ExternalLink, Folder, FolderOpen, GitFork, Maximize2, Menu, MessageSquarePlus, Minus, PanelLeftClose, Pencil, Send, Settings2, TerminalSquare, Wrench, X } from "lucide-react";
 import { closeWindow, connect, minimizeWindow, onAgentEvent, openDirectory, request, toggleMaximizeWindow } from "./bridge";
 import Markdown from "./Markdown";
 import type { AgentConfig, AgentEvent, Catalog, Message, Session, Snapshot, Workspace } from "./types";
@@ -100,13 +100,22 @@ export default function App() {
   const [textDialog, setTextDialog] = useState<{ kind: "rename" | "fork"; title: string; label: string; value: string }>();
   const [slashIndex, setSlashIndex] = useState(0);
   const [slashDismissed, setSlashDismissed] = useState(false);
+  const [agentMenu, setAgentMenu] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const conversationRef = useRef<HTMLElement>(null);
+  const agentMenuRef = useRef<HTMLDivElement>(null);
   const historyIndex = useRef(-1);
   const queueRef = useRef<string[]>([]);
   const slashSuggestions = useMemo(() => slashDismissed ? [] : buildSlashSuggestions(prompt, catalog), [prompt, catalog, slashDismissed]);
 
   useEffect(() => setSlashIndex(0), [prompt]);
+  useEffect(() => {
+    const closeAgentMenu = (event: MouseEvent) => {
+      if (!agentMenuRef.current?.contains(event.target as Node)) setAgentMenu(false);
+    };
+    document.addEventListener("mousedown", closeAgentMenu);
+    return () => document.removeEventListener("mousedown", closeAgentMenu);
+  }, []);
 
   const completeSlashSuggestion = (suggestion: SlashSuggestion) => {
     setPrompt(`${suggestion.value} `);
@@ -237,6 +246,7 @@ export default function App() {
   }
 
   async function selectAgent(name: string) {
+    setAgentMenu(false);
     await action("select_agent", { name });
     setCatalog(await request<Catalog>("catalog"));
   }
@@ -271,7 +281,7 @@ export default function App() {
           </button>) : <p>No saved threads</p>}</div>}
         </section>;
       })}</nav>
-      <footer className="sidebar-footer"><div className="workspace-dot"/><div><span>Workspace</span><strong title={snapshot.workspace}>{snapshot.workspace.split(/[\\/]/).pop()}</strong></div><button onClick={() => { setEditing({ ...snapshot.agent }); setSettings(true); }}><Settings2 size={18}/></button></footer>
+      <footer className="sidebar-footer"><div className="workspace-dot"/><div><span>Workspace</span><strong title={snapshot.workspace}>{snapshot.workspace}</strong></div><button className="profile-button" title="Agent profile" onClick={() => { setEditing({ ...snapshot.agent }); setSettings(true); }}><Settings2 size={18}/></button></footer>
     </aside>
 
     <main>
@@ -280,11 +290,19 @@ export default function App() {
         <div className="thread-title"><strong>{snapshot.session.name}</strong><span>{snapshot.session.id.slice(0, 8)}</span></div>
         <div className="topbar-drag" data-tauri-drag-region onDoubleClick={toggleMaximizeWindow} />
         <div className="top-actions">
-          <label className="agent-select"><Bot size={15}/><select value={snapshot.agent.name} onChange={(e) => selectAgent(e.target.value)}>{catalog?.agents.map((a) => <option key={a.Name}>{a.Name}</option>)}</select><ChevronDown size={13}/></label>
+          <div className={`agent-select ${agentMenu ? "open" : ""}`} ref={agentMenuRef}>
+            <button className="agent-trigger" type="button" aria-haspopup="listbox" aria-expanded={agentMenu} onClick={() => setAgentMenu((open) => !open)}>
+              <Bot size={15}/><span>{snapshot.agent.name}</span><ChevronDown size={13}/>
+            </button>
+            {agentMenu && <div className="agent-menu" role="listbox" aria-label="Root agent">
+              {catalog?.agents.map((agent) => <button type="button" role="option" aria-selected={agent.Name === snapshot.agent.name} className={agent.Name === snapshot.agent.name ? "active" : ""} key={agent.Name} onClick={() => selectAgent(agent.Name)}>
+                <span>{agent.Name}</span><small>{agent.Description || agent.Source}</small>
+              </button>)}
+            </div>}
+          </div>
           <button className="icon-button" title="Rename" onClick={() => setTextDialog({ kind: "rename", title: "Rename thread", label: "Thread name", value: snapshot.session.name })}><Pencil size={16}/></button>
           <button className="icon-button" title="Fork" onClick={() => setTextDialog({ kind: "fork", title: "Fork thread", label: "New thread name", value: `${snapshot.session.name}-fork` })}><GitFork size={16}/></button>
           <button className="icon-button" title="Compact context" disabled={running} onClick={compactNow}><BrainCircuit size={16}/></button>
-          <button className="icon-button" title="Retry" disabled={running} onClick={() => send(true)}><RotateCcw size={16}/></button>
           <div className="window-controls" aria-label="Window controls">
             <button className="window-control" title="Minimize" onClick={minimizeWindow}><Minus size={15}/></button>
             <button className="window-control" title="Maximize" onClick={toggleMaximizeWindow}><Maximize2 size={13}/></button>
