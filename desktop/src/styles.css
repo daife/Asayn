@@ -194,3 +194,265 @@ main{min-width:0;min-height:0;overflow:hidden;display:grid;grid-template-rows:58
 @keyframes dialog-in { from { opacity:0;transform:translateY(8px) scale(.985) } }
 @keyframes command-in { from { opacity:0;transform:translateY(6px) scale(.99) } }
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important}}
+
+/* Transparent shell polish for the desktop build. The native window is transparent;
+   this keeps the main workspace readable while letting every secondary surface float. */
+:root {
+  background: transparent;
+  --glass: #0b111bd9;
+  --glass-soft: #101a28a8;
+  --glass-faint: #12203373;
+  --glass-line: #d6ebff24;
+  --glass-edge: #ffffff12;
+}
+
+html,
+body,
+#root {
+  background: transparent;
+}
+
+body {
+  background:
+    radial-gradient(circle at 12% 0%, #2c8fff2e, transparent 31%),
+    radial-gradient(circle at 86% 12%, #74d3ff1f, transparent 28%),
+    transparent;
+}
+
+.app {
+  height: calc(100% - 16px);
+  margin: 8px;
+  border: 1px solid var(--glass-line);
+  border-radius: 24px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 76% -10%, #1d62a33b 0, transparent 34%),
+    linear-gradient(145deg, #08101ae8, #0b111bdc 48%, #070b12e8);
+  box-shadow:
+    0 26px 90px #02060da8,
+    0 0 0 1px #ffffff0b inset,
+    0 1px 0 #ffffff18 inset;
+  backdrop-filter: blur(22px) saturate(1.25);
+}
+
+.sidebar {
+  background:
+    linear-gradient(180deg, #0d1624a8, #0b111b78),
+    radial-gradient(circle at 0% 0%, #2d9bff21, transparent 32%);
+  border-right-color: var(--glass-line);
+  backdrop-filter: blur(24px) saturate(1.18);
+}
+
+.brand,
+.sidebar-footer,
+.topbar,
+.composer-wrap,
+.modal-layer,
+.boot,
+.fatal-error {
+  background: transparent;
+}
+
+.brand,
+.topbar,
+.sidebar-footer {
+  border-color: var(--glass-line);
+  box-shadow: inset 0 1px #ffffff0b;
+}
+
+.topbar {
+  background: linear-gradient(180deg, #0b111bc7, #0b111b66);
+  backdrop-filter: blur(28px) saturate(1.24);
+}
+
+main {
+  background:
+    radial-gradient(circle at 84% 3%, #2b8df029, transparent 30%),
+    linear-gradient(180deg, #09101acc, #0a1018e8);
+}
+
+.conversation {
+  background: linear-gradient(180deg, #07101a2b, transparent 35%);
+}
+
+.composer-wrap {
+  background: linear-gradient(180deg, transparent, #07101bd4 46%, #07101bf2);
+}
+
+.sidebar-actions button,
+.workspace-row:hover,
+.workspace-group.current>.workspace-row,
+.workspace-sessions button:hover,
+.workspace-sessions button.active,
+.agent-select,
+.icon-button:hover,
+.starter-grid span,
+.run-card,
+.user-copy,
+.tool-result,
+.composer,
+.command-menu,
+.error-banner,
+.settings,
+.text-dialog,
+.dialog-mark,
+.switch,
+.picker button,
+.settings textarea,
+.settings select,
+.settings input,
+.text-dialog input {
+  border-color: var(--glass-line);
+  background-color: var(--glass-faint);
+  backdrop-filter: blur(18px) saturate(1.2);
+  box-shadow: inset 0 1px var(--glass-edge);
+}
+
+.sidebar-actions .open-workspace {
+  background: linear-gradient(135deg, #1f8fff42, #14365c66);
+  border-color: #7cc8ff3d;
+}
+
+.sidebar-actions .new-chat,
+.workspace-sessions button.active,
+.picker button.selected {
+  background: linear-gradient(135deg, #1634548a, #0d1827a8);
+}
+
+.workspace-row:hover,
+.workspace-sessions button:hover,
+.icon-button:hover,
+.copy:hover,
+.settings>footer .secondary:hover,
+.text-dialog>footer .secondary:hover,
+.command-menu>button:hover,
+.command-menu>button.active {
+  background-color: #21354f7d;
+}
+
+.user-copy {
+  background: linear-gradient(145deg, #122238b8, #10192596);
+  border-radius: 10px 18px 18px 18px;
+}
+
+.speaker-icon.user {
+  border-radius: 13px;
+  background: linear-gradient(145deg, #46607cbd, #233247b8);
+}
+
+.speaker-icon.asayn,
+.empty-orbit,
+.empty-orbit>div {
+  background-color: #0c1726ad;
+  backdrop-filter: blur(14px);
+}
+
+.run-card {
+  background: #101a27a6;
+}
+
+.run-card pre,
+.markdown pre {
+  background: #050b13bf;
+}
+
+.composer {
+  background: linear-gradient(145deg, #0e1a29d9, #0b121dda);
+  border-radius: 18px;
+}
+
+.command-menu,
+.settings,
+.text-dialog {
+  background:
+    linear-gradient(145deg, #0c1623d6, #0b111bbd),
+    radial-gradient(circle at 12% 0%, #3aa8ff24, transparent 36%);
+  border-color: #d6ebff2b;
+  box-shadow:
+    0 28px 90px #02060db5,
+    inset 0 1px #ffffff18,
+    inset 0 0 0 1px #ffffff08;
+}
+
+.settings>header,
+.settings>footer,
+.text-dialog>header,
+.text-dialog>footer,
+.command-menu footer {
+  background: #07101a66;
+  border-color: var(--glass-line);
+}
+
+.modal-layer {
+  background:
+    radial-gradient(circle at 50% 42%, #0f27438c, transparent 36%),
+    #01050b57;
+  backdrop-filter: blur(16px) saturate(1.18);
+}
+
+.boot,
+.fatal-error {
+  color: #8fa3ba;
+}
+
+.boot {
+  gap: 10px;
+}
+
+.boot::before,
+.fatal-error::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 50% 45%, #123b6640, transparent 28%),
+    radial-gradient(circle at 50% 45%, #70c7ff14, transparent 15%);
+}
+
+.boot-mark {
+  width: 64px;
+  height: 64px;
+  position: relative;
+  z-index: 1;
+  opacity: 1;
+  filter:
+    drop-shadow(0 18px 36px #0f8df060)
+    drop-shadow(0 0 18px #8bd6ff38);
+}
+
+.boot p,
+.boot pre,
+.fatal-error h1,
+.fatal-error pre,
+.fatal-error p {
+  position: relative;
+  z-index: 1;
+}
+
+.boot p {
+  margin: 0;
+  opacity: .62;
+}
+
+.boot pre,
+.fatal-error pre {
+  background: #160b0f82;
+  border-color: #ff81784a;
+  border-radius: 12px;
+  backdrop-filter: blur(16px);
+}
+
+.empty-orbit {
+  border-color: #c6e8ff2b;
+}
+
+.empty-orbit:before,
+.empty-orbit:after {
+  border-color: #c6e8ff22;
+}
+
+.error-banner {
+  background: #351f25bd;
+  backdrop-filter: blur(20px);
+}
