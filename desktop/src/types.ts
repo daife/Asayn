@@ -14,6 +14,6 @@ export type CatalogItem = { Name: string; Description: string; Source: string };
 export type Skill = CatalogItem & { Folder: string };
 export type Provider = { url: string; allowed_models: string[] };
 export type Catalog = { agents: CatalogItem[]; skills: Skill[]; mcp: CatalogItem[]; providers: Record<string, Provider>; config: AgentConfig; api_config_path: string };
-export type AgentEvent = { kind: string; text?: string; usage?: unknown; answer?: string; error?: string };
+export type AgentEvent = { kind: string; text?: string; tool_name?: string; tool_args?: string; tool_call_id?: string; usage?: unknown; answer?: string; error?: string };
 export type ClaudeMigrationItem = { id: string; kind: "skill" | "mcp"; name: string; source: string; target?: string; duplicate: boolean; reason?: string };
 export type ClaudeMigrationResult = { migrated: string[]; skipped: string[] };

@@ -1,7 +1,7 @@
 {
   "name": "asayn-desktop",
   "private": true,
-  "version": "0.5.18",
+  "version": "0.5.19",
   "description": "Asayn desktop client backed by the local Go agent engine.",
   "homepage": "https://github.com/daife/Asayn",
   "desktopName": "Asayn.desktop",

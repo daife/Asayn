@@ -340,7 +340,7 @@ func (b *bridge) runAgent(requestID, action, prompt string, runCtx context.Conte
 	ctx, sess := b.ctx, b.sess
 	b.mu.Unlock()
 	emit := func(event llm.AgentEvent) {
-		b.write(envelope{Type: "event", RequestID: requestID, Data: map[string]any{"kind": event.Kind, "text": event.Text, "usage": event.Usage}})
+		b.write(envelope{Type: "event", RequestID: requestID, Data: map[string]any{"kind": event.Kind, "text": event.Text, "tool_name": event.ToolName, "tool_args": event.ToolArgs, "tool_call_id": event.ToolCallID, "usage": event.Usage}})
 	}
 	var answer string
 	var err error

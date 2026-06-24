@@ -4,10 +4,11 @@ import { closeWindow, connect, minimizeWindow, onAgentEvent, openDirectory, requ
 import Markdown from "./Markdown";
 import type { AgentConfig, AgentEvent, Catalog, ClaudeMigrationItem, ClaudeMigrationResult, Message, Session, Snapshot, Workspace } from "./types";
 
-type RunItem = { kind: "thinking" | "tool" | "error"; title: string; text: string; active?: boolean };
+type RunItem = { kind: "thinking" | "tool" | "error"; title: string; text: string; active?: boolean; toolCallId?: string; toolName?: string; toolArgs?: string };
+type AssistantBlock = { kind: "markdown"; content: string } | { kind: "run"; item: RunItem };
 type TranscriptItem =
   | { kind: "user"; message: Message }
-  | { kind: "assistant"; runItems: RunItem[]; content: string };
+  | { kind: "assistant"; blocks: AssistantBlock[] };
 type SlashSuggestion = { value: string; description: string; kind: "command" | "skill" | "mcp" };
 
 const BUILTIN_COMMANDS: SlashSuggestion[] = [
@@ -37,6 +38,45 @@ export function buildSlashSuggestions(prompt: string, catalog?: Catalog): SlashS
 }
 
 const compact = (n = 0) => n < 1_000 ? `${n}` : n < 1_000_000 ? `${(n / 1_000).toFixed(1)}K` : `${(n / 1_000_000).toFixed(1)}M`;
+const isShellTool = (name?: string) => !!name && name.startsWith("shell_");
+const toolTitle = (name?: string) => isShellTool(name) ? "Shell" : name || "Tool";
+const formatToolText = (name: string | undefined, args = "", result = "") => {
+  if (!isShellTool(name)) return result || args;
+  let command = "";
+  try {
+    const parsed = JSON.parse(args || "{}");
+    if (typeof parsed.command === "string") command = parsed.command;
+    else if (typeof parsed.input === "string") command = parsed.input;
+    else if (typeof parsed.shell_id === "string") command = `shell_id=${parsed.shell_id}`;
+  } catch {
+    command = args;
+  }
+  return [`Command\n${command || args}`, result ? `Result\n${result}` : ""].filter(Boolean).join("\n\n");
+};
+const appendMarkdownBlock = (blocks: AssistantBlock[], content: string): AssistantBlock[] => {
+  if (!content) return blocks;
+  const next = [...blocks];
+  const last = next[next.length - 1];
+  if (last?.kind === "markdown") next[next.length - 1] = { ...last, content: last.content + content };
+  else next.push({ kind: "markdown", content });
+  return next;
+};
+const appendLiveMarkdownBlock = (blocks: AssistantBlock[], content: string): AssistantBlock[] => {
+  if (!content) return blocks;
+  const next = [...blocks];
+  let insertAt = next.length;
+  while (insertAt > 0) {
+    const previous = next[insertAt - 1];
+    if (previous.kind !== "run" || previous.item.kind !== "thinking") break;
+    insertAt--;
+  }
+  const previous = next[insertAt - 1];
+  if (previous?.kind === "markdown") next[insertAt - 1] = { ...previous, content: previous.content + content };
+  else next.splice(insertAt, 0, { kind: "markdown", content });
+  return next;
+};
+const markdownContent = (blocks: AssistantBlock[]) => blocks.filter((block): block is Extract<AssistantBlock, { kind: "markdown" }> => block.kind === "markdown").map((block) => block.content).join("\n\n");
+
 export function buildTranscript(messages?: Message[] | null): TranscriptItem[] {
   const transcript: TranscriptItem[] = [];
   let assistant: Extract<TranscriptItem, { kind: "assistant" }> | undefined;
@@ -44,7 +84,7 @@ export function buildTranscript(messages?: Message[] | null): TranscriptItem[] {
 
   const ensureAssistant = () => {
     if (!assistant) {
-      assistant = { kind: "assistant", runItems: [], content: "" };
+      assistant = { kind: "assistant", blocks: [] };
       transcript.push(assistant);
     }
     return assistant;
@@ -60,22 +100,22 @@ export function buildTranscript(messages?: Message[] | null): TranscriptItem[] {
     }
     if (message.role === "assistant") {
       const turn = ensureAssistant();
-      if (message.reasoning_content) turn.runItems.push({ kind: "thinking", title: "Reasoning", text: message.reasoning_content });
+      if (message.content) turn.blocks = appendMarkdownBlock(turn.blocks, message.content);
+      if (message.reasoning_content) turn.blocks.push({ kind: "run", item: { kind: "thinking", title: "Reasoning", text: message.reasoning_content } });
       for (const call of message.tool_calls || []) {
-        const item: RunItem = { kind: "tool", title: call.function.name, text: call.function.arguments };
-        turn.runItems.push(item);
+        const item: RunItem = { kind: "tool", title: toolTitle(call.function.name), text: formatToolText(call.function.name, call.function.arguments), toolCallId: call.id, toolName: call.function.name, toolArgs: call.function.arguments };
+        turn.blocks.push({ kind: "run", item });
         toolItems.set(call.id, item);
       }
-      if (message.content) turn.content += `${turn.content ? "\n\n" : ""}${message.content}`;
       continue;
     }
     if (message.role === "tool") {
       const matched = message.tool_call_id ? toolItems.get(message.tool_call_id) : undefined;
-      if (matched) matched.text = message.content;
-      else ensureAssistant().runItems.push({ kind: "tool", title: "Tool result", text: message.content });
+      if (matched) matched.text = formatToolText(matched.toolName, matched.toolArgs, message.content);
+      else ensureAssistant().blocks.push({ kind: "run", item: { kind: "tool", title: "Tool result", text: message.content } });
     }
   }
-  return transcript.filter((item) => item.kind === "user" || item.content || item.runItems.length > 0);
+  return transcript.filter((item) => item.kind === "user" || item.blocks.length > 0);
 }
 const normalizedPath = (path: string) => {
   const value = path.replace(/\\/g, "/").replace(/\/$/, "");
@@ -90,8 +130,7 @@ export default function App() {
   const [expandedWorkspaces, setExpandedWorkspaces] = useState<Set<string>>(new Set());
   const [prompt, setPrompt] = useState("");
   const [running, setRunning] = useState(false);
-  const [stream, setStream] = useState("");
-  const [runItems, setRunItems] = useState<RunItem[]>([]);
+  const [liveBlocks, setLiveBlocks] = useState<AssistantBlock[]>([]);
   const [queued, setQueued] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [sidebar, setSidebar] = useState(true);
@@ -148,27 +187,27 @@ export default function App() {
   useEffect(() => {
     const conversation = conversationRef.current;
     if (conversation) conversation.scrollTo({ top: conversation.scrollHeight, behavior: running ? "smooth" : "auto" });
-  }, [snapshot?.session.messages, stream, runItems, running]);
+  }, [snapshot?.session.messages, liveBlocks, running]);
 
   function consumeEvent(event: AgentEvent) {
-    if (event.kind === "assistant_delta") setStream((text) => text + (event.text || ""));
-    else if (event.kind === "thinking_start") setRunItems((items) => [...items, { kind: "thinking", title: "Reasoning", text: "", active: true }]);
-    else if (event.kind === "thinking_delta" || event.kind === "thinking") setRunItems((items) => {
-      const next = [...items]; const i = next.findLastIndex((x) => x.kind === "thinking");
-      if (i >= 0) next[i] = { ...next[i], text: event.kind === "thinking_delta" ? next[i].text + (event.text || "") : event.text || "", active: false };
-      else next.push({ kind: "thinking", title: "Reasoning", text: event.text || "" }); return next;
+    if (event.kind === "assistant_delta" || event.kind === "assistant") setLiveBlocks((blocks) => appendLiveMarkdownBlock(blocks, event.text || ""));
+    else if (event.kind === "thinking_start") setLiveBlocks((blocks) => [...blocks.map((block) => block.kind === "run" ? { ...block, item: { ...block.item, active: false } } : block), { kind: "run", item: { kind: "thinking", title: "Reasoning", text: "", active: true } }]);
+    else if (event.kind === "thinking_delta" || event.kind === "thinking") setLiveBlocks((blocks) => {
+      const next = [...blocks]; const i = next.findLastIndex((x) => x.kind === "run" && x.item.kind === "thinking");
+      if (i >= 0 && next[i].kind === "run") next[i] = { kind: "run", item: { ...next[i].item, text: event.kind === "thinking_delta" ? next[i].item.text + (event.text || "") : event.text || "", active: false } };
+      else next.push({ kind: "run", item: { kind: "thinking", title: "Reasoning", text: event.text || "" } }); return next;
     });
-    else if (event.kind === "tool_start") setRunItems((items) => [...items.map((x) => ({ ...x, active: false })), { kind: "tool", title: event.text || "Tool", text: "", active: true }]);
-    else if (event.kind === "tool_result" || event.kind === "tool_error") setRunItems((items) => {
-      const next = [...items]; const i = next.findLastIndex((x) => x.kind === "tool");
-      if (i >= 0) next[i] = { ...next[i], kind: event.kind === "tool_error" ? "error" : "tool", text: event.text || "", active: false }; return next;
+    else if (event.kind === "tool_start") setLiveBlocks((blocks) => [...blocks.map((block) => block.kind === "run" ? { ...block, item: { ...block.item, active: false } } : block), { kind: "run", item: { kind: "tool", title: toolTitle(event.tool_name || event.text), text: formatToolText(event.tool_name || event.text, event.tool_args), active: true, toolCallId: event.tool_call_id, toolName: event.tool_name || event.text, toolArgs: event.tool_args } }]);
+    else if (event.kind === "tool_result" || event.kind === "tool_error") setLiveBlocks((blocks) => {
+      const next = [...blocks]; const i = next.findLastIndex((x) => x.kind === "run" && x.item.kind === "tool" && (!event.tool_call_id || x.item.toolCallId === event.tool_call_id));
+      if (i >= 0 && next[i].kind === "run") next[i] = { kind: "run", item: { ...next[i].item, kind: event.kind === "tool_error" ? "error" : "tool", text: formatToolText(next[i].item.toolName, next[i].item.toolArgs, event.text || ""), active: false } }; return next;
     });
-    else if (event.kind === "auto_compact") { setStream(""); setRunItems([{ kind: "thinking", title: "Compressing context", text: "Preparing a continuation summary", active: true }]); }
+    else if (event.kind === "auto_compact") setLiveBlocks([{ kind: "run", item: { kind: "thinking", title: "Compressing context", text: "Preparing a continuation summary", active: true } }]);
     else if (event.kind === "done") {
       setRunning(false);
       if (event.error && !event.error.includes("context canceled")) setError(event.error);
       refresh().then(() => {
-        setStream(""); setRunItems([]);
+        setLiveBlocks([]);
         const next = queueRef.current.shift(); setQueued([...queueRef.current]);
         if (next) launch(next);
       }).catch((e) => setError(String(e)));
@@ -176,7 +215,7 @@ export default function App() {
   }
 
   function launch(text: string, retry = false) {
-    setError(""); setStream(""); setRunItems([]); setRunning(true);
+    setError(""); setLiveBlocks([]); setRunning(true);
     if (!retry) setSnapshot((current) => current ? ({ ...current, session: { ...current.session, messages: [...(current.session.messages || []), { role: "user", content: text }] } }) : current);
     request(retry ? "retry" : "ask", retry ? {} : { prompt: text }).catch((e) => { setRunning(false); setError(String(e)); });
   }
@@ -253,7 +292,7 @@ export default function App() {
 
   async function compactNow() {
     if (running) return;
-    setError(""); setStream(""); setRunItems([{ kind: "thinking", title: "Compressing context", text: "Creating a continuation summary", active: true }]); setRunning(true);
+    setError(""); setLiveBlocks([{ kind: "run", item: { kind: "thinking", title: "Compressing context", text: "Creating a continuation summary", active: true } }]); setRunning(true);
     try { await request("compact"); } catch (e) { setRunning(false); setError(String(e)); }
   }
 
@@ -314,13 +353,8 @@ export default function App() {
       <section className="conversation" ref={conversationRef}>
         {transcript.length === 0 && !running ? <EmptyState agent={snapshot.agent}/> : transcript.map((item, i) => item.kind === "user"
           ? <UserMessage key={`user-${i}`} message={item.message}/>
-          : <AssistantTurn key={`assistant-${i}`} runItems={item.runItems} content={item.content}/>)}
-        {(running || stream || runItems.length > 0) && <article className="turn assistant-turn live">
-          <div className="speaker"><AsaynAvatar/><strong>Asayn</strong><span className="live-pill">LIVE</span></div>
-          <div className="run-stack">{runItems.map((item, i) => <RunCard item={item} key={i}/>)}</div>
-          {stream && <Markdown>{stream}</Markdown>}
-          {!stream && runItems.length === 0 && <div className="thinking-line"><i/><i/><i/>Contacting {snapshot.agent.model}</div>}
-        </article>}
+          : <AssistantTurn key={`assistant-${i}`} blocks={item.blocks}/>)}
+        {(running || liveBlocks.length > 0) && <AssistantTurn blocks={liveBlocks} live emptyText={`Contacting ${snapshot.agent.model}`}/>}
         <div ref={endRef}/>
       </section>
 
@@ -364,12 +398,15 @@ function UserMessage({ message }: { message: Message }) {
 
 function AsaynAvatar() { return <div className="speaker-icon asayn" aria-label="Asayn"/>; }
 
-function AssistantTurn({ runItems, content }: { runItems: RunItem[]; content: string }) {
+function AssistantTurn({ blocks, live, emptyText }: { blocks: AssistantBlock[]; live?: boolean; emptyText?: string }) {
   const [copied, setCopied] = useState(false);
-  return <article className="turn assistant-turn"><div className="speaker"><AsaynAvatar/><strong>Asayn</strong></div>
-    {runItems.length > 0 && <div className="run-stack">{runItems.map((item, i) => <RunCard item={item} key={i}/>)}</div>}
-    {content && <Markdown>{content}</Markdown>}
-    {content && <button className="copy" onClick={() => { navigator.clipboard.writeText(content); setCopied(true); setTimeout(() => setCopied(false), 1200); }}><Copy size={13}/>{copied ? "Copied" : "Copy"}</button>}
+  const content = markdownContent(blocks);
+  return <article className={`turn assistant-turn ${live ? "live" : ""}`}><div className="speaker"><AsaynAvatar/><strong>Asayn</strong>{live && <span className="live-pill">LIVE</span>}</div>
+    {blocks.map((block, i) => block.kind === "markdown"
+      ? <Markdown key={`markdown-${i}`}>{block.content}</Markdown>
+      : <div className="run-stack" key={`run-${i}`}><RunCard item={block.item}/></div>)}
+    {blocks.length === 0 && live && <div className="thinking-line"><i/><i/><i/>{emptyText}</div>}
+    {content && !live && <button className="copy" onClick={() => { navigator.clipboard.writeText(content); setCopied(true); setTimeout(() => setCopied(false), 1200); }}><Copy size={13}/>{copied ? "Copied" : "Copy"}</button>}
   </article>;
 }
 

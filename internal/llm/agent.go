@@ -26,9 +26,12 @@ type Agent struct {
 }
 
 type AgentEvent struct {
-	Kind  string
-	Text  string
-	Usage *types.Usage
+	Kind       string
+	Text       string
+	ToolName   string
+	ToolArgs   string
+	ToolCallID string
+	Usage      *types.Usage
 }
 
 func (e AgentEvent) Display() string {
@@ -411,8 +414,11 @@ func (a *Agent) runToolCall(parent context.Context, sess *session.Session, call 
 	}
 	if emit != nil {
 		emit(AgentEvent{
-			Kind: "tool_start",
-			Text: fmt.Sprintf("%s(%s)", call.Function.Name, call.Function.Arguments),
+			Kind:       "tool_start",
+			Text:       call.Function.Name,
+			ToolName:   call.Function.Name,
+			ToolArgs:   call.Function.Arguments,
+			ToolCallID: call.ID,
 		})
 	}
 	ctx, cancel := context.WithTimeout(parent, toolCallTimeout(call.Function.Name, args))
@@ -421,12 +427,12 @@ func (a *Agent) runToolCall(parent context.Context, sess *session.Session, call 
 	if err != nil {
 		out = fmt.Sprintf("tool error: %v", err)
 		if emit != nil {
-			emit(AgentEvent{Kind: "tool_error", Text: out})
+			emit(AgentEvent{Kind: "tool_error", Text: out, ToolName: call.Function.Name, ToolArgs: call.Function.Arguments, ToolCallID: call.ID})
 		}
 		return out
 	}
 	if emit != nil {
-		emit(AgentEvent{Kind: "tool_result", Text: out})
+		emit(AgentEvent{Kind: "tool_result", Text: out, ToolName: call.Function.Name, ToolArgs: call.Function.Arguments, ToolCallID: call.ID})
 	}
 	return out
 }
