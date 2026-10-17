@@ -322,3 +322,32 @@ Run tests:
 ```bash
 go test ./...
 ```
+
+### ChatGPT subscription Responses
+
+Use `subscription_responses` to authorize eligible ChatGPT plan usage through the official Sign in with ChatGPT flow:
+
+```sh
+asayn subscription login personal
+asayn subscription models personal
+```
+
+Add a provider to `~/.Asayn/api_config.toml`, replacing the model slug with one returned for your account:
+
+```toml
+[providers.ChatGPT]
+api_type = "subscription_responses"
+subscription_account = "personal"
+timeout_seconds = 120
+allowed_models = ["model-slug-from-the-models-command"]
+```
+
+Select this provider and model in root, subagent, or compaction profiles. Desktop uses the same local configuration and credentials; sign in using the CLI first. Account labels default to `default`; use separate labels for different accounts/workspaces. Reauthorization reuses the registration and verifies the account identity. Refresh the model list and configuration after switching accounts.
+
+Do not set `api_key`. This mode uses OAuth and the public `https://api.openai.com/v1/responses` endpoint. It always streams with `store=false`, converts system messages to developer messages, sends full local history, and waits for `response.completed`, including for nonstreaming internal callers. Unsupported fields and `previous_response_id` are omitted. Subscription errors never fall back to API billing.
+
+Credentials are stored separately in `~/.Asayn/subscription/<label>.json` with private file permissions (0600, directory 0700). Keep this directory out of source control. Windows users should restrict the directory's ACL to their own account. Expiring tokens refresh automatically under a cross-process lock, with rotating refresh tokens saved atomically. Temporary failures preserve credentials; terminal refresh failures require sign-in again.
+
+Run `asayn subscription logout personal` to revoke the renewable session and clear local tokens while retaining the registration. If remote revocation cannot be confirmed, disconnect the app in ChatGPT Settings. Login requires the browser and CLI on the same host; consult the official self-hosted VM instructions for remote installations.
+
+Availability depends on account/workspace eligibility, regions, granted permissions, and preview restrictions. Plus usage shares a five-hour allowance across apps using the plan. Review usage and authorization in ChatGPT Settings → Usage. See the official [sign-in](https://developers.openai.com/siwc/token-sharing-open-source/sign-in), [sessions](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions), [inference](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference), and [limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations) documentation.

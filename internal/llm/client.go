@@ -14,6 +14,7 @@ import (
 
 	"github.com/asayn/asayn/internal/config"
 	"github.com/asayn/asayn/internal/llm/types"
+	"github.com/asayn/asayn/internal/subscription"
 )
 
 type Client struct {
@@ -116,6 +117,9 @@ func NewClient(cfg config.ProviderConfig) *Client {
 }
 
 func (c *Client) Chat(ctx context.Context, model string, messages []types.ChatMessage, tools []types.ToolSchema, thinkingEnabled bool, reasoningEffort string) (types.ChatMessage, types.Usage, error) {
+	if c.cfg.APIType == "subscription_responses" {
+		return c.ChatStream(ctx, model, messages, tools, thinkingEnabled, reasoningEffort, nil)
+	}
 	reqBody := c.buildRequest(model, messages, tools, thinkingEnabled, reasoningEffort, false)
 
 	data, err := json.Marshal(reqBody)
@@ -132,8 +136,8 @@ func (c *Client) Chat(ctx context.Context, model string, messages []types.ChatMe
 			return types.ChatMessage{}, types.Usage{}, err
 		}
 		req.Header.Set("Content-Type", "application/json")
-		if c.cfg.APIKey != "" {
-			req.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
+		if err := c.authorize(ctx, req); err != nil {
+			return types.ChatMessage{}, types.Usage{}, err
 		}
 
 		resp, err := c.http.Do(req)
@@ -150,6 +154,11 @@ func (c *Client) Chat(ctx context.Context, model string, messages []types.ChatMe
 			return types.ChatMessage{}, types.Usage{}, err
 		}
 
+		if c.cfg.APIType == "subscription_responses" && (resp.StatusCode < 200 || resp.StatusCode >= 300) {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+			resp.Body.Close()
+			return types.ChatMessage{}, types.Usage{}, fmt.Errorf("subscription API HTTP %d (request ID %s): %s", resp.StatusCode, resp.Header.Get("x-request-id"), string(body))
+		}
 		if resp.StatusCode == http.StatusTooManyRequests {
 			if attempt == maxRetries {
 				return types.ChatMessage{}, types.Usage{}, fmt.Errorf("API rate limit exceeded after %d retries", maxRetries)
@@ -163,7 +172,7 @@ func (c *Client) Chat(ctx context.Context, model string, messages []types.ChatMe
 			}
 		}
 
-		if c.cfg.APIType == "responses" && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		if c.usesResponses() && resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			return decodeResponses(body)
 		}
 		var parsed chatResponse
@@ -203,8 +212,8 @@ func (c *Client) ChatStream(ctx context.Context, model string, messages []types.
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "text/event-stream")
-		if c.cfg.APIKey != "" {
-			req.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
+		if err := c.authorize(ctx, req); err != nil {
+			return types.ChatMessage{}, types.Usage{}, err
 		}
 
 		resp, err = c.http.Do(req)
@@ -215,6 +224,11 @@ func (c *Client) ChatStream(ctx context.Context, model string, messages []types.
 			return types.ChatMessage{}, types.Usage{}, err
 		}
 
+		if c.cfg.APIType == "subscription_responses" && (resp.StatusCode < 200 || resp.StatusCode >= 300) {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+			resp.Body.Close()
+			return types.ChatMessage{}, types.Usage{}, fmt.Errorf("subscription API HTTP %d (request ID %s): %s", resp.StatusCode, resp.Header.Get("x-request-id"), string(body))
+		}
 		if resp.StatusCode == http.StatusTooManyRequests {
 			resp.Body.Close()
 			if attempt == maxRetries {
@@ -250,8 +264,12 @@ func (c *Client) ChatStream(ctx context.Context, model string, messages []types.
 		return types.ChatMessage{}, types.Usage{}, fmt.Errorf("API error %d: %s", resp.StatusCode, string(body))
 	}
 
-	if c.cfg.APIType == "responses" {
-		return c.readResponsesStream(resp.Body, onDelta)
+	if c.usesResponses() {
+		msg, usage, err := c.readResponsesStream(resp.Body, onDelta)
+		if err != nil && c.cfg.APIType == "subscription_responses" {
+			return msg, usage, fmt.Errorf("subscription response (request ID %s): %w", resp.Header.Get("x-request-id"), err)
+		}
+		return msg, usage, err
 	}
 	msg := types.ChatMessage{Role: "assistant"}
 	var finalUsage types.Usage
@@ -441,4 +459,25 @@ func normalizedReasoningEffort(effort string) string {
 	default:
 		return "high"
 	}
+}
+
+func (c *Client) usesResponses() bool {
+	return c.cfg.APIType == "responses" || c.cfg.APIType == "subscription_responses"
+}
+func (c *Client) authorize(ctx context.Context, req *http.Request) error {
+	token := c.cfg.APIKey
+	if c.cfg.APIType == "subscription_responses" {
+		path, err := subscription.DefaultPath(c.cfg.SubscriptionAccount)
+		if err != nil {
+			return err
+		}
+		token, err = subscription.AccessToken(ctx, path)
+		if err != nil {
+			return err
+		}
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	return nil
 }

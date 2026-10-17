@@ -17,6 +17,9 @@ func providerURL(cfg config.ProviderConfig) string {
 	for _, suffix := range []string{"/chat/completions", "/responses"} {
 		base = strings.TrimSuffix(base, suffix)
 	}
+	if cfg.APIType == "subscription_responses" {
+		return "https://api.openai.com/v1/responses"
+	}
 	if cfg.APIType == "responses" {
 		return base + "/responses"
 	}
@@ -24,7 +27,7 @@ func providerURL(cfg config.ProviderConfig) string {
 }
 
 func (c *Client) buildRequest(model string, messages []types.ChatMessage, tools []types.ToolSchema, thinking bool, effort string, stream bool) any {
-	if c.cfg.APIType != "responses" {
+	if !c.usesResponses() {
 		r := buildChatRequest(model, messages, tools, thinking, effort, stream)
 		r.User, r.PromptCacheKey = c.cfg.User, c.cfg.PromptCacheKey
 		return r
@@ -41,7 +44,11 @@ func (c *Client) buildRequest(model string, messages []types.ChatMessage, tools 
 			continue
 		}
 		if m.Content != "" || m.Role != "assistant" {
-			input = append(input, map[string]any{"role": m.Role, "content": m.Content})
+			role := m.Role
+			if c.cfg.APIType == "subscription_responses" && role == "system" {
+				role = "developer"
+			}
+			input = append(input, map[string]any{"role": role, "content": m.Content})
 		}
 		for _, call := range m.ToolCalls {
 			input = append(input, map[string]any{"type": "function_call", "call_id": call.ID, "name": call.Function.Name, "arguments": call.Function.Arguments})
@@ -52,6 +59,9 @@ func (c *Client) buildRequest(model string, messages []types.ChatMessage, tools 
 		functions = append(functions, map[string]any{"type": "function", "name": t.Function.Name, "description": t.Function.Description, "parameters": t.Function.Parameters, "strict": false})
 	}
 	r := map[string]any{"model": model, "input": input, "store": false, "stream": stream, "include": []string{"reasoning.encrypted_content"}}
+	if c.cfg.APIType == "subscription_responses" {
+		r["stream"] = true
+	}
 	if len(functions) > 0 {
 		r["tools"] = functions
 	}
@@ -103,6 +113,8 @@ type responsesResult struct {
 	} `json:"usage"`
 	Error *struct {
 		Message string `json:"message"`
+		Code    string `json:"code"`
+		Param   string `json:"param"`
 	} `json:"error"`
 	IncompleteDetails any `json:"incomplete_details"`
 }
@@ -141,7 +153,7 @@ func decodeResponses(data []byte) (types.ChatMessage, types.Usage, error) {
 		}
 	}
 	if r.Error != nil {
-		return msg, usage, fmt.Errorf("Responses API: %s", r.Error.Message)
+		return msg, usage, fmt.Errorf("Responses API %s (%s): %s", r.Error.Code, r.Error.Param, r.Error.Message)
 	}
 	if r.Status != "completed" {
 		return msg, usage, fmt.Errorf("Responses API status %q: %v", r.Status, r.IncompleteDetails)

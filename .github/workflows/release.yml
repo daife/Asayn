@@ -151,6 +151,7 @@ jobs:
     needs: [cli, desktop]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: release
@@ -163,19 +164,6 @@ jobs:
         with:
           name: Asayn ${{ github.ref_name }}
           generate_release_notes: true
-          body: |
-            ## Desktop application
-            This release includes the Tauri 2 desktop client backed by the local Go agent engine.
-
-            - Windows x64: NSIS setup (`.exe`) and MSI installer (`.msi`)
-            - Linux x64: Debian package (`.deb`) and AppImage (`.AppImage`)
-            - Existing CLI binaries remain available for Linux, macOS, and Windows.
-
-            ## 桌面应用
-            本版本包含由本地 Go Agent 引擎驱动的 Tauri 2 桌面客户端。
-
-            - Windows x64：NSIS 安装程序和 MSI 安装包
-            - Linux x64：DEB 安装包和 AppImage
-            - 同时保留 Linux、macOS、Windows 的 CLI 二进制文件
+          body_path: docs/releases/${{ github.ref_name }}.md
           files: release/*
           fail_on_unmatched_files: true

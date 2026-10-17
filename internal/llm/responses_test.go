@@ -7,8 +7,11 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/asayn/asayn/internal/config"
 	"github.com/asayn/asayn/internal/llm/types"
@@ -106,5 +109,69 @@ func TestChatRequestDoesNotLeakResponsesMetadata(t *testing.T) {
 	}
 	if strings.Contains(string(data), "responses_reasoning") || !strings.Contains(string(data), `"user":"shared-user"`) {
 		t.Fatalf("invalid chat request: %s", data)
+	}
+}
+
+func TestSubscriptionRequestConstraints(t *testing.T) {
+	c := NewClient(config.ProviderConfig{APIType: "subscription_responses", BaseURL: "https://untrusted.invalid", User: "user"})
+	if c.apiURL != "https://api.openai.com/v1/responses" {
+		t.Fatal("subscription endpoint must be public OpenAI")
+	}
+	body := c.buildRequest("model", []types.ChatMessage{{Role: "system", Content: "instructions"}, {Role: "user", Content: "hello"}}, nil, false, "", false).(map[string]any)
+	if body["store"] != false || body["stream"] != true || body["input"].([]any)[0].(map[string]any)["role"] != "developer" {
+		t.Fatalf("invalid subscription request: %v", body)
+	}
+	for _, key := range []string{"previous_response_id", "temperature", "max_output_tokens", "user", "metadata", "conversation"} {
+		if _, exists := body[key]; exists {
+			t.Errorf("unsupported field %s", key)
+		}
+	}
+}
+
+func TestSubscriptionTerminalErrors(t *testing.T) {
+	c := NewClient(config.ProviderConfig{APIType: "subscription_responses"})
+	for _, payload := range []string{
+		`{"type":"response.failed","response":{"status":"failed","error":{"code":"subscription_sharing_usage_limit_exceeded","message":"Plan limit reached"}}}`,
+		`{"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"limit"}}}`,
+	} {
+		_, _, err := c.readResponsesStream(io.NopCloser(strings.NewReader("data: "+payload+"\n\n")), nil)
+		if err == nil {
+			t.Fatal("non-completed response accepted")
+		}
+		if strings.Contains(payload, "subscription_sharing_usage_limit_exceeded") && !strings.Contains(err.Error(), "subscription_sharing_usage_limit_exceeded") {
+			t.Fatal("lost subscription error code")
+		}
+	}
+}
+
+func TestSubscriptionChatUsesAuthenticatedStream(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	dir := filepath.Join(home, ".Asayn", "subscription")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	session, _ := json.Marshal(map[string]any{"client_id": "issued", "scope": "chatgpt.tokens.use.direct", "access_token": "oauth-access", "expires_at": time.Now().Add(time.Hour)})
+	if err := os.WriteFile(filepath.Join(dir, "default.json"), session, 0600); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer oauth-access" {
+			t.Error("OAuth token missing")
+		}
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body["stream"] != true || body["store"] != false {
+			t.Error("invalid subscription options")
+		}
+		fmt.Fprintf(w, "data: {\"type\":\"response.completed\",\"response\":%s}\n\n", responsesFixture)
+	}))
+	defer server.Close()
+	c := NewClient(config.ProviderConfig{APIType: "subscription_responses"})
+	c.apiURL = server.URL
+	msg, _, err := c.Chat(context.Background(), "model", []types.ChatMessage{{Role: "user", Content: "hello"}}, nil, false, "")
+	if err != nil || len(msg.ToolCalls) != 1 {
+		t.Fatalf("nonstream caller failed: %+v %v", msg, err)
 	}
 }

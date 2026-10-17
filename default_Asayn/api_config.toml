@@ -70,3 +70,12 @@ max_output_tokens = 131072
 # prompt_cache_key = "asayn"
 # timeout_seconds = 120
 # allowed_models = ["your-model"]
+
+# ChatGPT subscription Responses (OAuth, no api_key):
+# Run: asayn subscription login personal
+# Then: asayn subscription models personal
+# [providers.ChatGPT]
+# api_type = "subscription_responses"
+# subscription_account = "personal"
+# timeout_seconds = 120
+# allowed_models = ["model-slug-from-the-models-command"]

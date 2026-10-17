@@ -322,3 +322,40 @@ CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w -buil
 ```bash
 go test ./...
 ```
+
+### 使用 ChatGPT 订阅额度（订阅 Responses）
+
+新增第三种协议 `subscription_responses`，通过官方 Sign in with ChatGPT 授权使用符合条件的 ChatGPT 订阅额度。先在本机终端执行：
+
+```sh
+asayn subscription login personal
+asayn subscription models personal
+```
+
+登录命令会打开系统浏览器（Continue with ChatGPT），等待本机回调，验证 ID Token 签名、issuer、audience、有效期、nonce 和授权 scope。`personal` 是本地账号标签；省略时为 `default`。不同账号或工作区请使用不同标签，重新登录同一标签会复用已签发的 client ID 和本机 host ID，并检查账号身份一致。
+
+在 `~/.Asayn/api_config.toml` 中添加：
+
+```toml
+[providers.ChatGPT]
+api_type = "subscription_responses"
+subscription_account = "personal"
+timeout_seconds = 120
+allowed_models = ["替换为 models 命令返回的 slug"]
+```
+
+然后把主 agent、子 agent 或压缩 agent 的 `provider` 设置为 `ChatGPT`，`model` 设置为实际 slug。桌面版也读取同一配置和凭据：先用 CLI 登录，再在桌面版中选择对应的 Provider/模型。`models` 命令使用所选账号的实时模型列表，保留官方显示顺序；换账号后重新查询并更新 `allowed_models`。
+
+不要配置 `api_key`。URL 可省略，订阅请求固定使用公开的 `https://api.openai.com/v1/responses`。与普通 Responses 的差异：强制 `store=false`、`stream=true`，系统提示转为 developer 消息，每次发送完整本地历史，不使用 `previous_response_id` 或不支持的采样字段。内部非流式调用也通过流式请求聚合结果，仅收到 `response.completed` 后返回成功；订阅额度错误、未完成和中断均返回错误，不会自动切换 API 付费。
+
+凭据保存在 `~/.Asayn/subscription/<标签>.json`（0600，目录 0700），不会写入 API 配置或浏览器存储。请勿提交或分享该目录。接近过期时自动刷新并保存新的 refresh token；跨进程锁防止并发刷新。暂时性刷新失败保留凭据，确认 refresh token 不可用后清除 token 并要求重新登录。Windows 请确保用户目录 ACL 仅允许本人访问。
+
+```sh
+asayn subscription logout personal
+```
+
+退出会尝试撤销远端可续期会话并清除本地 token，保留注册信息以便重新登录；远端撤销未确认时会明确提示，可在 ChatGPT Settings 中断开应用。浏览器和 CLI 需运行在同一台机器；远程 VM 请按官方自托管指引转移受保护凭据，并保留 VM 自己的 host ID。
+
+这项能力目前受官方预览限制、账号/工作区资格、地区和实际授权范围约束；Plus 的五小时额度在使用订阅的应用之间共享，不是每个应用单独一份。可在 ChatGPT Settings → Usage 查看额度和管理授权。
+
+官方文档：[登录授权](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)、[会话与刷新](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions)、[模型调用](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)、[预览限制](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations)。

@@ -27,14 +27,15 @@ type Paths struct {
 }
 
 type ProviderConfig struct {
-	APIType        string                 `toml:"api_type" json:"api_type"`
-	PromptCacheKey string                 `toml:"prompt_cache_key" json:"prompt_cache_key"`
-	User           string                 `toml:"user" json:"user"`
-	BaseURL        string                 `toml:"url" json:"url"`
-	APIKey         string                 `toml:"api_key" json:"api_key"`
-	TimeoutSeconds int                    `toml:"timeout_seconds" json:"timeout_seconds"`
-	AllowedModels  []string               `toml:"allowed_models" json:"allowed_models"`
-	ModelLimits    map[string]ModelLimits `toml:"model_limits" json:"model_limits"`
+	SubscriptionAccount string                 `toml:"subscription_account" json:"subscription_account"`
+	APIType             string                 `toml:"api_type" json:"api_type"`
+	PromptCacheKey      string                 `toml:"prompt_cache_key" json:"prompt_cache_key"`
+	User                string                 `toml:"user" json:"user"`
+	BaseURL             string                 `toml:"url" json:"url"`
+	APIKey              string                 `toml:"api_key" json:"api_key"`
+	TimeoutSeconds      int                    `toml:"timeout_seconds" json:"timeout_seconds"`
+	AllowedModels       []string               `toml:"allowed_models" json:"allowed_models"`
+	ModelLimits         map[string]ModelLimits `toml:"model_limits" json:"model_limits"`
 }
 
 type ModelLimits struct {
@@ -180,9 +181,18 @@ func LoadAPIConfig(paths Paths) (APIConfig, error) {
 	for k, p := range cfg.Providers {
 		p.APIType = strings.ToLower(strings.TrimSpace(p.APIType))
 		switch p.APIType {
-		case "", "chat_completions", "responses":
+		case "", "chat_completions", "responses", "subscription_responses":
 		default:
-			return cfg, fmt.Errorf("provider %q: unsupported api_type %q (use chat_completions or responses)", k, p.APIType)
+			return cfg, fmt.Errorf("provider %q: unsupported api_type %q (use chat_completions, responses or subscription_responses)", k, p.APIType)
+		}
+		if p.APIType == "subscription_responses" {
+			if p.BaseURL != "" && strings.TrimRight(p.BaseURL, "/") != "https://api.openai.com/v1" && strings.TrimRight(p.BaseURL, "/") != "https://api.openai.com/v1/responses" {
+				return cfg, fmt.Errorf("provider %q: subscription_responses requires the public OpenAI endpoint", k)
+			}
+			p.BaseURL = "https://api.openai.com/v1"
+			if p.APIKey != "" {
+				return cfg, fmt.Errorf("provider %q: subscription_responses uses OAuth; remove api_key", k)
+			}
 		}
 		if p.TimeoutSeconds <= 0 {
 			p.TimeoutSeconds = 120
