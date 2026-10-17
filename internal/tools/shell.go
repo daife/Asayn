@@ -87,9 +87,8 @@ func (m *ShellManager) RunBlocking(ctx context.Context, command string, timeoutS
 	case <-run.done:
 		out := run.output.String()
 		if err := run.Err(); err != nil {
-			return truncate(out, m.limit), fmt.Errorf("command failed: %w", err)
+			return out, fmt.Errorf("command failed: %w", err)
 		}
-		out = truncate(out, m.limit)
 		return out, nil
 	case <-waitCtx.Done():
 		m.killRun(run)
@@ -98,7 +97,6 @@ func (m *ShellManager) RunBlocking(ctx context.Context, command string, timeoutS
 			out += "\n"
 		}
 		out += fmt.Sprintf("<TIMEOUT after %d seconds>", timeoutSec)
-		out = truncate(out, m.limit)
 		return out, nil
 	}
 }
@@ -132,7 +130,7 @@ func (m *ShellManager) Status(id string) string {
 			}
 			return "shell not found or terminated"
 		}
-		return truncate(m.describeWithOutput(run), m.limit)
+		return m.describeWithOutput(run)
 	}
 	rows := []string{}
 	for _, run := range m.runs {
@@ -142,7 +140,7 @@ func (m *ShellManager) Status(id string) string {
 	if len(rows) == 0 {
 		return "no running shells"
 	}
-	return truncate(strings.Join(rows, "\n\n"), m.limit)
+	return strings.Join(rows, "\n\n")
 }
 
 func (m *ShellManager) Write(id, input string) (string, error) {

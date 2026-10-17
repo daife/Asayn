@@ -297,7 +297,7 @@ func (e *Executor) readSkill(args map[string]any) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return truncate(skill.Content, e.maxOutputLines), nil
+	return skill.Content, nil
 }
 
 func (e *Executor) SubAgentSnapshots() []SubAgentSnapshot {
@@ -382,7 +382,7 @@ func (e *Executor) readFile(args map[string]any) (string, error) {
 		return "", fmt.Errorf("start_line is after end_line")
 	}
 	out := strings.Join(lines[start-1:end], "\n")
-	return truncate(out, e.maxOutputLines), nil
+	return out, nil
 }
 
 func (e *Executor) viewDir(args map[string]any) (string, error) {
@@ -407,7 +407,7 @@ func (e *Executor) viewDir(args map[string]any) (string, error) {
 		rows = append(rows, ent.Name()+suffix)
 	}
 	sort.Strings(rows)
-	return truncate(strings.Join(rows, "\n"), e.maxOutputLines), nil
+	return strings.Join(rows, "\n"), nil
 }
 
 func (e *Executor) searchGrep(args map[string]any) (string, error) {
@@ -442,14 +442,11 @@ func (e *Executor) searchGrep(args map[string]any) (string, error) {
 		if isKnownBinaryFile(rel) {
 			return nil
 		}
-		fileMatches, readErr := grepTextFile(path, rel, re, 200-len(matches))
+		fileMatches, readErr := grepTextFile(path, rel, re)
 		if readErr != nil {
 			return nil
 		}
 		matches = append(matches, fileMatches...)
-		if len(matches) >= 200 {
-			return filepath.SkipAll
-		}
 		return nil
 	})
 	if err != nil {
@@ -458,7 +455,7 @@ func (e *Executor) searchGrep(args map[string]any) (string, error) {
 	if len(matches) == 0 {
 		return "no matches", nil
 	}
-	return truncate(strings.Join(matches, "\n"), e.maxOutputLines), nil
+	return strings.Join(matches, "\n"), nil
 }
 
 func compileSearchPattern(query string, caseSensitive bool) (*regexp.Regexp, error) {
@@ -503,10 +500,7 @@ func riskyFilePreview(path string) (string, bool, error) {
 	return preview, true, nil
 }
 
-func grepTextFile(path, rel string, re *regexp.Regexp, remaining int) ([]string, error) {
-	if remaining <= 0 {
-		return nil, nil
-	}
+func grepTextFile(path, rel string, re *regexp.Regexp) ([]string, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -525,24 +519,23 @@ func grepTextFile(path, rel string, re *regexp.Regexp, remaining int) ([]string,
 		return nil, err
 	}
 
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	reader := bufio.NewReader(file)
 	matches := []string{}
-	lineNo := 0
-	for scanner.Scan() {
-		lineNo++
-		line := scanner.Text()
-		if re.MatchString(line) {
-			matches = append(matches, fmt.Sprintf("%s:%d: %s", rel, lineNo, line))
-			if len(matches) >= remaining {
-				return matches, nil
+	for lineNo := 1; ; lineNo++ {
+		line, err := reader.ReadString('\n')
+		if err != nil && err != io.EOF {
+			return nil, err
+		}
+		if len(line) > 0 {
+			line = strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r")
+			if re.MatchString(line) {
+				matches = append(matches, fmt.Sprintf("%s:%d: %s", rel, lineNo, line))
 			}
 		}
+		if err == io.EOF {
+			return matches, nil
+		}
 	}
-	if err := scanner.Err(); err != nil {
-		return matches, nil
-	}
-	return matches, nil
 }
 
 func (e *Executor) resolveWorkspaceRootPath(path string) (string, error) {
@@ -679,30 +672,6 @@ func boolArg(args map[string]any, key string, def bool) bool {
 	default:
 		return def
 	}
-}
-
-func truncate(s string, limitLines int) string {
-	if limitLines <= 0 {
-		return s
-	}
-	lines := strings.Split(s, "\n")
-	if len(lines) <= limitLines {
-		return s
-	}
-	head := 500
-	tail := limitLines - head
-	if limitLines < 1000 {
-		head = limitLines / 3
-		tail = limitLines - head
-	}
-	truncStart := head + 1
-	truncEnd := len(lines) - tail
-
-	var out strings.Builder
-	out.WriteString(strings.Join(lines[:head], "\n"))
-	out.WriteString(fmt.Sprintf("\n\n--- [Output truncated: omitted lines %d to %d (total %d lines). Use grep_search/file_read for specific sections.] ---\n\n", truncStart, truncEnd, len(lines)))
-	out.WriteString(strings.Join(lines[len(lines)-tail:], "\n"))
-	return out.String()
 }
 
 func isBinary(data []byte) bool {

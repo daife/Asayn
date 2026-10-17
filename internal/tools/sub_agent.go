@@ -120,7 +120,7 @@ func (m *SubAgentManager) List(paths config.Paths) string {
 	} else {
 		rows = append(rows, "none")
 	}
-	return truncate(strings.Join(rows, "\n"), m.limit)
+	return strings.Join(rows, "\n")
 }
 
 func (m *SubAgentManager) Check(id string) string {
@@ -136,7 +136,7 @@ func (m *SubAgentManager) Check(id string) string {
 		task.UpdatedAt = time.Now()
 		task.persistLocked()
 	}
-	return truncate(res, m.limit)
+	return res
 }
 
 func (m *SubAgentManager) Delay(ctx context.Context, seconds int) (string, error) {

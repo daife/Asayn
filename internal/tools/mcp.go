@@ -239,14 +239,13 @@ func (m *MCPManager) Call(ctx context.Context, publicName string, args map[strin
 		return "", fmt.Errorf("mcp server %q is %s", ref.Server, err)
 	}
 	client := rt.client
-	limit := m.limit
 	m.mu.Unlock()
 
 	result, err := client.callTool(ctx, ref.Tool, args)
 	if err != nil {
 		return "", err
 	}
-	return truncate(formatMCPCallResult(result), limit), nil
+	return formatMCPCallResult(result), nil
 }
 
 func (m *MCPManager) Shutdown() {
