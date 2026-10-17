@@ -1,12 +1,15 @@
 package types
 
+import "encoding/json"
+
 type ChatMessage struct {
-	Role             string     `json:"role"`
-	Content          string     `json:"content"`
-	Name             string     `json:"name,omitempty"`
-	ToolCallID       string     `json:"tool_call_id,omitempty"`
-	ReasoningContent string     `json:"reasoning_content,omitempty"`
-	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
+	ResponsesReasoning []json.RawMessage `json:"responses_reasoning,omitempty"`
+	Role               string            `json:"role"`
+	Content            string            `json:"content"`
+	Name               string            `json:"name,omitempty"`
+	ToolCallID         string            `json:"tool_call_id,omitempty"`
+	ReasoningContent   string            `json:"reasoning_content,omitempty"`
+	ToolCalls          []ToolCall        `json:"tool_calls,omitempty"`
 }
 
 type Usage struct {

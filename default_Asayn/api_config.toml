@@ -1,6 +1,12 @@
+# api_type: "chat_completions" (default) or "responses".
+# Optional prompt_cache_key: use a stable value shared by sessions/subagents.
+# Optional user: forwarded to Chat Completions; fallback cache key for Responses.
+# For Responses, set url to the API base (including /v1 when required) or /responses.
+
 [providers.SiliconFlow]
 url = "https://api.siliconflow.cn/v1"
 api_key = "your_api_key"
+api_type = "chat_completions"
 timeout_seconds = 120
 allowed_models = [
   "deepseek-ai/DeepSeek-V4-Flash",
@@ -23,6 +29,7 @@ max_output_tokens = 384000
 [providers.DeepSeek]
 url = "https://api.deepseek.com"
 api_key = "your_api_key"
+api_type = "chat_completions"
 timeout_seconds = 120
 allowed_models = [
   "deepseek-v4-pro",
@@ -40,6 +47,7 @@ max_output_tokens = 384000
 [providers.XiaomiMIMO]
 url = "https://api.xiaomimimo.com/v1"
 api_key = "your_api_key"
+api_type = "chat_completions"
 timeout_seconds = 120
 allowed_models = [
   "mimo-v2.5-pro",
@@ -53,3 +61,12 @@ max_output_tokens = 131072
 [providers.XiaomiMIMO.model_limits."mimo-v2.5"]
 context_window = 1024000
 max_output_tokens = 131072
+
+# Responses example (uncomment and set your actual model/API key):
+# [providers.OpenAI]
+# url = "https://api.openai.com/v1"
+# api_key = "your_api_key"
+# api_type = "responses"
+# prompt_cache_key = "asayn"
+# timeout_seconds = 120
+# allowed_models = ["your-model"]

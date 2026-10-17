@@ -151,7 +151,21 @@ allowed_models = [
 ]
 ```
 
-The bundled default config includes DeepSeek, SiliconFlow, and XiaomiMIMO examples. Provider URLs are treated as OpenAI-compatible Chat Completions endpoints; if the configured URL does not end with `/chat/completions`, Asayn appends it.
+The bundled default config includes DeepSeek, SiliconFlow, and XiaomiMIMO examples. Each provider selects `api_type = "chat_completions"` (default, compatible with existing configs) or `api_type = "responses"`. Asayn appends the matching `/chat/completions` or `/responses` endpoint and also accepts a full endpoint URL. Include `/v1` in the URL when required by your provider.
+
+```toml
+[providers.OpenAI]
+url = "https://api.openai.com/v1"
+api_key = "your_api_key"
+api_type = "responses"
+prompt_cache_key = "asayn"
+timeout_seconds = 120
+allowed_models = ["your-model"]
+```
+
+Set the agent's `provider` and `model` accordingly. Root, subagent, and compaction calls support both protocols. Optional `prompt_cache_key` is a stable provider-wide cache routing key shared across sessions and subagents, without session ID suffixes. Optional `user` is sent unchanged for Chat Completions; Responses uses it only as a fallback cache key when `prompt_cache_key` is absent. Neither field is sent when unset. Cache hits depend on provider support and matching prompt prefixes; sharing a cache key does not share conversation history.
+
+Responses uses `store = false` with independent local histories and persists encrypted reasoning items for tool continuations and session restoration, without `previous_response_id`. With `thinking_enabled = true`, `reasoning.effort` is sent (`max` maps to `xhigh`); otherwise reasoning parameters are omitted and model defaults apply. Parameter support depends on your model and compatible provider.
 
 ### Agents
 

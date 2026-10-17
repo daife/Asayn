@@ -26,6 +26,8 @@ type Client struct {
 const rateLimitMaxRetries = 10
 
 type chatRequest struct {
+	User            string              `json:"user,omitempty"`
+	PromptCacheKey  string              `json:"prompt_cache_key,omitempty"`
 	Model           string              `json:"model"`
 	Messages        []types.ChatMessage `json:"messages"`
 	Tools           []types.ToolSchema  `json:"tools,omitempty"`
@@ -108,13 +110,13 @@ func NewClient(cfg config.ProviderConfig) *Client {
 	return &Client{
 		cfg:     cfg,
 		http:    newHTTPClient(timeout),
-		apiURL:  completionsURL(cfg.BaseURL),
+		apiURL:  providerURL(cfg),
 		timeout: timeout,
 	}
 }
 
 func (c *Client) Chat(ctx context.Context, model string, messages []types.ChatMessage, tools []types.ToolSchema, thinkingEnabled bool, reasoningEffort string) (types.ChatMessage, types.Usage, error) {
-	reqBody := buildChatRequest(model, messages, tools, thinkingEnabled, reasoningEffort, false)
+	reqBody := c.buildRequest(model, messages, tools, thinkingEnabled, reasoningEffort, false)
 
 	data, err := json.Marshal(reqBody)
 	if err != nil {
@@ -161,6 +163,9 @@ func (c *Client) Chat(ctx context.Context, model string, messages []types.ChatMe
 			}
 		}
 
+		if c.cfg.APIType == "responses" && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			return decodeResponses(body)
+		}
 		var parsed chatResponse
 		if err := json.Unmarshal(body, &parsed); err != nil {
 			return types.ChatMessage{}, types.Usage{}, fmt.Errorf("decode API response: %w: %s", err, string(body))
@@ -180,7 +185,7 @@ func (c *Client) Chat(ctx context.Context, model string, messages []types.ChatMe
 }
 
 func (c *Client) ChatStream(ctx context.Context, model string, messages []types.ChatMessage, tools []types.ToolSchema, thinkingEnabled bool, reasoningEffort string, onDelta func(StreamDelta)) (types.ChatMessage, types.Usage, error) {
-	reqBody := buildChatRequest(model, messages, tools, thinkingEnabled, reasoningEffort, true)
+	reqBody := c.buildRequest(model, messages, tools, thinkingEnabled, reasoningEffort, true)
 
 	data, err := json.Marshal(reqBody)
 	if err != nil {
@@ -245,6 +250,9 @@ func (c *Client) ChatStream(ctx context.Context, model string, messages []types.
 		return types.ChatMessage{}, types.Usage{}, fmt.Errorf("API error %d: %s", resp.StatusCode, string(body))
 	}
 
+	if c.cfg.APIType == "responses" {
+		return c.readResponsesStream(resp.Body, onDelta)
+	}
 	msg := types.ChatMessage{Role: "assistant"}
 	var finalUsage types.Usage
 	toolCalls := map[int]types.ToolCall{}
@@ -399,9 +407,13 @@ func (t *streamIdleTimer) TimedOut() bool {
 }
 
 func buildChatRequest(model string, messages []types.ChatMessage, tools []types.ToolSchema, thinkingEnabled bool, reasoningEffort string, stream bool) chatRequest {
+	clean := append([]types.ChatMessage(nil), messages...)
+	for i := range clean {
+		clean[i].ResponsesReasoning = nil
+	}
 	reqBody := chatRequest{
 		Model:    model,
-		Messages: messages,
+		Messages: clean,
 		Tools:    tools,
 		Stream:   stream,
 	}

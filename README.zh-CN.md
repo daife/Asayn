@@ -151,7 +151,21 @@ allowed_models = [
 ]
 ```
 
-内置默认配置包含 DeepSeek、SiliconFlow 和 XiaomiMIMO 示例。Provider URL 按兼容 OpenAI Chat Completions 的接口处理；如果配置的 URL 不是以 `/chat/completions` 结尾，Asayn 会自动追加。
+内置默认配置包含 DeepSeek、SiliconFlow 和 XiaomiMIMO 示例。每个 Provider 可通过 `api_type = "chat_completions"`（默认，兼容旧配置）或 `api_type = "responses"` 选择协议。URL 会按协议追加 `/chat/completions` 或 `/responses`，也接受完整接口地址；需要 `/v1` 的服务商请在 URL 中保留 `/v1`。
+
+```toml
+[providers.OpenAI]
+url = "https://api.openai.com/v1"
+api_key = "your_api_key"
+api_type = "responses"
+prompt_cache_key = "asayn"
+timeout_seconds = 120
+allowed_models = ["your-model"]
+```
+
+将 agent 的 `provider` 和 `model` 设置为对应服务商和实际模型即可，主 agent、子 agent 和压缩 agent 均支持两种协议。`prompt_cache_key` 是可选的固定缓存路由标识，同一 Provider 下跨会话和子 agent 复用，不会自动追加会话 ID。可选的 `user` 在 Chat Completions 中原样发送；Responses 不发送旧 `user` 字段，未配置 `prompt_cache_key` 时使用 `user` 作为缓存标识。两者均未配置时不发送标识。缓存命中仍取决于服务商支持和相同的提示前缀，共享缓存标识不会共享会话历史。
+
+Responses 使用 `store = false` 和独立的本地会话历史，保存并回传加密推理项以支持后续工具调用及恢复会话，不使用 `previous_response_id`。`thinking_enabled = true` 时发送 `reasoning.effort`，其中 `max` 映射为 `xhigh`；关闭时省略推理参数，由模型决定默认行为。参数支持情况取决于模型和兼容服务商。
 
 ### Agent
 

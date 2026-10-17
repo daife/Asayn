@@ -27,6 +27,9 @@ type Paths struct {
 }
 
 type ProviderConfig struct {
+	APIType        string                 `toml:"api_type" json:"api_type"`
+	PromptCacheKey string                 `toml:"prompt_cache_key" json:"prompt_cache_key"`
+	User           string                 `toml:"user" json:"user"`
 	BaseURL        string                 `toml:"url" json:"url"`
 	APIKey         string                 `toml:"api_key" json:"api_key"`
 	TimeoutSeconds int                    `toml:"timeout_seconds" json:"timeout_seconds"`
@@ -175,6 +178,12 @@ func LoadAPIConfig(paths Paths) (APIConfig, error) {
 		return cfg, err
 	}
 	for k, p := range cfg.Providers {
+		p.APIType = strings.ToLower(strings.TrimSpace(p.APIType))
+		switch p.APIType {
+		case "", "chat_completions", "responses":
+		default:
+			return cfg, fmt.Errorf("provider %q: unsupported api_type %q (use chat_completions or responses)", k, p.APIType)
+		}
 		if p.TimeoutSeconds <= 0 {
 			p.TimeoutSeconds = 120
 		}
