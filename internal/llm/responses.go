@@ -168,17 +168,58 @@ func (c *Client) readResponsesStream(body io.ReadCloser, onDelta func(StreamDelt
 	defer idle.Stop()
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 64*1024), 8*1024*1024)
+	// Keep output items by index. Terminal envelopes may omit output already
+	// delivered by item/delta events; they must never erase streamed progress.
 	pending := map[int]StreamDelta{}
-	fail := func(err error) (types.ChatMessage, types.Usage, error) {
-		indexes := make([]int, 0, len(pending))
+	items := map[int]types.ChatMessage{}
+	merge := func(index int, snapshot types.ChatMessage) {
+		previous := items[index]
+		if snapshot.Content == "" {
+			snapshot.Content = previous.Content
+		}
+		if snapshot.ReasoningContent == "" {
+			snapshot.ReasoningContent = previous.ReasoningContent
+		}
+		if len(snapshot.ToolCalls) == 0 {
+			snapshot.ToolCalls = previous.ToolCalls
+		}
+		if len(snapshot.ResponsesReasoning) == 0 {
+			snapshot.ResponsesReasoning = previous.ResponsesReasoning
+		}
+		if snapshot.Content == "" {
+			snapshot.Content = pending[index].Content
+		}
+		if snapshot.ReasoningContent == "" {
+			snapshot.ReasoningContent = pending[index].ReasoningContent
+		}
+		items[index] = snapshot
+		delete(pending, index)
+	}
+	collect := func() types.ChatMessage {
+		indexes := map[int]bool{}
+		for i := range items {
+			indexes[i] = true
+		}
 		for i := range pending {
-			indexes = append(indexes, i)
+			indexes[i] = true
 		}
-		sort.Ints(indexes)
-		for _, i := range indexes {
-			msg.Content += pending[i].Content
-			msg.ReasoningContent += pending[i].ReasoningContent
+		ordered := make([]int, 0, len(indexes))
+		for i := range indexes {
+			ordered = append(ordered, i)
 		}
+		sort.Ints(ordered)
+		result := types.ChatMessage{Role: "assistant"}
+		for _, i := range ordered {
+			item := items[i]
+			result.Content += item.Content + pending[i].Content
+			result.ReasoningContent += item.ReasoningContent + pending[i].ReasoningContent
+			result.ToolCalls = append(result.ToolCalls, item.ToolCalls...)
+			result.ResponsesReasoning = append(result.ResponsesReasoning, item.ResponsesReasoning...)
+		}
+		return result
+	}
+	fail := func(err error) (types.ChatMessage, types.Usage, error) {
+		msg = collect()
 		return msg, usage, &StreamError{Message: err.Error(), Partial: msg, Usage: usage}
 	}
 	// SSE data may span multiple lines. Dispatch only once the event is complete.
@@ -219,14 +260,25 @@ func (c *Client) readResponsesStream(body io.ReadCloser, onDelta func(StreamDelt
 				onDelta(StreamDelta{ReasoningContent: event.Delta})
 			}
 		case "response.output_item.done":
-			delete(pending, event.OutputIndex)
-			if err := appendResponseItem(&msg, event.Item); err != nil {
+			var item types.ChatMessage
+			if err := appendResponseItem(&item, event.Item); err != nil {
 				return false, err
 			}
+			merge(event.OutputIndex, item)
 		case "response.completed", "response.incomplete", "response.failed":
-			final, u, err := decodeResponses(event.Response)
-			msg, usage = final, u
-			pending = map[int]StreamDelta{}
+			var response responsesResult
+			if err := json.Unmarshal(event.Response, &response); err != nil {
+				return false, fmt.Errorf("decode Responses terminal event: %w", err)
+			}
+			for index, raw := range response.Output {
+				var item types.ChatMessage
+				if err := appendResponseItem(&item, raw); err != nil {
+					return false, err
+				}
+				merge(index, item)
+			}
+			_, u, err := decodeResponses(event.Response)
+			msg, usage = collect(), u
 			if onDelta != nil {
 				onDelta(StreamDelta{Usage: &usage})
 			}

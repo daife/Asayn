@@ -15,6 +15,8 @@ import (
 
 	"github.com/asayn/asayn/internal/config"
 	"github.com/asayn/asayn/internal/llm/types"
+	"github.com/asayn/asayn/internal/session"
+	"github.com/asayn/asayn/internal/tools"
 )
 
 const responsesFixture = `{"status":"completed","output":[{"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"opaque"},{"type":"function_call","call_id":"call_1","name":"shell","arguments":"{\"command\":\"pwd\"}"}],"usage":{"input_tokens":100,"output_tokens":20,"total_tokens":120,"input_tokens_details":{"cached_tokens":80}}}`
@@ -173,5 +175,125 @@ func TestSubscriptionChatUsesAuthenticatedStream(t *testing.T) {
 	msg, _, err := c.Chat(context.Background(), "model", []types.ChatMessage{{Role: "user", Content: "hello"}}, nil, false, "")
 	if err != nil || len(msg.ToolCalls) != 1 {
 		t.Fatalf("nonstream caller failed: %+v %v", msg, err)
+	}
+}
+
+func TestResponsesTerminalEnvelopePreservesStreamedOutput(t *testing.T) {
+	for _, apiType := range []string{"responses", "subscription_responses"} {
+		for _, terminal := range []string{
+			`{"type":"response.completed","response":{"status":"completed","output":[],"usage":{"input_tokens":10,"output_tokens":2,"total_tokens":12}}}`,
+			`{"type":"response.completed","response":{"status":"completed"}}`,
+			`{"type":"response.failed","response":{"status":"failed","error":{"code":"subscription_sharing_usage_limit_exceeded","message":"limit"}}}`,
+			`{"type":"response.incomplete","response":{"status":"incomplete"}}`,
+			`{"type":"response.completed","response":null}`,
+		} {
+			for _, itemDone := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/%s/done=%v", apiType, terminal, itemDone), func(t *testing.T) {
+					c := NewClient(config.ProviderConfig{APIType: apiType})
+					stream := "data: " + `{"type":"response.output_text.delta","output_index":0,"delta":"hello"}` + "\n\n"
+					if itemDone {
+						stream += "data: " + `{"type":"response.output_item.done","output_index":0,"item":{"type":"message","content":[{"type":"output_text","text":"hello"}]}}` + "\n\n"
+					}
+					stream += "data: " + terminal + "\n\n"
+					var displayed string
+					msg, _, err := c.readResponsesStream(io.NopCloser(strings.NewReader(stream)), func(d StreamDelta) { displayed += d.Content })
+					wantError := !strings.Contains(terminal, `"status":"completed"`)
+					if (err != nil) != wantError {
+						t.Fatalf("terminal error = %v", err)
+					}
+					if msg.Content != displayed || msg.Content != "hello" {
+						t.Fatalf("visible output lost: displayed=%q saved=%q", displayed, msg.Content)
+					}
+					if err != nil && (streamError(err) == nil || streamError(err).Partial.Content != "hello") {
+						t.Fatalf("partial reply lost on error: %v", err)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestResponsesItemAssemblyOrderedWithoutDuplicates(t *testing.T) {
+	events := []string{
+		`{"type":"response.reasoning_summary_text.delta","output_index":0,"delta":"thinking"}`,
+		`{"type":"response.output_item.done","output_index":0,"item":{"type":"reasoning","encrypted_content":"opaque","summary":[]}}`,
+		`{"type":"response.output_text.delta","output_index":1,"delta":"first"}`,
+		`{"type":"response.output_text.delta","output_index":2,"delta":"second"}`,
+		`{"type":"response.output_item.done","output_index":2,"item":{"type":"message","content":[{"type":"output_text","text":"second"}]}}`,
+		`{"type":"response.output_item.done","output_index":1,"item":{"type":"message","content":[{"type":"output_text","text":"first"}]}}`,
+		`{"type":"response.output_item.done","output_index":1,"item":{"type":"message","content":[{"type":"output_text","text":"first"}]}}`,
+		`{"type":"response.output_item.done","output_index":3,"item":{"type":"function_call","call_id":"c1","name":"shell","arguments":"{}"}}`,
+		`{"type":"response.completed","response":{"status":"completed","output":[]}}`,
+	}
+	var stream strings.Builder
+	for _, event := range events {
+		fmt.Fprintf(&stream, "data: %s\n\n", event)
+	}
+	c := NewClient(config.ProviderConfig{APIType: "subscription_responses"})
+	msg, _, err := c.readResponsesStream(io.NopCloser(strings.NewReader(stream.String())), nil)
+	if err != nil || msg.Content != "firstsecond" || msg.ReasoningContent != "thinking" || len(msg.ResponsesReasoning) != 1 || len(msg.ToolCalls) != 1 {
+		t.Fatalf("incorrect item assembly: %+v %v", msg, err)
+	}
+}
+
+func TestResponsesReplySurvivesAgentSnapshotAndNextTurn(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	dir := filepath.Join(home, ".Asayn", "subscription")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	credentials, _ := json.Marshal(map[string]any{"client_id": "issued", "scope": "chatgpt.tokens.use.direct", "access_token": "oauth-access", "expires_at": time.Now().Add(time.Hour)})
+	if err := os.WriteFile(filepath.Join(dir, "default.json"), credentials, 0600); err != nil {
+		t.Fatal(err)
+	}
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+		}
+		if requests == 2 {
+			input := request["input"].([]any)
+			if len(input) != 4 || input[2].(map[string]any)["content"] != "visible reply" {
+				t.Error("next turn lost previous assistant reply")
+			}
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: "+`{"type":"response.output_text.delta","output_index":0,"delta":"visible reply"}`+"\n\n")
+		fmt.Fprint(w, "data: "+`{"type":"response.output_item.done","output_index":0,"item":{"type":"message","content":[{"type":"output_text","text":"visible reply"}]}}`+"\n\n")
+		fmt.Fprint(w, "data: "+`{"type":"response.completed","response":{"status":"completed","output":[]}}`+"\n\n")
+	}))
+	defer server.Close()
+	paths := config.Paths{WorkspaceRoot: home, WorkspaceDir: filepath.Join(home, ".Asayn"), HomeDir: filepath.Join(home, ".Asayn")}
+	store := session.NewStore(filepath.Join(home, "sessions"))
+	sess, err := store.New("test", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent := NewAgent(config.APIConfig{Providers: map[string]config.ProviderConfig{"ChatGPT": {APIType: "subscription_responses"}}}, config.AgentConfig{Provider: "ChatGPT", Model: "model"}, paths, tools.NewBasicExecutor(paths, store, 2000, false))
+	agent.client.apiURL = server.URL
+	for turn := 0; turn < 2; turn++ {
+		var visible string
+		answer, _, err := agent.AskWithEvents(context.Background(), sess, "hello", func(e AgentEvent) {
+			if e.Kind == "assistant_delta" {
+				visible += e.Text
+			}
+		})
+		if err != nil || answer != visible || answer != "visible reply" {
+			t.Fatalf("stream/final mismatch: visible=%q answer=%q error=%v", visible, answer, err)
+		}
+		if err = store.Save(sess); err != nil {
+			t.Fatal(err)
+		}
+		sess, err = store.LoadByID(sess.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if last := sess.Messages[len(sess.Messages)-1]; last.Content != visible {
+			t.Fatalf("snapshot lost visible reply: %+v", last)
+		}
 	}
 }
