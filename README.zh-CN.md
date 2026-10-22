@@ -241,7 +241,7 @@ MCP server 配置是 `~/.Asayn/mcp/` 或 `<workspace>/.Asayn/mcp/` 下的 JSON �
 | `/btw <question>` | 预留命令，当前未实现 |
 | `/exit` | 退出 CLI |
 
-Agent 正在工作时，按 Enter 会把当前输入加入队列。按 Esc 会取消最后一条队列消息；如果队列为空，则中断当前回合。
+Agent 正在工作时，按 Enter 会在当前批工具调用全部完成后插入输入的消息（如果没有工具调用，则在当前模型响应结束后插入）；按 Tab 会将消息排队到当前完整轮次结束后发送。按 Esc 会取消最后一条队列消息；如果队列为空，则中断当前回合。
 
 在 Windows 上，`/model_config` 和 GUI 的 Agent 设置中会为 root agent 提供 **Git Bash** shell 选项。强烈建议开启 Git Bash——模型通常比 PowerShell 更擅长使用 bash shell 命令。开启时，Asayn 会检查 Git Bash 是否安装在默认路径 `C:\Program Files\Git\bin\bash.exe`；如果未找到，会拒绝开启并提示从 <https://git-scm.com/download/win> 使用默认设置安装 Git for Windows。开启成功后，暴露给模型的 shell 工具会描述为 Git Bash command，并通过 Git Bash 执行，而不是 PowerShell。
 

@@ -98,6 +98,21 @@ func (a *Agent) RetryWithEvents(ctx context.Context, sess *session.Session, emit
 }
 
 func (a *Agent) askWithEvents(ctx context.Context, sess *session.Session, prompt string, emit func(AgentEvent), appendPrompt bool) (string, types.Usage, error) {
+	input, _ := ctx.Value(turnInputKey{}).(*TurnInput)
+	if input != nil {
+		defer func() {
+			input.mu.Lock()
+			input.closed = true
+			remaining := input.pending
+			input.pending = nil
+			input.mu.Unlock()
+			for _, text := range remaining {
+				if emit != nil {
+					emit(AgentEvent{Kind: "user_deferred", Text: text})
+				}
+			}
+		}()
+	}
 	a.EnsureSystemPrompt(sess)
 	baseLen := len(sess.Messages)
 	if appendPrompt {
@@ -159,9 +174,7 @@ func (a *Agent) askWithEvents(ctx context.Context, sess *session.Session, prompt
 		if emit != nil && msg.Content != "" && len(msg.ToolCalls) > 0 && !contentStreamed {
 			emit(AgentEvent{Kind: "assistant", Text: msg.Content})
 		}
-		if len(msg.ToolCalls) == 0 {
-			return msg.Content, totalUsage, nil
-		}
+
 		for _, call := range msg.ToolCalls {
 			result := a.runToolCall(ctx, sess, call, emit)
 			sess.Messages = append(sess.Messages, types.ChatMessage{
@@ -169,6 +182,22 @@ func (a *Agent) askWithEvents(ctx context.Context, sess *session.Session, prompt
 				ToolCallID: call.ID,
 				Content:    result,
 			})
+		}
+		var inserted []string
+		if input != nil {
+			inserted = input.drain(len(msg.ToolCalls) == 0)
+		}
+		for _, text := range inserted {
+			sess.Messages = append(sess.Messages, types.ChatMessage{Role: "user", Content: text})
+			if emit != nil {
+				emit(AgentEvent{Kind: "user_inserted", Text: text})
+			}
+		}
+		if len(inserted) > 0 {
+			baseLen = len(sess.Messages)
+		}
+		if len(msg.ToolCalls) == 0 && len(inserted) == 0 {
+			return msg.Content, totalUsage, nil
 		}
 	}
 }

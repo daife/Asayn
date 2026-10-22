@@ -42,6 +42,7 @@ type model struct {
 	pendingCompact            bool
 	compactBaseLen            int
 	queuedMessages            []string
+	turnInput                 *llm.TurnInput
 	agentEvents               chan agentRunEvent
 	commandSelected           int
 	inputHistory              []string
@@ -414,6 +415,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		case "tab":
+			if m.thinking && strings.TrimSpace(m.input.Value()) != "" {
+				value := strings.TrimSpace(m.input.Value())
+				m.addInputHistory(value)
+				if prompt, ok := m.parseSkillMCPCommand(value); ok {
+					value = prompt
+				}
+				m.queuedMessages = append(m.queuedMessages, value)
+				m.input.SetValue("")
+				m.syncInputSize()
+				m.status = m.agentRunningStatus()
+				return m, nil
+			}
 			if suggestions := m.commandSuggestions(); len(suggestions) > 0 {
 				m.completeCommand(suggestions[m.clampedCommandSelected(len(suggestions))].Name)
 				return m, nil
@@ -442,7 +455,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// Treat as agent turn with skill/MCP recommendation
 					if m.thinking {
 						m.addInputHistory(value)
-						m.queuedMessages = append(m.queuedMessages, prompt)
+						m.submitSteering(prompt)
 						m.status = m.agentRunningStatus()
 						m.syncInputSize()
 						return m, nil
@@ -458,7 +471,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.thinking {
 				m.addInputHistory(value)
-				m.queuedMessages = append(m.queuedMessages, value)
+				m.submitSteering(value)
 				m.status = m.agentRunningStatus()
 				m.syncInputSize()
 				return m, nil
@@ -1008,9 +1021,11 @@ func (m model) agentRunningStatus() string {
 	return "agent running"
 }
 
-func (m model) ask(prompt string, agent *llm.Agent, sess *session.Session, kind, modelName string) (tea.Cmd, context.CancelFunc, chan agentRunEvent) {
+func (m *model) ask(prompt string, agent *llm.Agent, sess *session.Session, kind, modelName string) (tea.Cmd, context.CancelFunc, chan agentRunEvent) {
 	events := make(chan agentRunEvent, 64)
 	ctx, cancel := context.WithCancel(context.Background())
+	m.turnInput = &llm.TurnInput{}
+	ctx = llm.WithTurnInput(ctx, m.turnInput)
 	cmd := func() tea.Msg {
 		go func() {
 			defer cancel()
@@ -1025,9 +1040,11 @@ func (m model) ask(prompt string, agent *llm.Agent, sess *session.Session, kind,
 	return cmd, cancel, events
 }
 
-func (m model) retryAsk(agent *llm.Agent, sess *session.Session, kind, modelName string) (tea.Cmd, context.CancelFunc, chan agentRunEvent) {
+func (m *model) retryAsk(agent *llm.Agent, sess *session.Session, kind, modelName string) (tea.Cmd, context.CancelFunc, chan agentRunEvent) {
 	events := make(chan agentRunEvent, 64)
 	ctx, cancel := context.WithCancel(context.Background())
+	m.turnInput = &llm.TurnInput{}
+	ctx = llm.WithTurnInput(ctx, m.turnInput)
 	cmd := func() tea.Msg {
 		go func() {
 			defer cancel()
@@ -1145,6 +1162,13 @@ func (m *model) appendAgentEvent(event llm.AgentEvent) bool {
 		}
 		m.activeTimeoutStatus = "Timeout: " + text
 		m.status = m.activeTimeoutStatus
+	case "user_deferred":
+		m.queuedMessages = append(m.queuedMessages, event.Text)
+	case "user_inserted":
+		m.finalizePendingThinking()
+		m.finalizeStreamAnswer("")
+		m.streamAnswerText = ""
+		m.appendLog("\n" + userStyle.Render("You") + ":\n" + event.Text + "\n")
 	case "tool_start":
 		m.reconcileTransientToolResult()
 		m.finalizePendingThinking()
@@ -2207,9 +2231,14 @@ func (m *model) setCommandOutput(text string) {
 }
 
 func (m model) runningAssistView() string {
-	rows := []string{fmt.Sprintf("running: enter queues message, esc interrupts current turn; queued=%d", len(m.queuedMessages))}
+	rows := []string{fmt.Sprintf("running: enter inserts after tool calls, tab queues message, esc interrupts current turn; queued=%d", len(m.queuedMessages))}
+	if m.turnInput != nil {
+		for _, text := range m.turnInput.Pending() {
+			rows = append(rows, "inserting after tool calls: "+oneLine(text))
+		}
+	}
 	if len(m.queuedMessages) > 0 {
-		rows[0] = fmt.Sprintf("running: enter queues message, esc cancels last queued message; queued=%d", len(m.queuedMessages))
+		rows[0] = fmt.Sprintf("running: enter inserts after tool calls, tab queues message, esc cancels last queued message; queued=%d", len(m.queuedMessages))
 		rows = append(rows, queuedMessageRows(m.queuedMessages, m.log.Width)...)
 	}
 	if !m.activeTurnStartedAt.IsZero() {
@@ -3324,7 +3353,15 @@ type / then use up/down to select commands; tab completes
 with no command suggestions, up/down recalls previous inputs
 /resume, /root_agent, and /model_config open interactive pickers
 /model_config uses left/right to switch targets such as default(root) and default(sub)
-while Asayn is working, enter queues the typed message
+while Asayn is working, enter inserts after current tool calls; tab queues for the next turn
 while Asayn is working, esc cancels the last queued message, or interrupts the current turn if the queue is empty
 `
+}
+
+func (m *model) submitSteering(text string) {
+	if m.activeRunKind != "compact" && m.turnInput != nil && m.turnInput.Submit(text) {
+		m.status = "message pending insertion after current tool calls"
+		return
+	}
+	m.queuedMessages = append(m.queuedMessages, text)
 }

@@ -63,12 +63,13 @@ type envelope struct {
 }
 
 type bridge struct {
-	mu      sync.Mutex
-	writeMu sync.Mutex
-	ctx     *app.Context
-	sess    *session.Session
-	cancel  context.CancelFunc
-	running bool
+	mu        sync.Mutex
+	writeMu   sync.Mutex
+	ctx       *app.Context
+	sess      *session.Session
+	cancel    context.CancelFunc
+	running   bool
+	turnInput *llm.TurnInput
 }
 
 func main() {
@@ -320,9 +321,28 @@ func (b *bridge) dispatch(req request) (any, error) {
 		b.running = true
 		runCtx, cancel := context.WithCancel(context.Background())
 		b.cancel = cancel
+		b.turnInput = &llm.TurnInput{}
+		if req.Action == "compact" {
+			b.turnInput = nil
+		} else {
+			runCtx = llm.WithTurnInput(runCtx, b.turnInput)
+		}
 		b.mu.Unlock()
 		go b.runAgent(req.ID, req.Action, p.Prompt, runCtx)
 		return map[string]bool{"started": true}, nil
+	case "steer":
+		var p struct {
+			Prompt string `json:"prompt"`
+		}
+		if err := json.Unmarshal(req.Payload, &p); err != nil {
+			return nil, err
+		}
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		if !b.running || b.turnInput == nil || !b.turnInput.Submit(p.Prompt) {
+			return nil, errors.New("current turn no longer accepts messages")
+		}
+		return map[string]bool{"accepted": true}, nil
 	case "cancel":
 		b.mu.Lock()
 		if b.cancel != nil {

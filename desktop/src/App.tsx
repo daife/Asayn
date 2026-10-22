@@ -5,7 +5,7 @@ import Markdown from "./Markdown";
 import type { AgentConfig, AgentEvent, Catalog, ClaudeMigrationItem, ClaudeMigrationResult, Message, Session, Snapshot, Workspace } from "./types";
 
 type RunItem = { kind: "thinking" | "tool" | "error"; title: string; text: string; active?: boolean; toolCallId?: string; toolName?: string; toolArgs?: string };
-type AssistantBlock = { kind: "markdown"; content: string } | { kind: "run"; item: RunItem };
+type AssistantBlock = { kind: "user"; content: string } | { kind: "markdown"; content: string } | { kind: "run"; item: RunItem };
 type TranscriptItem =
   | { kind: "user"; message: Message }
   | { kind: "assistant"; blocks: AssistantBlock[] };
@@ -132,6 +132,7 @@ export default function App() {
   const [running, setRunning] = useState(false);
   const [liveBlocks, setLiveBlocks] = useState<AssistantBlock[]>([]);
   const [queued, setQueued] = useState<string[]>([]);
+  const [steering, setSteering] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [sidebar, setSidebar] = useState(true);
   const [settings, setSettings] = useState(false);
@@ -145,6 +146,7 @@ export default function App() {
   const agentMenuRef = useRef<HTMLDivElement>(null);
   const historyIndex = useRef(-1);
   const queueRef = useRef<string[]>([]);
+  const runningRef = useRef(false);
   const slashSuggestions = useMemo(() => slashDismissed ? [] : buildSlashSuggestions(prompt, catalog), [prompt, catalog, slashDismissed]);
 
   useEffect(() => setSlashIndex(0), [prompt]);
@@ -190,7 +192,9 @@ export default function App() {
   }, [snapshot?.session.messages, liveBlocks, running]);
 
   function consumeEvent(event: AgentEvent) {
-    if (event.kind === "assistant_delta" || event.kind === "assistant") setLiveBlocks((blocks) => appendLiveMarkdownBlock(blocks, event.text || ""));
+    if (event.kind === "user_inserted") { setSteering((messages) => { const next = [...messages]; const i = next.indexOf(event.text || ""); if (i >= 0) next.splice(i, 1); return next; }); setLiveBlocks((blocks) => [...blocks, { kind: "user", content: event.text || "" }]); }
+    else if (event.kind === "user_deferred") { setSteering((messages) => { const next = [...messages]; const i = next.indexOf(event.text || ""); if (i >= 0) next.splice(i, 1); return next; }); queueRef.current.push(event.text || ""); setQueued([...queueRef.current]); }
+    else if (event.kind === "assistant_delta" || event.kind === "assistant") setLiveBlocks((blocks) => appendLiveMarkdownBlock(blocks, event.text || ""));
     else if (event.kind === "thinking_start") setLiveBlocks((blocks) => [...blocks.map((block) => block.kind === "run" ? { ...block, item: { ...block.item, active: false } } : block), { kind: "run", item: { kind: "thinking", title: "Reasoning", text: "", active: true } }]);
     else if (event.kind === "thinking_delta" || event.kind === "thinking") setLiveBlocks((blocks) => {
       const next = [...blocks]; const i = next.findLastIndex((x) => x.kind === "run" && x.item.kind === "thinking");
@@ -204,7 +208,7 @@ export default function App() {
     });
     else if (event.kind === "auto_compact") setLiveBlocks([{ kind: "run", item: { kind: "thinking", title: "Compressing context", text: "Preparing a continuation summary", active: true } }]);
     else if (event.kind === "done") {
-      setRunning(false);
+      runningRef.current = false; setRunning(false);
       if (event.error && !event.error.includes("context canceled")) setError(event.error);
       refresh().then(() => {
         setLiveBlocks([]);
@@ -215,14 +219,19 @@ export default function App() {
   }
 
   function launch(text: string, retry = false) {
-    setError(""); setLiveBlocks([]); setRunning(true);
+    setError(""); setLiveBlocks([]); runningRef.current = true; setRunning(true);
     if (!retry) setSnapshot((current) => current ? ({ ...current, session: { ...current.session, messages: [...(current.session.messages || []), { role: "user", content: text }] } }) : current);
-    request(retry ? "retry" : "ask", retry ? {} : { prompt: text }).catch((e) => { setRunning(false); setError(String(e)); });
+    request(retry ? "retry" : "ask", retry ? {} : { prompt: text }).catch((e) => { runningRef.current = false; setRunning(false); setError(String(e)); });
   }
 
-  async function send(retry = false) {
+  async function send(retry = false, queue = false) {
     let text = prompt.trim(); if ((!text && !retry) || !snapshot) return;
-    if (running && !retry) { queueRef.current.push(text); setQueued([...queueRef.current]); setPrompt(""); return; }
+    if (running && !retry) {
+      setPrompt("");
+      if (queue) { queueRef.current.push(text); setQueued([...queueRef.current]); }
+      else { setSteering((messages) => [...messages, text]); try { await request("steer", { prompt: text }); } catch { setSteering((messages) => { const next = [...messages]; const i = next.indexOf(text); if (i >= 0) next.splice(i, 1); return next; }); if (runningRef.current) { queueRef.current.push(text); setQueued([...queueRef.current]); } else launch(text); } }
+      return;
+    }
     if (running) return;
     if (!retry && text.startsWith("/")) {
       const [command, ...rest] = text.split(/\s+/); const argument = rest.join(" ");
@@ -292,8 +301,8 @@ export default function App() {
 
   async function compactNow() {
     if (running) return;
-    setError(""); setLiveBlocks([{ kind: "run", item: { kind: "thinking", title: "Compressing context", text: "Creating a continuation summary", active: true } }]); setRunning(true);
-    try { await request("compact"); } catch (e) { setRunning(false); setError(String(e)); }
+    setError(""); setLiveBlocks([{ kind: "run", item: { kind: "thinking", title: "Compressing context", text: "Creating a continuation summary", active: true } }]); runningRef.current = true; setRunning(true);
+    try { await request("compact"); } catch (e) { runningRef.current = false; setRunning(false); setError(String(e)); }
   }
 
   if (!snapshot) return <div className="boot"><div className="boot-mark" aria-label="Asayn"/><p>Starting the local agent engine…</p>{error && <pre>{error}</pre>}</div>;
@@ -364,9 +373,10 @@ export default function App() {
           {slashSuggestions.length > 0 && <div className="command-menu" role="listbox" aria-label="Slash commands">{slashSuggestions.map((item, index) => <button type="button" role="option" aria-selected={index === slashIndex} className={index === slashIndex ? "active" : ""} key={`${item.kind}-${item.value}`} onMouseDown={(e) => e.preventDefault()} onClick={() => completeSlashSuggestion(item)}>
             <span className="command-value">{item.value}</span><span className="command-description">{item.description}</span><small>{item.kind}</small>
           </button>)}<footer><span><kbd>↑↓</kbd> navigate</span><span><kbd>Tab</kbd> complete</span><span><kbd>Esc</kbd> close</span></footer></div>}
-          <textarea value={prompt} rows={1} placeholder={running ? "Add a message to the queue…" : `Ask ${snapshot.agent.name} to inspect, build, or explain…`} onChange={(e) => { historyIndex.current = -1; setSlashDismissed(false); setPrompt(e.target.value); }} onKeyDown={(e) => {
+          <textarea value={prompt} rows={1} placeholder={running ? "Enter to steer, Tab to queue…" : `Ask ${snapshot.agent.name} to inspect, build, or explain…`} onChange={(e) => { historyIndex.current = -1; setSlashDismissed(false); setPrompt(e.target.value); }} onKeyDown={(e) => {
             const history = snapshot.session.input_history || [];
-            if (slashSuggestions.length && (e.key === "ArrowDown" || e.key === "ArrowUp")) { e.preventDefault(); setSlashIndex((current) => (current + (e.key === "ArrowDown" ? 1 : -1) + slashSuggestions.length) % slashSuggestions.length); }
+            if (running && e.key === "Tab" && prompt.trim()) { e.preventDefault(); send(false, true); }
+            else if (slashSuggestions.length && (e.key === "ArrowDown" || e.key === "ArrowUp")) { e.preventDefault(); setSlashIndex((current) => (current + (e.key === "ArrowDown" ? 1 : -1) + slashSuggestions.length) % slashSuggestions.length); }
             else if (slashSuggestions.length && (e.key === "Tab" || e.key === "Enter")) { e.preventDefault(); completeSlashSuggestion(slashSuggestions[slashIndex] || slashSuggestions[0]); }
             else if (e.key === "Escape" && slashSuggestions.length) { e.preventDefault(); setSlashDismissed(true); }
             else if (e.key === "Escape") { e.preventDefault(); if (queueRef.current.length) { queueRef.current.pop(); setQueued([...queueRef.current]); } else if (running) request("cancel"); }
@@ -374,7 +384,8 @@ export default function App() {
             else if (e.key === "ArrowDown" && historyIndex.current >= 0) { e.preventDefault(); historyIndex.current += 1; if (historyIndex.current >= history.length) { historyIndex.current = -1; setPrompt(""); } else setPrompt(history[historyIndex.current]); }
             else if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
           }}/>
-          <div className="composer-meta"><span><kbd>Enter</kbd> {running ? "queue" : "send"}</span><span><kbd>Shift Enter</kbd> newline</span>{queued.length > 0 && <span className="queue-count">{queued.length} queued · Esc removes last</span>}</div>
+          {steering.length > 0 && <div className="queue-count">Awaiting insertion after tool calls: {steering.join(" · ")}</div>}
+          <div className="composer-meta"><span><kbd>Enter</kbd> {running ? "insert after tool calls" : "send"}</span>{running && <span><kbd>Tab</kbd> queue</span>}<span><kbd>Shift Enter</kbd> newline</span>{queued.length > 0 && <span className="queue-count">{queued.length} queued · Esc removes last</span>}</div>
           {running ? <button className="send stop" onClick={() => request("cancel")} title="Stop"><CircleStop size={18}/></button> : <button className="send" disabled={!prompt.trim()} onClick={() => send()} title="Send"><Send size={18}/></button>}
         </div>
         <div className="statusbar"><span><i className="online"/> Local engine</span><span>{snapshot.agent.model}</span><span>{compact(snapshot.stats.SessionInput)} in / {compact(snapshot.stats.SessionOutput)} out</span><span>{compact(snapshot.session.last_total_tokens)} context</span></div>
@@ -404,6 +415,7 @@ function AssistantTurn({ blocks, live, emptyText }: { blocks: AssistantBlock[]; 
   return <article className={`turn assistant-turn ${live ? "live" : ""}`}><div className="speaker"><AsaynAvatar/><strong>Asayn</strong>{live && <span className="live-pill">LIVE</span>}</div>
     {blocks.map((block, i) => block.kind === "markdown"
       ? <Markdown key={`markdown-${i}`}>{block.content}</Markdown>
+      : block.kind === "user" ? <div className="user-turn" key={`user-${i}`}><strong>You</strong><p>{block.content}</p></div>
       : <div className="run-stack" key={`run-${i}`}><RunCard item={block.item}/></div>)}
     {blocks.length === 0 && live && <div className="thinking-line"><i/><i/><i/>{emptyText}</div>}
     {content && !live && <button className="copy" onClick={() => { navigator.clipboard.writeText(content); setCopied(true); setTimeout(() => setCopied(false), 1200); }}><Copy size={13}/>{copied ? "Copied" : "Copy"}</button>}
