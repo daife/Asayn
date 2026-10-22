@@ -243,6 +243,8 @@ Type `/` in the TUI to see fuzzy command suggestions. `Tab` completes a selected
 
 During a running agent turn, Enter inserts the typed message after the current batch of tool calls finishes (or after the current model response if no tools are called). Tab queues a message for the next full turn. Pressing Esc cancels the last queued message, or interrupts the current turn if the queue is empty.
 
+Enter submissions in the TUI wait 0.5 seconds. Repeated Enters within 0.5 seconds or further editing cancel the pending submission, protecting against terminals that paste newlines as Enter keys; review the draft and press Enter after the paste settles.
+
 On Windows, `/model_config` and the GUI Agent settings include a **Git Bash** shell option for root agents. It is strongly recommended to enable Git Bash — models are generally far more proficient with bash shell commands than PowerShell. When enabled, Asayn checks that Git Bash is installed at the default path `C:\Program Files\Git\bin\bash.exe`; if it is not found, the setting is rejected and the UI asks you to install Git for Windows from <https://git-scm.com/download/win> using the default installation settings. Once enabled, shell tools are described to the model as Git Bash commands and run through Git Bash instead of PowerShell.
 
 ## Tools and Capabilities

@@ -16,6 +16,13 @@ func TestRunningMessageKeys(t *testing.T) {
 			m.input.SetValue("new direction")
 			next, _ := m.Update(tea.KeyMsg{Type: key})
 			got := next.(model)
+			if key == tea.KeyEnter {
+				if len(got.turnInput.Pending()) != 0 || got.input.Value() != "new direction" {
+					t.Fatal("Enter submitted before the quiet period")
+				}
+				next, _ = got.Update(submitInputMsg{at: got.pendingEnter, value: got.input.Value()})
+				got = next.(model)
+			}
 			wantQueued := 0
 			if key == tea.KeyTab {
 				wantQueued = 1

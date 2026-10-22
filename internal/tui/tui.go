@@ -26,6 +26,8 @@ import (
 )
 
 type model struct {
+	lastEnter                 time.Time
+	pendingEnter              time.Time
 	ctx                       *app.Context
 	session                   *session.Session
 	input                     chatInput
@@ -327,6 +329,15 @@ func (m model) Init() tea.Cmd {
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	switch msg := msg.(type) {
+	case submitInputMsg:
+		if m.pendingEnter.IsZero() || !m.pendingEnter.Equal(msg.at) {
+			return m, nil
+		}
+		m.pendingEnter = time.Time{}
+		if m.input.Value() != msg.value || m.resumePicker || m.rootAgentPicker || m.modelConfigPicker {
+			return m, nil
+		}
+		return m.submitInput()
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -337,6 +348,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshLog(false)
 	case tea.KeyMsg:
 		msg = sanitizePasteKeyMsg(msg)
+		if !m.pendingEnter.IsZero() {
+			m.pendingEnter = time.Time{}
+			// More text or another Enter means the pending Enter was likely a
+			// newline from an unmarked paste. Keep a separator in the input.
+			if !m.resumePicker && !m.rootAgentPicker && !m.modelConfigPicker && (msg.Type == tea.KeyRunes || msg.Type == tea.KeyEnter) {
+				m.insertInputSeparator()
+			}
+		}
 		if m.resumePicker {
 			next, cmd, handled := m.handleResumePickerKey(msg)
 			if handled {
@@ -355,6 +374,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return next, cmd
 			}
 		}
+
 		switch msg.String() {
 		case "ctrl+c":
 			m.shutdownActiveWork()
@@ -432,51 +452,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		case "enter":
-			value := strings.TrimSpace(m.input.Value())
-			m.input.SetValue("")
-			m.syncInputSize()
-			if value == "" {
-				return m, nil
-			}
-			if strings.HasPrefix(value, "/") {
-				// Check if it's a skill/MCP slash command first
-				prompt, isSkillMCP := m.parseSkillMCPCommand(value)
-				// Only try handleCommand for real commands (no arguments or known commands)
-				parts := strings.Fields(value)
-				cmdName := strings.TrimPrefix(parts[0], "/")
-				isKnownCommand := false
-				for _, c := range commands {
-					if strings.TrimPrefix(c.Name, "/") == cmdName {
-						isKnownCommand = true
-						break
-					}
-				}
-				if isSkillMCP && !isKnownCommand {
-					// Treat as agent turn with skill/MCP recommendation
-					if m.thinking {
-						m.addInputHistory(value)
-						m.submitSteering(prompt)
-						m.status = m.agentRunningStatus()
-						m.syncInputSize()
-						return m, nil
-					}
-					return m.startAgentTurn(prompt, true)
-				}
-				if replacement, ok := m.selectedCommandForEnter(value); ok {
-					value = replacement
-				}
-				m.addInputHistory(value)
-				next, cmd := m.handleCommand(value)
-				return next, cmd
-			}
-			if m.thinking {
-				m.addInputHistory(value)
-				m.submitSteering(value)
-				m.status = m.agentRunningStatus()
-				m.syncInputSize()
-				return m, nil
-			}
-			return m.startAgentTurn(value, true)
+			return m.handleInputEnter(time.Now())
 		}
 	case tea.MouseMsg:
 		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
