@@ -1150,9 +1150,16 @@ func (m *model) appendAgentEvent(event llm.AgentEvent) bool {
 		m.finalizePendingThinking()
 		m.finalizeStreamAnswer("")
 		m.streamAnswerText = ""
-		line := "\n" + toolRunStyle.Render(spinnerFrame(m.spinner)+" ● "+event.Text) + "\n"
+		label := event.ToolName
+		if label == "" {
+			label = event.Text
+		}
+		if event.ToolArgs != "" {
+			label += "(" + event.ToolArgs + ")"
+		}
+		line := "\n" + toolRunStyle.Render(spinnerFrame(m.spinner)+" ● "+label) + "\n"
 		m.pendingToolLine = line
-		m.pendingToolName = event.Text
+		m.pendingToolName = label
 		m.pendingToolStart = len(m.content)
 		m.appendLog(line)
 	case "tool_result":
