@@ -250,6 +250,7 @@ On Windows, `/model_config` and the GUI Agent settings include a **Git Bash** sh
 Built-in agent tools include:
 
 - Workspace file reading, directory listing, and regex search.
+- `view_image`: workspace PNG, JPEG, GIF and WebP images, up to 20 MiB each, with optional `detail`.
 - Visible skill reading.
 - Synchronous shell commands.
 - Optional asynchronous and interactive shell commands when enabled in agent config.
@@ -257,6 +258,12 @@ Built-in agent tools include:
 - Visible MCP tools discovered from enabled MCP servers.
 
 Sub-agents use a basic executor: file/search/skill/synchronous shell plus visible MCP, without root-agent sub-agent orchestration.
+
+Ask the agent to inspect a workspace image, for example `screenshots/page.png`. It can call `view_image({"path":"screenshots/page.png","detail":"auto"})`; detail accepts `auto` (default), `low`, `high`, or `original`, subject to model support. File content determines the format, and paths and symlinks must stay inside the workspace. CLI, desktop, and sub-agents share the tool.
+
+A vision-capable model is required; see [DeepSeek vision](https://api-docs.deepseek.com/zh-cn/guides/vision/). Chat Completions sends `image_url` blocks; Responses sends [`input_image`](https://developers.openai.com/api/docs/guides/images-vision?api-mode=responses). [ChatGPT subscription mode](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference) keeps the existing OAuth authentication and Responses endpoint with `store=false`, `stream=true`, and requires no additional API key. It uses the same image format, subject to account and model capabilities.
+
+Image data persists with tool results in local sessions, allowing history restoration without rereading the source file. The UI displays file information only. Real-time context control hides stale images together with their tool results. Images increase local session size and model context usage.
 
 ## Build From Source
 

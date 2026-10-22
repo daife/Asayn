@@ -2,7 +2,13 @@ package types
 
 import "encoding/json"
 
+type ImageInput struct {
+	URL    string `json:"url"`
+	Detail string `json:"detail,omitempty"`
+}
+
 type ChatMessage struct {
+	Images             []ImageInput      `json:"images,omitempty"`
 	ResponsesReasoning []json.RawMessage `json:"responses_reasoning,omitempty"`
 	Role               string            `json:"role"`
 	Content            string            `json:"content"`

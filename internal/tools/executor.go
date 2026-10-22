@@ -100,6 +100,18 @@ func (e *Executor) SetAgentLimits(maxOutputLines int, allowParallelShell, allowI
 
 func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 	schemas := []types.ToolSchema{
+		schema("view_image", "View a local image inside the workspace using the current model. Supports PNG, JPEG, GIF and WebP; requires a vision-capable model. Use this instead of reading images as text.", map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"path": prop("string", "Image path, relative to workspace or absolute within workspace."),
+				"detail": map[string]any{
+					"type":        "string",
+					"enum":        []string{"auto", "low", "high", "original"},
+					"description": "Image detail; defaults to auto.",
+				},
+			},
+			"required": []string{"path"},
+		}),
 		schema("file_read", "Read a file. Support paths inside workspace only. Binary files and files without extensions are considered risky and will only show a preview unless force_binary is set. Multiple file_read calls per response are recommended.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -232,10 +244,13 @@ func (e *Executor) Run(ctx context.Context, sess *session.Session, name string, 
 	if e.mcp != nil && e.mcp.HasTool(name) {
 		return e.mcp.Call(ctx, name, args)
 	}
-	if e.basicOnly && name != "file_read" && name != "dir_view" && name != "grep_search" && name != "skill_read" && name != "shell_run_sync" {
+	if e.basicOnly && name != "view_image" && name != "file_read" && name != "dir_view" && name != "grep_search" && name != "skill_read" && name != "shell_run_sync" {
 		return "", fmt.Errorf("tool %q is not available to basic-only agents", name)
 	}
 	switch name {
+	case "view_image":
+		out, _, err := e.ReadImage(args)
+		return out, err
 	case "file_read":
 		return e.readFile(args)
 	case "dir_view":

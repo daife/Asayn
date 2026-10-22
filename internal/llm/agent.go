@@ -176,11 +176,12 @@ func (a *Agent) askWithEvents(ctx context.Context, sess *session.Session, prompt
 		}
 
 		for _, call := range msg.ToolCalls {
-			result := a.runToolCall(ctx, sess, call, emit)
+			result, images := a.runToolCall(ctx, sess, call, emit)
 			sess.Messages = append(sess.Messages, types.ChatMessage{
 				Role:       "tool",
 				ToolCallID: call.ID,
 				Content:    result,
+				Images:     images,
 			})
 		}
 		var inserted []string
@@ -306,6 +307,7 @@ func prepareMessagesForAPI(messages []types.ChatMessage, thinkingEnabled, realTi
 		}
 	}
 	for i, idx := range staleToolResultIndexes {
+		out[idx].Images = nil
 		out[idx].Content = "hidden"
 		if i == len(staleToolResultIndexes)-1 {
 			out[idx].Content = staleToolResultsHiddenMessage
@@ -433,10 +435,10 @@ func formatSkillMetadata(metadata map[string]string) string {
 	return strings.Join(items, " ")
 }
 
-func (a *Agent) runToolCall(parent context.Context, sess *session.Session, call types.ToolCall, emit func(AgentEvent)) string {
+func (a *Agent) runToolCall(parent context.Context, sess *session.Session, call types.ToolCall, emit func(AgentEvent)) (string, []types.ImageInput) {
 	var args map[string]any
 	if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {
-		return fmt.Sprintf("tool argument JSON error: %v", err)
+		return fmt.Sprintf("tool argument JSON error: %v", err), nil
 	}
 	if call.Function.Name == "skill_read" {
 		args["_visible_skills"] = a.visibleSkillNames(sess)
@@ -452,18 +454,25 @@ func (a *Agent) runToolCall(parent context.Context, sess *session.Session, call 
 	}
 	ctx, cancel := context.WithTimeout(parent, toolCallTimeout(call.Function.Name, args))
 	defer cancel()
-	out, err := a.tools.Run(ctx, sess, call.Function.Name, args)
+	var out string
+	var images []types.ImageInput
+	var err error
+	if call.Function.Name == "view_image" {
+		out, images, err = a.tools.ReadImage(args)
+	} else {
+		out, err = a.tools.Run(ctx, sess, call.Function.Name, args)
+	}
 	if err != nil {
 		out = fmt.Sprintf("tool error: %v", err)
 		if emit != nil {
 			emit(AgentEvent{Kind: "tool_error", Text: out, ToolName: call.Function.Name, ToolArgs: call.Function.Arguments, ToolCallID: call.ID})
 		}
-		return out
+		return out, nil
 	}
 	if emit != nil {
 		emit(AgentEvent{Kind: "tool_result", Text: out, ToolName: call.Function.Name, ToolArgs: call.Function.Arguments, ToolCallID: call.ID})
 	}
-	return out
+	return out, images
 }
 
 func (a *Agent) visibleSkillNames(sess *session.Session) []string {

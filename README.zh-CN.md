@@ -250,6 +250,7 @@ Agent 正在工作时，按 Enter 会在当前批工具调用全部完成后插�
 内置 agent 工具包括：
 
 - 工作区文件读取、目录浏览和正则搜索。
+- `view_image`：读取工作区内的 PNG、JPEG、GIF、WebP 图片（单张最大 20 MiB），支持 `detail` 参数。
 - 读取可见 skills。
 - 同步 shell 命令。
 - 在 agent 配置中启用后，可使用异步和交互式 shell 命令。
@@ -257,6 +258,12 @@ Agent 正在工作时，按 Enter 会在当前批工具调用全部完成后插�
 - 从已启用 MCP server 中发现的可见 MCP 工具。
 
 Sub-agent 使用基础 executor：文件/搜索/skill/同步 shell 以及可见 MCP，不包含 root agent 的 sub-agent 编排工具。
+
+可以直接告诉 agent「查看 `screenshots/page.png`，分析界面问题」，模型会调用 `view_image({"path":"screenshots/page.png","detail":"auto"})`。`detail` 可选 `auto`（默认）、`low`、`high`、`original`；具体支持取决于模型。图片按实际内容识别格式，路径不能通过 `..` 或符号链接逃出工作区。CLI、桌面端和 sub-agent 共用此工具。
+
+图片由当前模型直接理解，需配置支持视觉输入的模型，例如 [DeepSeek 视觉文档](https://api-docs.deepseek.com/zh-cn/guides/vision/) 中的模型。Chat Completions 使用 `image_url` 内容块，Responses 使用 [`input_image`](https://developers.openai.com/api/docs/guides/images-vision?api-mode=responses)。[ChatGPT 订阅模式](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference) 沿用现有 OAuth 认证和 Responses 端点，保持 `store=false`、`stream=true`，无需额外 API Key；图像格式与 Responses 相同，账号及模型仍需支持视觉输入。
+
+图像数据随工具结果保存在本地会话，恢复会话时无需重新读取原文件；界面只显示文件信息。启用实时上下文控制时，旧图像与对应工具结果一起隐藏。图片会增加会话体积及模型上下文消耗。
 
 ## 从源码构建
 

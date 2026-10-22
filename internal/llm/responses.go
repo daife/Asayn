@@ -33,7 +33,7 @@ func (c *Client) buildRequest(model string, messages []types.ChatMessage, tools 
 		return r
 	}
 	input := []any{}
-	for _, m := range messages {
+	for _, m := range imageMessages(messages) {
 		if m.Role == "assistant" {
 			for _, item := range m.ResponsesReasoning {
 				input = append(input, item)
@@ -43,12 +43,16 @@ func (c *Client) buildRequest(model string, messages []types.ChatMessage, tools 
 			input = append(input, map[string]any{"type": "function_call_output", "call_id": m.ToolCallID, "output": m.Content})
 			continue
 		}
-		if m.Content != "" || m.Role != "assistant" {
+		if m.Content != "" || len(m.Images) > 0 || m.Role != "assistant" {
 			role := m.Role
 			if c.cfg.APIType == "subscription_responses" && role == "system" {
 				role = "developer"
 			}
-			input = append(input, map[string]any{"role": role, "content": m.Content})
+			var content any = m.Content
+			if len(m.Images) > 0 {
+				content = imageContent(m, true)
+			}
+			input = append(input, map[string]any{"role": role, "content": content})
 		}
 		for _, call := range m.ToolCalls {
 			input = append(input, map[string]any{"type": "function_call", "call_id": call.ID, "name": call.Function.Name, "arguments": call.Function.Arguments})
