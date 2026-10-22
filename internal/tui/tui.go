@@ -1718,14 +1718,14 @@ func (m model) handleModelConfigPickerKey(msg tea.KeyMsg) (model, tea.Cmd, bool)
 		return m, nil, true
 	case "up":
 		m.modelConfigOptionSelected--
-		maxOptions := 7 + len(m.skillItems) + len(m.mcpItems)
+		maxOptions := modelConfigFixedOptions + len(m.skillItems) + len(m.mcpItems)
 		if m.modelConfigOptionSelected < 0 {
 			m.modelConfigOptionSelected = maxOptions - 1
 		}
 		return m, nil, true
 	case "down":
 		m.modelConfigOptionSelected++
-		maxOptions := 7 + len(m.skillItems) + len(m.mcpItems)
+		maxOptions := modelConfigFixedOptions + len(m.skillItems) + len(m.mcpItems)
 		if m.modelConfigOptionSelected >= maxOptions {
 			m.modelConfigOptionSelected = 0
 		}
@@ -1768,6 +1768,8 @@ func (m model) handleModelConfigPercentEditKey(msg tea.KeyMsg) (model, tea.Cmd, 
 	}
 	return m, nil, true
 }
+
+const modelConfigFixedOptions = 8
 
 func (m model) handleModelConfigAction() model {
 	agentInfo := m.modelConfigAgents[m.modelConfigAgentSelected]
@@ -1855,7 +1857,7 @@ func (m model) handleModelConfigAction() model {
 				cfg.RealTimeContextControl = !cfg.RealTimeContextControl
 			}
 		default: // Skills and MCP servers
-			idx := m.modelConfigOptionSelected - 8
+			idx := m.modelConfigOptionSelected - modelConfigFixedOptions
 			if idx >= 0 && idx < len(m.skillItems) {
 				skillName := m.skillItems[idx].Name
 				found := -1
@@ -2003,7 +2005,7 @@ func (m model) modelConfigPickerView() string {
 	rows = append(rows, "", "Skills:")
 	for i, skill := range m.skillItems {
 		marker := "  "
-		if i+7 == m.modelConfigOptionSelected {
+		if i+modelConfigFixedOptions == m.modelConfigOptionSelected {
 			marker = "> "
 		}
 		checked := "[ ]"
@@ -2019,7 +2021,7 @@ func (m model) modelConfigPickerView() string {
 	rows = append(rows, "", "MCP Servers:")
 	for i, item := range m.mcpItems {
 		marker := "  "
-		if i+7+len(m.skillItems) == m.modelConfigOptionSelected {
+		if i+modelConfigFixedOptions+len(m.skillItems) == m.modelConfigOptionSelected {
 			marker = "> "
 		}
 		checked := "[ ]"
