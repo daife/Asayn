@@ -18,10 +18,11 @@ import (
 )
 
 type Client struct {
-	cfg     config.ProviderConfig
-	http    *http.Client
-	apiURL  string
-	timeout time.Duration
+	cfg            config.ProviderConfig
+	http           *http.Client
+	apiURL         string
+	timeout        time.Duration
+	cacheSessionID string
 }
 
 const rateLimitMaxRetries = 10
@@ -465,6 +466,9 @@ func (c *Client) usesResponses() bool {
 	return c.cfg.APIType == "responses" || c.cfg.APIType == "subscription_responses"
 }
 func (c *Client) authorize(ctx context.Context, req *http.Request) error {
+	if c.usesResponses() && c.cacheSessionID != "" {
+		req.Header.Set("session-id", c.cacheSessionID)
+	}
 	token := c.cfg.APIKey
 	if c.cfg.APIType == "subscription_responses" {
 		path, err := subscription.DefaultPath(c.cfg.SubscriptionAccount)

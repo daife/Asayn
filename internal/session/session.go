@@ -15,6 +15,8 @@ import (
 
 type Session struct {
 	ID              string              `json:"id"`
+	CacheSessionID  string              `json:"cache_session_id"`
+	PromptCacheKey  string              `json:"prompt_cache_key"`
 	Name            string              `json:"name"`
 	RootAgent       string              `json:"root_agent"`
 	CreatedAt       time.Time           `json:"created_at"`
@@ -135,6 +137,8 @@ func (s *Store) Load(idOrName string) (*Session, error) {
 func (s *Store) Fork(src *Session, name string) (*Session, error) {
 	cp := *src
 	cp.ID = uuid.NewString()
+	cp.CacheSessionID = cp.ID
+	cp.PromptCacheKey = cp.ID
 	cp.Name = name
 	cp.CreatedAt = time.Now()
 	cp.UpdatedAt = cp.CreatedAt
@@ -244,7 +248,19 @@ func (s *Store) loadByID(id string) (*Session, error) {
 	return &sess, nil
 }
 
+// EnsureCacheIdentity also deterministically upgrades legacy sessions without
+// changing their identity on repeated loads, even before the next save.
+func (sess *Session) EnsureCacheIdentity() {
+	if sess.CacheSessionID == "" {
+		sess.CacheSessionID = sess.ID
+	}
+	if sess.PromptCacheKey == "" {
+		sess.PromptCacheKey = sess.CacheSessionID
+	}
+}
+
 func normalizeCollections(sess *Session) {
+	sess.EnsureCacheIdentity()
 	if sess.Messages == nil {
 		sess.Messages = []types.ChatMessage{}
 	}

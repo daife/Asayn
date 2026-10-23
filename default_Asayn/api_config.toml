@@ -1,5 +1,5 @@
 # api_type: "chat_completions" (default) or "responses".
-# Optional prompt_cache_key: use a stable value shared by sessions/subagents.
+# Optional prompt_cache_key: fallback for standalone clients; agents use persisted per-session keys.
 # Optional user: forwarded to Chat Completions; fallback cache key for Responses.
 # For Responses, set url to the API base (including /v1 when required) or /responses.
 

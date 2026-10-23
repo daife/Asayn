@@ -48,7 +48,47 @@ func TestLoadNormalizesLegacyNullCollections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if sess.CacheSessionID != id || sess.PromptCacheKey != id {
+		t.Fatal("legacy cache identity was not derived from session ID")
+	}
 	if sess.Messages == nil || sess.VisibleSkills == nil || sess.SubAgents == nil || sess.InputHistory == nil {
 		t.Fatal("legacy null collections were not normalized")
+	}
+}
+
+func TestCacheIdentitySurvivesRestoreAndForkIsIndependent(t *testing.T) {
+	store := NewStore(t.TempDir())
+	original, err := store.New("first", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if original.CacheSessionID == "" || original.PromptCacheKey == "" {
+		t.Fatal("missing cache identity")
+	}
+	restored, err := store.LoadByID(original.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored.CacheSessionID != original.CacheSessionID || restored.PromptCacheKey != original.PromptCacheKey {
+		t.Fatal("restore changed cache identity")
+	}
+	fork, err := store.Fork(restored, "fork")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fork.CacheSessionID == original.CacheSessionID || fork.PromptCacheKey == original.PromptCacheKey {
+		t.Fatal("persistent fork shares routing identity")
+	}
+	restored.CacheSessionID = "inherited-affinity"
+	restored.PromptCacheKey = "inherited-key"
+	if err := store.Save(restored); err != nil {
+		t.Fatal(err)
+	}
+	restored, err = store.LoadByID(restored.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored.CacheSessionID != "inherited-affinity" || restored.PromptCacheKey != "inherited-key" {
+		t.Fatal("explicit affinity was overwritten")
 	}
 }

@@ -163,7 +163,7 @@ timeout_seconds = 120
 allowed_models = ["your-model"]
 ```
 
-将 agent 的 `provider` 和 `model` 设置为对应服务商和实际模型即可，主 agent、子 agent 和压缩 agent 均支持两种协议。`prompt_cache_key` 是可选的固定缓存路由标识，同一 Provider 下跨会话和子 agent 复用，不会自动追加会话 ID。可选的 `user` 在 Chat Completions 中原样发送；Responses 不发送旧 `user` 字段，未配置 `prompt_cache_key` 时使用 `user` 作为缓存标识。两者均未配置时不发送标识。缓存命中仍取决于服务商支持和相同的提示前缀，共享缓存标识不会共享会话历史。
+将 agent 的 `provider` 和 `model` 设置为对应服务商和实际模型即可，主 agent、子 agent 和压缩 agent 均支持两种协议。每个持久会话独立保存 `cache_session_id` 和 `prompt_cache_key`。Agent 请求使用会话自己的缓存 key（覆盖 Provider 固定值），Responses 请求同时发送稳定的 `session-id` Header。恢复或重试复用原标识；旧会话从已有 UUID 补齐。新会话、持久 fork 和独立子 agent 使用不同标识；压缩临时副本继承原会话标识。无会话的独立客户端仍使用 Provider 的 `prompt_cache_key`，Responses 未配置时回退到 `user`；Chat Completions 的 `user` 仍原样发送。订阅 OAuth 继续使用 `https://api.openai.com/v1/responses`，保持 `store: false` 和流式请求，与 Codex ChatGPT 后端区分。缓存命中仍取决于服务商支持、缓存有效期及相同提示前缀；稳定路由不保证缓存命中或物理缓存隔离。
 
 Responses 使用 `store = false` 和独立的本地会话历史，保存并回传加密推理项以支持后续工具调用及恢复会话，不使用 `previous_response_id`。`thinking_enabled = true` 时发送 `reasoning.effort`，其中 `max` 映射为 `xhigh`；关闭时省略推理参数，由模型决定默认行为。参数支持情况取决于模型和兼容服务商。
 

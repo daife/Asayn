@@ -79,8 +79,8 @@ func (c *Client) buildRequest(model string, messages []types.ChatMessage, tools 
 		}
 		r["reasoning"] = map[string]string{"effort": effort}
 	}
-	// A provider-wide key stays stable across sessions and subagents. Never use
-	// session IDs or previous_response_id to partition shared prompt prefixes.
+	// Agent invocations supply their persisted per-session key. Standalone
+	// clients retain the provider configuration fallback.
 	key := c.cfg.PromptCacheKey
 	if key == "" {
 		key = c.cfg.User

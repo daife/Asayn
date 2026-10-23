@@ -113,6 +113,11 @@ func (a *Agent) askWithEvents(ctx context.Context, sess *session.Session, prompt
 			}
 		}()
 	}
+	sess.EnsureCacheIdentity()
+	// Bind routing to this invocation, never mutate the shared provider client.
+	client := *a.client
+	client.cacheSessionID = sess.CacheSessionID
+	client.cfg.PromptCacheKey = sess.PromptCacheKey
 	a.EnsureSystemPrompt(sess)
 	baseLen := len(sess.Messages)
 	if appendPrompt {
@@ -126,7 +131,7 @@ func (a *Agent) askWithEvents(ctx context.Context, sess *session.Session, prompt
 			emit(AgentEvent{Kind: "thinking_start"})
 		}
 		contentStreamed := false
-		msg, usage, err := a.client.ChatStream(ctx, a.root.Model, messagesForAPI(sess, a.root.ThinkingEnabled, a.root.RealTimeContextControl), toolSchemas, a.root.ThinkingEnabled, a.root.ReasoningEffort, func(delta StreamDelta) {
+		msg, usage, err := client.ChatStream(ctx, a.root.Model, messagesForAPI(sess, a.root.ThinkingEnabled, a.root.RealTimeContextControl), toolSchemas, a.root.ThinkingEnabled, a.root.ReasoningEffort, func(delta StreamDelta) {
 			if emit == nil {
 				return
 			}

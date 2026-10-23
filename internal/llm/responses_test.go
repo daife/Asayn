@@ -255,6 +255,9 @@ func TestResponsesReplySurvivesAgentSnapshotAndNextTurn(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Error(err)
 		}
+		if r.Header.Get("session-id") == "" || request["prompt_cache_key"] != r.Header.Get("session-id") {
+			t.Error("subscription request lost persisted session routing")
+		}
 		if requests == 2 {
 			input := request["input"].([]any)
 			if len(input) != 4 || input[2].(map[string]any)["content"] != "visible reply" {
