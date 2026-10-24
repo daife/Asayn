@@ -130,6 +130,63 @@ func TestSubscriptionRequestConstraints(t *testing.T) {
 	}
 }
 
+func TestSubscriptionReasoningReplayStripsStatus(t *testing.T) {
+	const fixture = `{"status":"completed","output":[{"type":"reasoning","id":"rs_1","status":"completed","summary":[],"encrypted_content":"opaque"},{"type":"message","content":[{"type":"output_text","text":"answer"}]}]}`
+	for _, streaming := range []bool{false, true} {
+		t.Run(fmt.Sprint(streaming), func(t *testing.T) {
+			c := NewClient(config.ProviderConfig{APIType: "subscription_responses"})
+			var msg types.ChatMessage
+			var err error
+			if streaming {
+				stream := "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"id\":\"rs_1\",\"status\":\"completed\",\"summary\":[],\"encrypted_content\":\"opaque\"}}\n\n" +
+					"data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n"
+				msg, _, err = c.readResponsesStream(io.NopCloser(strings.NewReader(stream)), nil)
+			} else {
+				msg, _, err = decodeResponses([]byte(fixture))
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Legacy sessions persist the complete output item, including status.
+			stored, err := json.Marshal(msg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var restored types.ChatMessage
+			if err := json.Unmarshal(stored, &restored); err != nil {
+				t.Fatal(err)
+			}
+			messages := []types.ChatMessage{{Role: "user", Content: "hello"}, restored, {Role: "user", Content: "continue"}}
+			for _, apiType := range []string{"subscription_responses", "responses"} {
+				client := NewClient(config.ProviderConfig{APIType: apiType})
+				data, err := json.Marshal(client.buildRequest("model", messages, nil, false, "", false))
+				if err != nil {
+					t.Fatal(err)
+				}
+				var body struct {
+					Input []map[string]json.RawMessage `json:"input"`
+				}
+				if err := json.Unmarshal(data, &body); err != nil {
+					t.Fatal(err)
+				}
+				reasoning := body.Input[1]
+				_, hasStatus := reasoning["status"]
+				if hasStatus != (apiType == "responses") {
+					t.Fatalf("%s: unexpected reasoning status: %s", apiType, data)
+				}
+				for key, want := range map[string]string{"type": `"reasoning"`, "id": `"rs_1"`, "summary": `[]`, "encrypted_content": `"opaque"`} {
+					if string(reasoning[key]) != want {
+						t.Fatalf("%s: reasoning %s = %s, want %s", apiType, key, reasoning[key], want)
+					}
+				}
+			}
+			if !strings.Contains(string(restored.ResponsesReasoning[0]), `"status":"completed"`) {
+				t.Fatal("request construction mutated persisted reasoning")
+			}
+		})
+	}
+}
+
 func TestSubscriptionTerminalErrors(t *testing.T) {
 	c := NewClient(config.ProviderConfig{APIType: "subscription_responses"})
 	for _, payload := range []string{

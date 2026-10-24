@@ -36,6 +36,16 @@ func (c *Client) buildRequest(model string, messages []types.ChatMessage, tools 
 	for _, m := range imageMessages(messages) {
 		if m.Role == "assistant" {
 			for _, item := range m.ResponsesReasoning {
+				if c.cfg.APIType == "subscription_responses" {
+					// Subscription input rejects the output-only reasoning status.
+					// Normalize on replay so persisted sessions work without migration.
+					var reasoning map[string]json.RawMessage
+					if json.Unmarshal(item, &reasoning) == nil && reasoning != nil {
+						delete(reasoning, "status")
+						input = append(input, reasoning)
+						continue
+					}
+				}
 				input = append(input, item)
 			}
 		}
