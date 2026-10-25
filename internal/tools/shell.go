@@ -77,15 +77,16 @@ func (m *ShellManager) RunBlocking(ctx context.Context, command string, timeoutS
 	if command == "" {
 		return "", fmt.Errorf("command is required")
 	}
-	if timeoutSec <= 0 {
-		timeoutSec = 60
-	}
 	run, err := m.start(command, false)
 	if err != nil {
 		return "", err
 	}
-	waitCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
-	defer cancel()
+	waitCtx := ctx
+	if timeoutSec > 0 {
+		var cancel context.CancelFunc
+		waitCtx, cancel = context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
+		defer cancel()
+	}
 	select {
 	case <-run.done:
 		out := run.output.String()

@@ -154,7 +154,7 @@ func (e *Executor) Schemas(forSubAgent bool) []types.ToolSchema {
 		"type": "object",
 		"properties": map[string]any{
 			"command":     prop("string", shellEnv+" command."),
-			"timeout_sec": prop("integer", "Timeout seconds."),
+			"timeout_sec": prop("integer", "Timeout seconds; defaults to 60 when omitted. Zero or negative waits indefinitely until completion or cancellation."),
 		},
 		"required": []string{"command"},
 	}))

@@ -488,8 +488,7 @@ func (a *Agent) runToolCall(parent context.Context, sess *session.Session, call 
 			ToolCallID: call.ID,
 		})
 	}
-	ctx, cancel := context.WithTimeout(parent, toolCallTimeout(call.Function.Name, args))
-	defer cancel()
+	ctx := parent
 	var out string
 	var images []types.ImageInput
 	var err error
@@ -538,31 +537,4 @@ func (a *Agent) visibleSkillSet(sess *session.Session) map[string]bool {
 		visible[name] = true
 	}
 	return visible
-}
-func toolCallTimeout(name string, args map[string]any) time.Duration {
-	seconds := 60
-	if name == "shell_run_sync" || name == "delay" {
-		argName := "timeout_sec"
-		if name == "delay" {
-			argName = "seconds"
-		}
-		if raw, ok := args[argName]; ok {
-			switch value := raw.(type) {
-			case float64:
-				seconds = int(value)
-			case int:
-				seconds = value
-			case string:
-				var parsed int
-				if _, err := fmt.Sscanf(value, "%d", &parsed); err == nil {
-					seconds = parsed
-				}
-			}
-		}
-		if seconds < 1 {
-			seconds = 60
-		}
-		return time.Duration(seconds+5) * time.Second
-	}
-	return time.Duration(seconds) * time.Second
 }
