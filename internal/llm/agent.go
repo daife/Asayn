@@ -22,6 +22,7 @@ type Agent struct {
 	root       config.AgentConfig
 	paths      config.Paths
 	tools      *tools.Executor
+	store      *session.Store
 	isSubAgent bool
 }
 
@@ -85,6 +86,17 @@ func NewSubAgent(api config.APIConfig, root config.AgentConfig, paths config.Pat
 	return agent
 }
 
+// SetSessionStore enables durable checkpoints for persistent agents. Temporary
+// compaction agents must not use the original session store.
+func (a *Agent) SetSessionStore(store *session.Store) { a.store = store }
+
+func (a *Agent) checkpoint(sess *session.Session) error {
+	if a.store != nil {
+		return a.store.Save(sess)
+	}
+	return nil
+}
+
 func (a *Agent) Ask(ctx context.Context, sess *session.Session, prompt string) (string, types.Usage, error) {
 	return a.AskWithEvents(ctx, sess, prompt, nil)
 }
@@ -113,6 +125,7 @@ func (a *Agent) askWithEvents(ctx context.Context, sess *session.Session, prompt
 			}
 		}()
 	}
+	sess.RepairInterruptedTools()
 	sess.EnsureCacheIdentity()
 	// Bind routing to this invocation, never mutate the shared provider client.
 	client := *a.client
@@ -125,8 +138,14 @@ func (a *Agent) askWithEvents(ctx context.Context, sess *session.Session, prompt
 	}
 
 	var totalUsage types.Usage
+	if err := a.checkpoint(sess); err != nil {
+		return "", totalUsage, err
+	}
 	toolSchemas := a.tools.Schemas(a.isSubAgent)
 	for {
+		if err := ctx.Err(); err != nil {
+			return "", totalUsage, err
+		}
 		if emit != nil {
 			emit(AgentEvent{Kind: "thinking_start"})
 		}
@@ -168,6 +187,9 @@ func (a *Agent) askWithEvents(ctx context.Context, sess *session.Session, prompt
 		totalUsage.PromptCacheHitTokens += usage.PromptCacheHitTokens
 		totalUsage.PromptCacheMissTokens += usage.PromptCacheMissTokens
 		sess.Messages = append(sess.Messages, msg)
+		if err := a.checkpoint(sess); err != nil {
+			return "", totalUsage, err
+		}
 		if emit != nil {
 			snapshot := totalUsage
 			emit(AgentEvent{Kind: "usage", Usage: &snapshot})
@@ -188,6 +210,12 @@ func (a *Agent) askWithEvents(ctx context.Context, sess *session.Session, prompt
 				Content:    result,
 				Images:     images,
 			})
+			if err := a.checkpoint(sess); err != nil {
+				return "", totalUsage, err
+			}
+		}
+		if err := ctx.Err(); err != nil {
+			return "", totalUsage, err
 		}
 		var inserted []string
 		if input != nil {
@@ -441,6 +469,9 @@ func formatSkillMetadata(metadata map[string]string) string {
 }
 
 func (a *Agent) runToolCall(parent context.Context, sess *session.Session, call types.ToolCall, emit func(AgentEvent)) (string, []types.ImageInput) {
+	if parent.Err() != nil {
+		return session.ToolInterruptedBeforeStart, nil
+	}
 	var args map[string]any
 	if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {
 		return fmt.Sprintf("tool argument JSON error: %v", err), nil
@@ -462,10 +493,19 @@ func (a *Agent) runToolCall(parent context.Context, sess *session.Session, call 
 	var out string
 	var images []types.ImageInput
 	var err error
-	if call.Function.Name == "view_image" {
+	if parent.Err() != nil {
+		out, err = "", parent.Err()
+	} else if call.Function.Name == "view_image" {
 		out, images, err = a.tools.ReadImage(args)
 	} else {
 		out, err = a.tools.Run(ctx, sess, call.Function.Name, args)
+	}
+	if parent.Err() != nil {
+		out = session.ToolInterruptedByUser + "\n" + out
+		if emit != nil {
+			emit(AgentEvent{Kind: "tool_error", Text: out, ToolName: call.Function.Name, ToolArgs: call.Function.Arguments, ToolCallID: call.ID})
+		}
+		return out, images
 	}
 	if err != nil {
 		out = fmt.Sprintf("tool error: %v", err)

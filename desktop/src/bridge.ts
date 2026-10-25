@@ -118,6 +118,7 @@ export async function toggleMaximizeWindow() {
 }
 
 export async function closeWindow() {
+  if (electron() || isTauri()) await request("shutdown");
   const runtime = electron();
   if (runtime) return runtime.close();
   if (!isTauri()) return;

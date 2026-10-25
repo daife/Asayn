@@ -48,6 +48,7 @@ func Bootstrap(cwd string) (*Context, error) {
 	executor := tools.NewExecutor(paths, store, root.MaxOutputLines, root.AllowParallelShell, root.AllowInteractiveShell, root.UseGitBash)
 	executor.SetVisibleMCP(root.VisibleMCP)
 	agent := llm.NewAgent(api, root, paths, executor)
+	agent.SetSessionStore(store)
 	usageTracker := usage.NewTracker(paths)
 
 	var subSessions sync.Map
@@ -82,6 +83,7 @@ func Bootstrap(cwd string) (*Context, error) {
 		subExec.SetVisibleMCP(subCfg.VisibleMCP)
 		defer subExec.Shutdown()
 		sub := llm.NewSubAgent(api, subCfg, paths, subExec)
+		sub.SetSessionStore(subStore)
 		sub.RefreshSystemPrompt(subSess)
 		answer, use, err := sub.AskWithEvents(parent, subSess, instruction, nil)
 		if err == nil {

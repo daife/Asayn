@@ -231,6 +231,7 @@ MCP server 配置是 `~/.Asayn/mcp/` 或 `<workspace>/.Asayn/mcp/` 下的 JSON �
 | `/help` | 显示帮助 |
 | `/new [name]` | 新建会话 |
 | `/resume [session]` | 选择或恢复已保存会话 |
+| `/continue` | 从中断处继续工作，重试前先核查结果未知的工具效果 |
 | `/retry` | 重试上一条用户请求 |
 | `/rename [name]` | 重命名当前会话 |
 | `/fork [name]` | 从当前点复制会话 |

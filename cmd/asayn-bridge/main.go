@@ -68,6 +68,8 @@ type bridge struct {
 	ctx       *app.Context
 	sess      *session.Session
 	cancel    context.CancelFunc
+	stopping  bool
+	done      chan struct{}
 	running   bool
 	turnInput *llm.TurnInput
 }
@@ -84,12 +86,33 @@ func main() {
 		}
 		go b.handle(req)
 	}
-	if b.ctx != nil {
-		if !session.HasContent(b.sess) {
-			_ = b.ctx.Sessions.Delete(b.sess)
-		}
-		b.ctx.Tools.Shutdown()
+	_ = b.shutdown()
+}
+
+// shutdown waits for the agent to record cancellation before stopping tools.
+func (b *bridge) shutdown() error {
+	b.mu.Lock()
+	b.stopping = true
+	if b.cancel != nil {
+		b.cancel()
 	}
+	done := b.done
+	ctx, sess := b.ctx, b.sess
+	b.mu.Unlock()
+	if done != nil {
+		<-done
+	}
+	if ctx == nil || sess == nil {
+		return nil
+	}
+	if err := ctx.Sessions.Save(sess); err != nil {
+		return err
+	}
+	ctx.Tools.Shutdown()
+	if !session.HasContent(sess) {
+		return ctx.Sessions.Delete(sess)
+	}
+	return nil
 }
 
 func (b *bridge) handle(req request) {
@@ -300,7 +323,7 @@ func (b *bridge) dispatch(req request) (any, error) {
 			exec.Command("cmd", "/c", "start", "", p.Path).Start()
 		}
 		return nil, nil
-	case "ask", "retry", "compact":
+	case "ask", "retry", "continue", "compact":
 		_, _, err := b.readyIdle()
 		if err != nil {
 			return nil, err
@@ -319,6 +342,7 @@ func (b *bridge) dispatch(req request) (any, error) {
 		}
 		b.mu.Lock()
 		b.running = true
+		b.done = make(chan struct{})
 		runCtx, cancel := context.WithCancel(context.Background())
 		b.cancel = cancel
 		b.turnInput = &llm.TurnInput{}
@@ -343,6 +367,8 @@ func (b *bridge) dispatch(req request) (any, error) {
 			return nil, errors.New("current turn no longer accepts messages")
 		}
 		return map[string]bool{"accepted": true}, nil
+	case "shutdown":
+		return nil, b.shutdown()
 	case "cancel":
 		b.mu.Lock()
 		if b.cancel != nil {
@@ -367,6 +393,8 @@ func (b *bridge) runAgent(requestID, action, prompt string, runCtx context.Conte
 	var use llmtypes.Usage
 	if action == "compact" {
 		answer, use, err = b.compact(runCtx, sess, emit)
+	} else if action == "continue" {
+		answer, use, err = ctx.Agent.AskWithEvents(runCtx, sess, llm.ContinuePrompt, emit)
 	} else if action == "retry" {
 		answer, use, err = ctx.Agent.RetryWithEvents(runCtx, sess, emit)
 	} else {
@@ -404,9 +432,13 @@ func (b *bridge) runAgent(requestID, action, prompt string, runCtx context.Conte
 			}
 		}
 	}
+	if saveErr := ctx.Sessions.Save(sess); saveErr != nil {
+		err = errors.Join(err, saveErr)
+	}
 	b.mu.Lock()
 	b.running = false
 	b.cancel = nil
+	close(b.done)
 	b.mu.Unlock()
 	payload := map[string]any{"kind": "done", "answer": answer}
 	if err != nil {
@@ -464,6 +496,7 @@ func applyRootToContext(ctx *app.Context, name string) error {
 	ctx.Tools.SetAgentLimits(root.MaxOutputLines, root.AllowParallelShell, root.AllowInteractiveShell, root.UseGitBash)
 	ctx.Tools.SetVisibleMCP(root.VisibleMCP)
 	ctx.Agent = llm.NewAgent(ctx.API, root, ctx.Paths, ctx.Tools)
+	ctx.Agent.SetSessionStore(ctx.Sessions)
 	return nil
 }
 
@@ -539,7 +572,7 @@ func (b *bridge) readyIdle() (*app.Context, *session.Session, error) {
 		return nil, nil, err
 	}
 	b.mu.Lock()
-	running := b.running
+	running := b.running || b.stopping
 	b.mu.Unlock()
 	if running {
 		return nil, nil, errors.New("agent is running")

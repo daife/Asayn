@@ -38,6 +38,7 @@ type model struct {
 	width                     int
 	height                    int
 	status                    string
+	quitting                  bool
 	thinking                  bool
 	activeCancel              context.CancelFunc
 	activeRunKind             string
@@ -179,6 +180,7 @@ var commands = []commandSpec{
 	{Name: "/help", Description: "show help"},
 	{Name: "/new", Description: "start a new session"},
 	{Name: "/resume", Description: "resume a saved session"},
+	{Name: "/continue", Description: "continue interrupted work"},
 	{Name: "/retry", Description: "retry the last request"},
 	{Name: "/rename", Description: "rename current session"},
 	{Name: "/fork", Description: "fork from the current point"},
@@ -330,6 +332,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	switch msg := msg.(type) {
 	case submitInputMsg:
+		if m.quitting {
+			return m, nil
+		}
 		if m.pendingEnter.IsZero() || !m.pendingEnter.Equal(msg.at) {
 			return m, nil
 		}
@@ -347,6 +352,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.invalidateWrap()
 		m.refreshLog(false)
 	case tea.KeyMsg:
+		if m.quitting {
+			return m, nil
+		}
 		msg = sanitizePasteKeyMsg(msg)
 		if !m.pendingEnter.IsZero() {
 			m.pendingEnter = time.Time{}
@@ -377,9 +385,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch msg.String() {
 		case "ctrl+c":
-			m.shutdownActiveWork()
-			_ = m.cleanupEmptySession()
-			return m, tea.Quit
+			return m.requestQuit()
 		case "esc":
 			if m.subViewID != "" {
 				m.subViewID = ""
@@ -460,6 +466,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return next, nil
 		}
 	case agentMsg:
+		m.session.InputHistory = append([]string(nil), m.inputHistory...)
 		m.agentEvents = nil
 		m.activeCancel = nil
 		m.thinking = false
@@ -536,6 +543,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.streamAnswerText = ""
 			m.refreshLog(false)
 			_ = m.ctx.Sessions.Save(m.session)
+		}
+		if m.quitting {
+			return m.finishQuit()
 		}
 		if m.pendingCompact {
 			return m.startCompactTurn()
@@ -981,6 +991,31 @@ func (m model) handleInterrupt() model {
 		return m
 	}
 	return m
+}
+
+func (m model) requestQuit() (model, tea.Cmd) {
+	m.quitting = true
+	m.queuedMessages = nil
+	m.pendingCompact = false
+	if m.activeCancel != nil {
+		m.activeCancel()
+	}
+	if m.thinking {
+		m.status = "interrupting and saving before exit..."
+		return m, nil
+	}
+	return m.finishQuit()
+}
+
+func (m model) finishQuit() (model, tea.Cmd) {
+	if err := m.ctx.Sessions.Save(m.session); err != nil {
+		m.quitting = false
+		m.setCommandOutput("cannot exit: failed to save session: " + err.Error())
+		return m, nil
+	}
+	m.shutdownActiveWork()
+	_ = m.cleanupEmptySession()
+	return m, tea.Quit
 }
 
 func (m model) shutdownActiveWork() {
@@ -1523,6 +1558,16 @@ func (m model) handleCommand(raw string) (model, tea.Cmd) {
 			return m.startResumePicker()
 		}
 		return m.resumeSession(arg)
+	case "continue":
+		if m.thinking {
+			m.setCommandOutput("cannot continue while an agent turn is running")
+			return m, nil
+		}
+		if !hasRetryableUserRequest(m.session) {
+			m.setCommandOutput("no previous work to continue")
+			return m, nil
+		}
+		return m.startAgentTurn(llm.ContinuePrompt, false)
 	case "retry":
 		if m.thinking {
 			m.setCommandOutput("cannot retry while an agent turn is running")
@@ -1568,9 +1613,7 @@ func (m model) handleCommand(raw string) (model, tea.Cmd) {
 	case "btw":
 		m.setCommandOutput("/" + cmd + " is reserved in this MVP; side-channel questions are not implemented yet.")
 	case "exit":
-		m.shutdownActiveWork()
-		_ = m.cleanupEmptySession()
-		return m, tea.Quit
+		return m.requestQuit()
 	default:
 		m.setCommandOutput("unknown command: /" + cmd)
 	}
@@ -1611,6 +1654,7 @@ func (m model) applyRootAgent(name string) model {
 	m.ctx.Tools.SetAgentLimits(root.MaxOutputLines, root.AllowParallelShell, root.AllowInteractiveShell, root.UseGitBash)
 	m.ctx.Tools.SetVisibleMCP(root.VisibleMCP)
 	m.ctx.Agent = llm.NewAgent(m.ctx.API, root, m.ctx.Paths, m.ctx.Tools)
+	m.ctx.Agent.SetSessionStore(m.ctx.Sessions)
 	m.session.RootAgent = root.Name
 	m.ctx.Agent.RefreshSystemPrompt(m.session)
 	_ = m.ctx.Sessions.Save(m.session)
@@ -1913,6 +1957,7 @@ func (m model) handleModelConfigAction() model {
 		m.ctx.Tools.SetAgentLimits(newCfg.MaxOutputLines, newCfg.AllowParallelShell, newCfg.AllowInteractiveShell, newCfg.UseGitBash)
 		m.ctx.Tools.SetVisibleMCP(newCfg.VisibleMCP)
 		m.ctx.Agent = llm.NewAgent(m.ctx.API, newCfg, m.ctx.Paths, m.ctx.Tools)
+		m.ctx.Agent.SetSessionStore(m.ctx.Sessions)
 		m.ctx.Agent.RefreshSystemPrompt(m.session)
 	}
 
@@ -1940,6 +1985,7 @@ func (m model) saveModelConfigThreshold(value int) model {
 		m.ctx.Tools.SetAgentLimits(newCfg.MaxOutputLines, newCfg.AllowParallelShell, newCfg.AllowInteractiveShell, newCfg.UseGitBash)
 		m.ctx.Tools.SetVisibleMCP(newCfg.VisibleMCP)
 		m.ctx.Agent = llm.NewAgent(m.ctx.API, newCfg, m.ctx.Paths, m.ctx.Tools)
+		m.ctx.Agent.SetSessionStore(m.ctx.Sessions)
 		m.ctx.Agent.RefreshSystemPrompt(m.session)
 	}
 	return m
@@ -2480,8 +2526,10 @@ func (m *model) addInputHistory(value string) {
 	}
 	if len(m.inputHistory) == 0 || m.inputHistory[len(m.inputHistory)-1] != value {
 		m.inputHistory = append(m.inputHistory, value)
-		m.session.InputHistory = append([]string(nil), m.inputHistory...)
-		_ = m.ctx.Sessions.Save(m.session)
+		if !m.thinking {
+			m.session.InputHistory = append([]string(nil), m.inputHistory...)
+			_ = m.ctx.Sessions.Save(m.session)
+		}
 	}
 	m.historyIndex = -1
 	m.historyDraft = ""
@@ -3316,6 +3364,7 @@ Commands:
 /help                 show help
 /new [name]           start a new session
 /resume [session]     pick or resume saved sessions
+/continue             continue interrupted work
 /rename [name]        rename current session
 /fork [name]          fork from the current point
 /root_agent [name]    pick or set root agent

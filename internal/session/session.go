@@ -85,7 +85,25 @@ func (s *Store) Save(sess *Session) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, "session.json"), data, 0o644)
+	f, err := os.CreateTemp(dir, ".session-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	if err = f.Chmod(0o644); err == nil {
+		_, err = f.Write(data)
+	}
+	if err == nil {
+		err = f.Sync()
+	}
+	closeErr := f.Close()
+	if err != nil {
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	return os.Rename(f.Name(), filepath.Join(dir, "session.json"))
 }
 
 func (s *Store) Delete(sess *Session) error {
@@ -245,6 +263,7 @@ func (s *Store) loadByID(id string) (*Session, error) {
 		return nil, err
 	}
 	normalizeCollections(&sess)
+	sess.RepairInterruptedTools()
 	return &sess, nil
 }
 

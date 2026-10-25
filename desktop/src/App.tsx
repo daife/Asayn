@@ -14,6 +14,7 @@ type SlashSuggestion = { value: string; description: string; kind: "command" | "
 const BUILTIN_COMMANDS: SlashSuggestion[] = [
   { value: "/new", description: "Start a new thread", kind: "command" },
   { value: "/resume", description: "Resume a saved thread", kind: "command" },
+  { value: "/continue", description: "Continue interrupted work", kind: "command" },
   { value: "/retry", description: "Retry the last request", kind: "command" },
   { value: "/rename", description: "Rename the current thread", kind: "command" },
   { value: "/fork", description: "Fork the current thread", kind: "command" },
@@ -226,6 +227,7 @@ export default function App() {
 
   async function send(retry = false, queue = false) {
     let text = prompt.trim(); if ((!text && !retry) || !snapshot) return;
+    if (running && text === "/continue") { setError("Cannot continue while an agent turn is running."); return; }
     if (running && !retry) {
       setPrompt("");
       if (queue) { queueRef.current.push(text); setQueued([...queueRef.current]); }
@@ -239,13 +241,18 @@ export default function App() {
       if (command === "/resume") { if (argument) await action("load_session", { id: argument }); else setError("Choose a thread from the sidebar."); setPrompt(""); return; }
       if (command === "/rename") { if (argument) await action("rename_session", { name: argument }); else setError("Usage: /rename <name>"); setPrompt(""); return; }
       if (command === "/fork") { await action("fork_session", { name: argument || `${snapshot.session.name}-fork` }); setPrompt(""); return; }
+      if (command === "/continue") {
+        if (!snapshot.session.messages?.some((message) => message.role === "user")) { setError("No previous work to continue."); return; }
+        setPrompt(""); setError(""); setLiveBlocks([]); runningRef.current = true; setRunning(true);
+        request("continue").catch((e) => { runningRef.current = false; setRunning(false); setError(String(e)); }); return;
+      }
       if (command === "/retry") { setPrompt(""); await send(true); return; }
       if (command === "/compact") { setPrompt(""); await compactNow(); return; }
       if (command === "/model_config") { setEditing({ ...snapshot.agent }); setSettings(true); setPrompt(""); return; }
       if (command === "/root_agent" || command === "/model") { if (argument) await selectAgent(argument); else setError("Choose an agent from the top bar."); setPrompt(""); return; }
-      if (command === "/help") { setError("Commands: /new /resume /retry /rename /fork /root_agent /model /model_config /compact"); setPrompt(""); return; }
+      if (command === "/help") { setError("Commands: /new /resume /continue /retry /rename /fork /root_agent /model /model_config /compact"); setPrompt(""); return; }
       if (command === "/btw") { setError("/btw is reserved for a future side-channel question flow."); setPrompt(""); return; }
-      if (command === "/exit") { await closeWindow(); return; }
+      if (command === "/exit") { await exitApplication(); return; }
       const named = command.slice(1);
       if (catalog?.skills.some((x) => x.Name === named)) text = `Recommend skill "${named}" for this request. ${argument}`;
       else if (catalog?.mcp.some((x) => x.Name === named)) text = `Recommend MCP server "${named}" for this request. ${argument}`;
@@ -297,6 +304,11 @@ export default function App() {
     setAgentMenu(false);
     await action("select_agent", { name });
     setCatalog(await request<Catalog>("catalog"));
+  }
+
+  async function exitApplication() {
+    queueRef.current = []; setQueued([]);
+    try { await closeWindow(); } catch (e) { setError(String(e)); }
   }
 
   async function compactNow() {
@@ -354,7 +366,7 @@ export default function App() {
           <div className="window-controls" aria-label="Window controls">
             <button className="window-control" title="Minimize" onClick={minimizeWindow}><Minus size={15}/></button>
             <button className="window-control" title="Maximize" onClick={toggleMaximizeWindow}><Maximize2 size={13}/></button>
-            <button className="window-control close" title="Close" onClick={closeWindow}><X size={15}/></button>
+            <button className="window-control close" title="Close" onClick={exitApplication}><X size={15}/></button>
           </div>
         </div>
       </header>

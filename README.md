@@ -231,6 +231,7 @@ Type `/` in the TUI to see fuzzy command suggestions. `Tab` completes a selected
 | `/help` | Show help |
 | `/new [name]` | Start a new session |
 | `/resume [session]` | Pick or resume a saved session |
+| `/continue` | Continue interrupted work, checking uncertain tool effects before retrying |
 | `/retry` | Retry the last user request |
 | `/rename [name]` | Rename the current session |
 | `/fork [name]` | Fork from the current point |

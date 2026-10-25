@@ -71,6 +71,9 @@ func (m *ShellManager) SetUseGitBash(useGitBash bool) {
 }
 
 func (m *ShellManager) RunBlocking(ctx context.Context, command string, timeoutSec int) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	if command == "" {
 		return "", fmt.Errorf("command is required")
 	}
@@ -95,6 +98,9 @@ func (m *ShellManager) RunBlocking(ctx context.Context, command string, timeoutS
 		out := run.output.String()
 		if out != "" && !strings.HasSuffix(out, "\n") {
 			out += "\n"
+		}
+		if ctx.Err() != nil {
+			return out, ctx.Err()
 		}
 		out += fmt.Sprintf("<TIMEOUT after %d seconds>", timeoutSec)
 		return out, nil
