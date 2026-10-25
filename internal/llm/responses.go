@@ -133,6 +133,51 @@ type responsesResult struct {
 	IncompleteDetails any `json:"incomplete_details"`
 }
 
+// Gateways may wrap stream errors in an error object instead of exposing
+// the standard top-level message/code/param fields.
+func responsesStreamError(payload string) error {
+	type detail struct {
+		Message string `json:"message"`
+		Code    string `json:"code"`
+		Param   string `json:"param"`
+	}
+	var event struct {
+		detail
+		Error json.RawMessage `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(payload), &event); err != nil {
+		return fmt.Errorf("Responses stream: %s", payload)
+	}
+	d := event.detail
+	if len(event.Error) > 0 {
+		var nested detail
+		if json.Unmarshal(event.Error, &nested) == nil {
+			if d.Message == "" {
+				d.Message = nested.Message
+			}
+			if d.Code == "" {
+				d.Code = nested.Code
+			}
+			if d.Param == "" {
+				d.Param = nested.Param
+			}
+		} else if d.Message == "" {
+			_ = json.Unmarshal(event.Error, &d.Message)
+		}
+	}
+	if d.Message == "" {
+		// Keep unfamiliar error envelopes diagnosable rather than hiding them.
+		d.Message = payload
+	}
+	if d.Code != "" {
+		d.Message += " (code: " + d.Code + ")"
+	}
+	if d.Param != "" {
+		d.Message += " (param: " + d.Param + ")"
+	}
+	return fmt.Errorf("Responses stream: %s", d.Message)
+}
+
 func appendResponseItem(msg *types.ChatMessage, raw json.RawMessage) error {
 	var item responseItem
 	if err := json.Unmarshal(raw, &item); err != nil {
@@ -253,7 +298,6 @@ func (c *Client) readResponsesStream(body io.ReadCloser, onDelta func(StreamDelt
 			OutputIndex int             `json:"output_index"`
 			Item        json.RawMessage `json:"item"`
 			Response    json.RawMessage `json:"response"`
-			Message     string          `json:"message"`
 		}
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
 			return false, fmt.Errorf("decode Responses stream: %w", err)
@@ -298,7 +342,7 @@ func (c *Client) readResponsesStream(body io.ReadCloser, onDelta func(StreamDelt
 			}
 			return true, err
 		case "error":
-			return false, fmt.Errorf("Responses stream: %s", event.Message)
+			return false, responsesStreamError(payload)
 		}
 		return false, nil
 	}

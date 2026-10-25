@@ -203,6 +203,34 @@ func TestSubscriptionTerminalErrors(t *testing.T) {
 	}
 }
 
+func TestResponsesStreamErrorDetails(t *testing.T) {
+	for _, tc := range []struct {
+		name, payload string
+		want          []string
+	}{
+		{"standard", `{"type":"error","message":"bad input","code":"invalid_request_error","param":"input[2]"}`, []string{"bad input", "invalid_request_error", "input[2]"}},
+		{"nested", `{"type":"error","error":{"message":"plan limit","code":"subscription_sharing_usage_limit_exceeded","param":"model"}}`, []string{"plan limit", "subscription_sharing_usage_limit_exceeded", "model"}},
+		{"string", `{"type":"error","error":"upstream unavailable"}`, []string{"upstream unavailable"}},
+		{"unknown", `{"type":"error","details":{"reason":"unavailable"}}`, []string{`"details"`, "unavailable"}},
+		{"empty", `{"type":"error"}`, []string{`{"type":"error"}`}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := NewClient(config.ProviderConfig{APIType: "subscription_responses"})
+			stream := "data: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"delta\":\"partial\"}\n\n" +
+				"data: " + tc.payload + "\n\n"
+			msg, _, err := c.readResponsesStream(io.NopCloser(strings.NewReader(stream)), nil)
+			if err == nil || msg.Content != "partial" || streamError(err) == nil {
+				t.Fatalf("lost error or partial output: %+v %v", msg, err)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not contain %q", err, want)
+				}
+			}
+		})
+	}
+}
+
 func TestSubscriptionChatUsesAuthenticatedStream(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
