@@ -36,65 +36,65 @@ jobs:
           path: release/*
           if-no-files-found: error
 
-  desktop:
-    name: Desktop ${{ matrix.name }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: Linux x64
-            os: ubuntu-22.04
-            bundles: deb,appimage
-            artifact: desktop-linux-x64
-          - name: Windows x64
-            os: windows-latest
-            bundles: nsis,msi
-            artifact: desktop-windows-x64
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: desktop/package-lock.json
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Install Linux dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libgbm-dev
-      - name: Install frontend dependencies
-        working-directory: desktop
-        run: npm ci
-      - name: Build desktop packages
-        working-directory: desktop
-        run: npm run tauri build -- --bundles ${{ matrix.bundles }}
-      - name: Collect Linux packages
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          mkdir -p release
-          find desktop/src-tauri/target/release/bundle -type f \( -name '*.deb' -o -name '*.AppImage' \) -exec cp {} release/ \;
-      - name: Collect Windows packages
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force release | Out-Null
-          Get-ChildItem desktop/src-tauri/target/release/bundle -Recurse -File |
-            Where-Object { $_.Extension -in '.msi', '.exe' } |
-            Copy-Item -Destination release
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact }}
-          path: release/*
-          if-no-files-found: error
+  # GUI builds are disabled; releases contain CLI binaries only.
+  # desktop:
+  #   name: Desktop ${{ matrix.name }}
+  #   strategy:
+  #     fail-fast: false
+  #     matrix:
+  #       include:
+  #         - name: Linux x64
+  #           os: ubuntu-22.04
+  #           bundles: deb,appimage
+  #           artifact: desktop-linux-x64
+  #         - name: Windows x64
+  #           os: windows-latest
+  #           bundles: nsis,msi
+  #           artifact: desktop-windows-x64
+  #   runs-on: ${{ matrix.os }}
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: actions/setup-go@v5
+  #       with:
+  #         go-version-file: go.mod
+  #     - uses: actions/setup-node@v4
+  #       with:
+  #         node-version: 22
+  #         cache: npm
+  #         cache-dependency-path: desktop/package-lock.json
+  #     - uses: dtolnay/rust-toolchain@stable
+  #     - name: Install Linux dependencies
+  #       if: runner.os == 'Linux'
+  #       run: |
+  #         sudo apt-get update
+  #         sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libgbm-dev
+  #     - name: Install frontend dependencies
+  #       working-directory: desktop
+  #       run: npm ci
+  #     - name: Build desktop packages
+  #       working-directory: desktop
+  #       run: npm run tauri build -- --bundles ${{ matrix.bundles }}
+  #     - name: Collect Linux packages
+  #       if: runner.os == 'Linux'
+  #       shell: bash
+  #       run: |
+  #         mkdir -p release
+  #         find desktop/src-tauri/target/release/bundle -type f \( -name '*.deb' -o -name '*.AppImage' \) -exec cp {} release/ \;
+  #     - name: Collect Windows packages
+  #       if: runner.os == 'Windows'
+  #       shell: pwsh
+  #       run: |
+  #         New-Item -ItemType Directory -Force release | Out-Null
+  #         Get-ChildItem desktop/src-tauri/target/release/bundle -Recurse -File |
+  #           Where-Object { $_.Extension -in '.msi', '.exe' } |
+  #           Copy-Item -Destination release
+  #     - uses: actions/upload-artifact@v4
+  #       with:
+  #         name: ${{ matrix.artifact }}
+  #         path: release/*
+  #         if-no-files-found: error
 
-  # Electron publishing is temporarily disabled while the Tauri desktop
-  # windowing fixes are verified.
+  # Electron GUI builds remain disabled.
   # electron_desktop:
   #   name: Electron ${{ matrix.name }}
   #   strategy:
@@ -148,7 +148,7 @@ jobs:
 
   publish:
     name: Publish release
-    needs: [cli, desktop]
+    needs: [cli]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
